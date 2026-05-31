@@ -573,7 +573,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shader_shot_parser.add_argument("--config-dir", default=str(DEFAULT_SHADER_CONFIG))
     shader_shot_parser.add_argument("--rio-bin", default="target/debug/rio")
-    shader_shot_parser.add_argument("--wgpu-backend", default="gl")
+    shader_shot_parser.add_argument("--wgpu-backend", default="vulkan")
     shader_shot_parser.add_argument(
         "--shader",
         action="append",

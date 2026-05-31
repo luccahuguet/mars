@@ -80,11 +80,10 @@ host graphics stack, not to Rio's default native Vulkan backend. On a working
 GPU stack, that probe should compile through Naga's GLSL frontend and tint the
 cursor area from `iCurrentCursor`.
 
-The default screenshot command uses `WGPU_BACKEND=gl` because the local COSMIC
-Wayland/NVIDIA stack can create a WGPU/GL surface while WGPU/Vulkan currently
-fails surface creation. That is a validation recipe, not a renderer contract:
-Vulkan still needs separate fixing before it can be treated as the default WGPU
-backend for this host.
+The default screenshot command uses `WGPU_BACKEND=vulkan`. The local
+COSMIC/Wayland/NVIDIA stack now creates a WGPU/Vulkan surface for the shader
+probe, so Vulkan is the primary validation path for cursor-shader work. Pass
+`--wgpu-backend gl` only when investigating a host-specific Vulkan regression.
 
 ## Current Fixture Scope
 

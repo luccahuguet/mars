@@ -187,14 +187,19 @@ Ghostty does not currently expose a multi-cursor shader ABI.
 - Sugarloaf now passes its raw display handle into `wgpu::InstanceDescriptor`
   instead of constructing WGPU without a display handle
 - `python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot` launches
-  the checked-in shader probe with `WGPU_BACKEND=gl`
+  the checked-in shader probe
 - `artifacts/shader_probe/screenshots/wgpu_shader_probe_gl.png` captures the
   WGPU shader-probe window and shows the magenta cursor block produced through
   the Ghostty cursor uniform path
 
-WGPU/Vulkan still fails surface creation on this COSMIC Wayland/NVIDIA host, so
-the current validation recipe is WGPU/GL. That is good enough for shader-path
-evidence, but it is not proof that Vulkan is release-ready.
+`yzt-7p3.22` re-tested the same probe with `WGPU_BACKEND=vulkan` on the local
+COSMIC Wayland/NVIDIA host. WGPU/Vulkan no longer reproduces the earlier
+`CreateSurfaceError`, and the harness default is Vulkan again.
+
+- Visual evidence:
+  `artifacts/shader_probe/screenshots/wgpu_shader_probe_vulkan.png`
+- GL remains useful as an explicit fallback probe:
+  `python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot --wgpu-backend gl`
 
 ## Yazelix Preset Validation
 
