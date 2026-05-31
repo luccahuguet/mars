@@ -8,6 +8,7 @@
   darwin,
   autoPatchelfHook,
   cmake,
+  makeWrapper,
   ncurses,
   pkg-config,
   gcc-unwrapped,
@@ -55,8 +56,8 @@
   inherit (lib.fileset) unions toSource;
 in
   rustPlatform.buildRustPackage {
+    pname = "yazelix-terminal";
     inherit (cargoToml.workspace.package) version;
-    name = "rio";
     src = toSource {
       root = ./.;
       fileset = unions ([
@@ -76,6 +77,7 @@ in
     nativeBuildInputs =
       [
         rustPlatform.bindgenHook
+        makeWrapper
         ncurses
         shaderc
       ]
@@ -92,10 +94,22 @@ in
 
     postInstall =
       ''
-        install -D -m 644 misc/rio.desktop -t \
-                          $out/share/applications
         install -D -m 644 misc/logo.svg \
                           $out/share/icons/hicolor/scalable/apps/rio.svg
+        install -D -m 644 misc/logo.svg \
+                          $out/share/icons/hicolor/scalable/apps/yazelix-terminal.svg
+
+        wrapProgram "$out/bin/rio" \
+          --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath rlinkLibs}"
+        ln -s "$out/bin/rio" "$out/bin/yazelix-terminal"
+
+        install -dm 755 "$out/share/applications"
+        substitute misc/rio.desktop "$out/share/applications/yazelix-terminal.desktop" \
+          --replace-fail "TryExec=rio" "TryExec=$out/bin/yazelix-terminal" \
+          --replace-fail "Exec=rio" "Exec=$out/bin/yazelix-terminal" \
+          --replace-fail "Icon=rio" "Icon=yazelix-terminal" \
+          --replace-fail "Name=Rio" "Name=Yazelix Terminal" \
+          --replace-fail "StartupWMClass=Rio" "StartupWMClass=rio"
 
         # Install terminfo files
         install -dm 755 "$terminfo/share/terminfo/r/"
@@ -120,6 +134,6 @@ in
       license = lib.licenses.mit;
       platforms = lib.platforms.unix;
       changelog = "https://github.com/raphamorim/rio/blob/master/CHANGELOG.md";
-      mainProgram = "rio";
+      mainProgram = "yazelix-terminal";
     };
   }
