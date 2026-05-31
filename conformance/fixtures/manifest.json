@@ -114,10 +114,10 @@
       "hex": "1b5b322a786162630d0a6465661b5b313b313b323b333b33383a323a313a323a333b34383b353b343b3124721b5b2a78"
     },
     {
-      "id": "kitty_file_transfer_denied_start",
+      "id": "kitty_file_transfer_send_start",
       "tier": "cool",
       "protocol": "Kitty file transfer",
-      "description": "Start an OSC 5113 send session that must be denied until the approval UI and filesystem policy are implemented.",
+      "description": "Start an OSC 5113 send session that must request approval before filesystem access.",
       "source": "Kitty file transfer commands use OSC 5113 ; key=value ... ST, with ac=send starting remote-to-terminal transfer sessions.",
       "hex": "1b5d353131333b61633d73656e643b69643d73657373696f6e2d311b5c"
     },

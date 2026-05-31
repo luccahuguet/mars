@@ -54,8 +54,9 @@ Already implemented or partially validated in Yazelix-terminal:
   rendering through the normal cursor atlas slots
 - Kitty DECCARA all-SGR rectangular styling, including the common DECSACE
   wrapper and RGB/indexed color SGR tails
-- Kitty file transfer OSC 5113 parser skeleton with deny-by-default `EPERM`
-  replies for send/receive starts and no filesystem authority
+- Kitty file transfer OSC 5113 parser, approval request routing, and safe
+  remote-to-local `send` writes through an explicit transfer directory and
+  per-session staging root
 
 Important gaps found during this audit:
 
@@ -66,10 +67,10 @@ Important gaps found during this audit:
   behavior beyond the bounded renderer uniform capacity. The checked Ghostty
   source does not appear to implement the protocol, so this remains modern
   Kitty-frontier work rather than strict Ghostty parity.
-- Kitty file transfer and OSC 72 drag/drop are absent. Both cross a security and
-  OS-integration boundary and should not be treated as parser-only work.
-- Kitty file transfer still needs approval UI, safe staging writes, safe local
-  reads, compression, and any trusted bypass mechanism before it becomes useful.
+- OSC 72 drag/drop is absent and crosses a security and OS-integration boundary
+  that should not be treated as parser-only work.
+- Kitty file transfer still needs safe local reads, compression, symlink/link
+  policy, and any trusted bypass mechanism before it matches Kitty's full spec.
 
 ## Must
 
@@ -271,14 +272,21 @@ Policy:
 Result:
 
 - Implemented OSC 5113 key/value parsing for action, id, file_id, and quiet
-  fields
-- Implemented deny-by-default `EPERM` status replies for `send` and `receive`
-  starts while preserving a minimal denied-session registry
-- Implemented deterministic rejection for out-of-order file/data/status/finish
-  commands without touching the filesystem
+  fields plus file type, compression, transmission type, size, name, and data
+  payload metadata
+- Implemented approval-request routing for remote-to-local `send` sessions,
+  with default denial when the notification UI cannot provide actions
+- Implemented safe incoming regular-file and directory writes into
+  `$XDG_DOWNLOAD_DIR/yazelix-terminal-transfers` or
+  `~/Downloads/yazelix-terminal-transfers`, staged under `.staging` and
+  committed only on `finish`
+- Implemented deterministic rejection for receive/read sessions, out-of-order
+  data, path escapes, duplicate active sessions, links, compression, rsync mode,
+  and oversized transfers
 - Added parser/handler/grid tests and a conformance fixture
-- Remaining limitation: no approval UI, no filesystem reads/writes, no
-  compression, no symlink/link handling, and no trusted bypass support
+- Remaining limitation: no receive/read support, no destination chooser beyond
+  the explicit default transfer directory, no compression, no symlink/link
+  handling, and no trusted bypass support
 
 ### OSC 72 Drag And Drop
 

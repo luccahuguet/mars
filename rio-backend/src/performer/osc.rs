@@ -7,6 +7,7 @@
 
 use std::str::FromStr;
 
+use base64::{engine::general_purpose, Engine as _};
 use cursor_icon::CursorIcon;
 
 use crate::ansi::CursorShape;
@@ -17,9 +18,10 @@ use crate::simd_utf8;
 
 use super::handler::{
     KittyClipboard, KittyClipboardLocation, KittyClipboardOperation, KittyFileTransfer,
-    KittyFileTransferAction, KittyNotification, KittyNotificationKind, SemanticPrompt,
-    SemanticPromptAction, SemanticPromptClick, SemanticPromptKind, SemanticPromptRedraw,
-    TextSizing, TextSizingAlign,
+    KittyFileTransferAction, KittyFileTransferCompression, KittyFileTransferFileType,
+    KittyFileTransferTransmission, KittyNotification, KittyNotificationKind,
+    SemanticPrompt, SemanticPromptAction, SemanticPromptClick, SemanticPromptKind,
+    SemanticPromptRedraw, TextSizing, TextSizingAlign,
 };
 
 /// Either a concrete color value or a query for the current value.
@@ -737,6 +739,12 @@ pub(super) fn parse_kitty_file_transfer(params: &[&[u8]]) -> Option<KittyFileTra
     let mut id = None;
     let mut file_id = None;
     let mut quiet = 0;
+    let mut file_type = KittyFileTransferFileType::Regular;
+    let mut compression = KittyFileTransferCompression::None;
+    let mut transmission = KittyFileTransferTransmission::Simple;
+    let mut size = None;
+    let mut name = None;
+    let mut data = None;
 
     for param in params.get(1..)? {
         let eq = param.iter().position(|b| *b == b'=')?;
@@ -752,11 +760,27 @@ pub(super) fn parse_kitty_file_transfer(params: &[&[u8]]) -> Option<KittyFileTra
             b"fid" | b"file_id" => {
                 file_id = Some(parse_kitty_file_transfer_safe_string(value)?)
             }
+            b"ft" | b"file_type" => {
+                file_type = parse_kitty_file_transfer_file_type(value)?
+            }
+            b"zip" | b"compression" => {
+                compression = parse_kitty_file_transfer_compression(value)?
+            }
+            b"tt" | b"transmission_type" => {
+                transmission = parse_kitty_file_transfer_transmission(value)?
+            }
             b"q" | b"quiet" => {
                 quiet = parse_number(value)?;
                 if quiet > 2 {
                     return None;
                 }
+            }
+            b"sz" | b"size" => size = Some(parse_kitty_file_transfer_u64(value)?),
+            b"n" | b"name" => {
+                name = Some(parse_kitty_file_transfer_base64_string(value)?)
+            }
+            b"d" | b"data" => {
+                data = Some(parse_kitty_file_transfer_base64_bytes(value, 4096)?)
             }
             _ => {}
         }
@@ -767,6 +791,12 @@ pub(super) fn parse_kitty_file_transfer(params: &[&[u8]]) -> Option<KittyFileTra
         id: id?,
         file_id,
         quiet,
+        file_type,
+        compression,
+        transmission,
+        size,
+        name,
+        data,
     })
 }
 
@@ -784,11 +814,84 @@ fn parse_kitty_file_transfer_action(input: &[u8]) -> Option<KittyFileTransferAct
     }
 }
 
+fn parse_kitty_file_transfer_file_type(
+    input: &[u8],
+) -> Option<KittyFileTransferFileType> {
+    match input {
+        b"regular" => Some(KittyFileTransferFileType::Regular),
+        b"directory" => Some(KittyFileTransferFileType::Directory),
+        b"symlink" => Some(KittyFileTransferFileType::Symlink),
+        b"link" => Some(KittyFileTransferFileType::Link),
+        _ => None,
+    }
+}
+
+fn parse_kitty_file_transfer_compression(
+    input: &[u8],
+) -> Option<KittyFileTransferCompression> {
+    match input {
+        b"none" => Some(KittyFileTransferCompression::None),
+        b"zlib" => Some(KittyFileTransferCompression::Zlib),
+        _ => None,
+    }
+}
+
+fn parse_kitty_file_transfer_transmission(
+    input: &[u8],
+) -> Option<KittyFileTransferTransmission> {
+    match input {
+        b"simple" => Some(KittyFileTransferTransmission::Simple),
+        b"rsync" => Some(KittyFileTransferTransmission::Rsync),
+        _ => None,
+    }
+}
+
+fn parse_kitty_file_transfer_u64(input: &[u8]) -> Option<u64> {
+    if input.is_empty() {
+        return None;
+    }
+    let mut num: u64 = 0;
+    for byte in input {
+        let digit = (*byte as char).to_digit(10)?;
+        num = num
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(digit as u64))?;
+    }
+    Some(num)
+}
+
 fn parse_kitty_file_transfer_safe_string(input: &[u8]) -> Option<String> {
-    if input.is_empty() || !input.iter().all(is_kitty_file_transfer_safe_byte) {
+    if input.is_empty()
+        || input.len() > 256
+        || !input.iter().all(is_kitty_file_transfer_safe_byte)
+    {
         return None;
     }
     Some(simd_utf8::from_utf8_fast(input).ok()?.to_owned())
+}
+
+fn parse_kitty_file_transfer_base64_string(input: &[u8]) -> Option<String> {
+    let decoded = parse_kitty_file_transfer_base64_bytes(input, 4096)?;
+    Some(simd_utf8::from_utf8_fast(&decoded).ok()?.to_owned())
+}
+
+fn parse_kitty_file_transfer_base64_bytes(
+    input: &[u8],
+    max_decoded_len: usize,
+) -> Option<Vec<u8>> {
+    let cleaned = input
+        .iter()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .copied()
+        .collect::<Vec<_>>();
+    let decoded = general_purpose::STANDARD
+        .decode(&cleaned)
+        .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(&cleaned))
+        .ok()?;
+    if decoded.len() > max_decoded_len {
+        return None;
+    }
+    Some(decoded)
 }
 
 fn is_kitty_file_transfer_key(input: &[u8]) -> bool {
@@ -1060,6 +1163,12 @@ mod tests {
             b"id=session-1".as_slice(),
             b"fid=file_1".as_slice(),
             b"q=2".as_slice(),
+            b"ft=directory".as_slice(),
+            b"zip=none".as_slice(),
+            b"tt=simple".as_slice(),
+            b"sz=5".as_slice(),
+            b"n=L3RtcC9leGFtcGxlLnR4dA==".as_slice(),
+            b"d=aGVsbG8=".as_slice(),
             b"unknown=ignored".as_slice(),
         ])
         .unwrap();
@@ -1068,6 +1177,12 @@ mod tests {
         assert_eq!(transfer.id, "session-1");
         assert_eq!(transfer.file_id.as_deref(), Some("file_1"));
         assert_eq!(transfer.quiet, 2);
+        assert_eq!(transfer.file_type, KittyFileTransferFileType::Directory);
+        assert_eq!(transfer.compression, KittyFileTransferCompression::None);
+        assert_eq!(transfer.transmission, KittyFileTransferTransmission::Simple);
+        assert_eq!(transfer.size, Some(5));
+        assert_eq!(transfer.name.as_deref(), Some("/tmp/example.txt"));
+        assert_eq!(transfer.data.as_deref(), Some(b"hello".as_slice()));
         assert!(parse_kitty_file_transfer(&[
             b"5113".as_slice(),
             b"ac=send".as_slice(),
@@ -1079,6 +1194,13 @@ mod tests {
             b"ac=send".as_slice(),
             b"id=session-1".as_slice(),
             b"q=3".as_slice(),
+        ])
+        .is_none());
+        assert!(parse_kitty_file_transfer(&[
+            b"5113".as_slice(),
+            b"ac=data".as_slice(),
+            b"id=session-1".as_slice(),
+            b"d=@@@@".as_slice(),
         ])
         .is_none());
     }

@@ -1,6 +1,6 @@
 # Kitty File Transfer Policy
 
-Status: implementation policy for future OSC 5113 support.
+Status: implementation policy for OSC 5113 support.
 
 Source spec: https://sw.kovidgoyal.net/kitty/file-transfer-protocol/
 
@@ -27,7 +27,7 @@ that exact session.
 
 ## Default Policy
 
-Default behavior before a full UI exists:
+Default behavior before approval UI exists:
 
 - parse support may exist
 - every `send` or `receive` start request must be rejected with `EPERM`
@@ -39,16 +39,21 @@ Default behavior before a full UI exists:
 This keeps application probing deterministic without granting filesystem
 authority early.
 
-Default behavior after the UI exists:
+Current remote-to-local behavior:
 
-- show a session approval prompt for every transfer session
-- identify the direction as clearly as possible:
-  - remote program wants to send files to this computer
-  - remote program wants to read files from this computer
-- show the session id, host/context when available, requested path count, total
-  declared size when available, and whether the request uses quiet responses
-- require an explicit accept/deny action
-- deny by default when the UI cannot be shown
+- `action=send` creates a pending session and asks the frontend for explicit
+  approval before creating directories or files
+- the approval prompt identifies that a terminal program wants to write files to
+  this computer and shows the destination root
+- the destination root is
+  `$XDG_DOWNLOAD_DIR/yazelix-terminal-transfers` when set, otherwise
+  `~/Downloads/yazelix-terminal-transfers`
+- accepted sessions write only regular files and directories into a per-session
+  staging directory and commit that staging directory only on `finish`
+- rejected, canceled, errored, or uncommitted sessions do not expose partial
+  files in the final destination root
+- receive/read-local-files sessions still fail closed with `EPERM`
+- the UI is denied by default when notification actions are unavailable
 
 ## Session Lifecycle
 
@@ -72,13 +77,10 @@ security-relevant local UI, logs, or denial decisions.
 
 This corresponds to the remote client starting `action=send`.
 
-Initial safe implementation:
+Current safe implementation:
 
 - allow only regular files and directories
-- use a user-approved destination root
-- default destination should be an explicit transfer directory, such as
-  `$XDG_DOWNLOAD_DIR/yazelix-terminal-transfers` or
-  `~/Downloads/yazelix-terminal-transfers`
+- use the user-approved default transfer root shown in the approval prompt
 - create a per-session staging directory first
 - write into staging, then atomically move into the destination root on
   `finish`
@@ -88,8 +90,8 @@ Initial safe implementation:
 Path rules:
 
 - accept only valid UTF-8 POSIX-style protocol paths
-- reject absolute paths unless the user explicitly selected an absolute
-  destination mapping for this session
+- treat absolute protocol paths as names under the approved transfer root, never
+  as host-absolute paths
 - reject `..` components after normalization
 - reject empty components except for the root marker in protocol paths
 - reject path components longer than 255 bytes
@@ -184,7 +186,7 @@ The log must not store file contents or secret bypass material.
    - add malformed packet tests and conformance fixtures
 
 2. Approval UI and safe send-to-terminal writes
-   - destination chooser
+   - explicit default destination root shown in the approval prompt
    - staging directory
    - regular file and directory writes only
    - limits, cancel, finish, and cleanup

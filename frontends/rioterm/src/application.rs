@@ -29,6 +29,7 @@ use rio_window::platform::macos::WindowExtMacOS;
 use rio_window::window::WindowId;
 use rio_window::window::{CursorIcon, Fullscreen};
 use std::error::Error;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 fn kitty_notification_activation_reply(protocol_id: &str, button: Option<u32>) -> String {
@@ -200,6 +201,58 @@ impl Application<'_> {
                     route_id,
                     kitty_notification_close_reply(&protocol_id, "untracked"),
                 )),
+                window_id,
+            );
+        }
+    }
+
+    fn handle_kitty_file_transfer_approval_request(
+        &self,
+        window_id: WindowId,
+        route_id: usize,
+        id: String,
+        destination_root: PathBuf,
+    ) {
+        let notification_id = format!("rio-file-transfer-{route_id}-{id}");
+        let event_proxy = self.event_proxy.clone();
+        let transfer_id = id.clone();
+        let callback: rio_notifier::NotificationCallback =
+            std::sync::Arc::new(move |event| {
+                let rio_notifier::NotificationEvent::Activated { button, .. } = event
+                else {
+                    return;
+                };
+                event_proxy.send_event(
+                    RioEventType::Rio(RioEvent::KittyFileTransferApprovalDecision {
+                        route_id,
+                        id: transfer_id.clone(),
+                        approved: button == Some(1),
+                    }),
+                    window_id,
+                );
+            });
+
+        let tracking = rio_notifier::send_kitty_notification(
+            rio_notifier::NotificationRequest {
+                id: Some(notification_id),
+                title: "File transfer request".to_string(),
+                body: format!(
+                    "A terminal program wants to write files into {}",
+                    destination_root.display()
+                ),
+                report_activation: true,
+                report_close: false,
+                buttons: vec!["Accept".to_string(), "Deny".to_string()],
+            },
+            Some(callback),
+        );
+        if tracking == rio_notifier::NotificationTracking::Untracked {
+            self.event_proxy.send_event(
+                RioEventType::Rio(RioEvent::KittyFileTransferApprovalDecision {
+                    route_id,
+                    id,
+                    approved: false,
+                }),
                 window_id,
             );
         }
@@ -658,6 +711,37 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
             RioEventType::Rio(RioEvent::CloseKittyNotification { id }) => {
                 rio_notifier::close_notification(&id);
+            }
+            RioEventType::Rio(RioEvent::KittyFileTransferApprovalRequest {
+                route_id,
+                id,
+                destination_root,
+            }) => {
+                self.handle_kitty_file_transfer_approval_request(
+                    window_id,
+                    route_id,
+                    id,
+                    destination_root,
+                );
+            }
+            RioEventType::Rio(RioEvent::KittyFileTransferApprovalDecision {
+                route_id,
+                id,
+                approved,
+            }) => {
+                if let Some(route) = self.router.routes.get_mut(&window_id) {
+                    if let Some(item) = route
+                        .window
+                        .screen
+                        .context_manager
+                        .get_by_route_id(route_id)
+                    {
+                        item.val
+                            .terminal
+                            .lock()
+                            .handle_kitty_file_transfer_approval(&id, approved);
+                    }
+                }
             }
             RioEventType::Rio(RioEvent::PrepareRender(millis)) => {
                 if let Some(route) = self.router.routes.get(&window_id) {

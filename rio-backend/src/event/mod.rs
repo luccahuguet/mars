@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::path::PathBuf;
 use std::sync::Arc;
 use teletypewriter::WinsizeBuilder;
 
@@ -232,6 +233,20 @@ pub enum RioEvent {
         id: String,
     },
 
+    /// Kitty OSC 5113 send-session approval request.
+    KittyFileTransferApprovalRequest {
+        route_id: usize,
+        id: String,
+        destination_root: PathBuf,
+    },
+
+    /// Result of the user's decision for a Kitty OSC 5113 send session.
+    KittyFileTransferApprovalDecision {
+        route_id: usize,
+        id: String,
+        approved: bool,
+    },
+
     /// Shutdown request.
     Exit,
 
@@ -332,6 +347,22 @@ impl Debug for RioEvent {
             }
             RioEvent::CloseKittyNotification { id } => {
                 write!(f, "CloseKittyNotification({id})")
+            }
+            RioEvent::KittyFileTransferApprovalRequest { route_id, id, .. } => {
+                write!(
+                    f,
+                    "KittyFileTransferApprovalRequest(route={route_id}, {id})"
+                )
+            }
+            RioEvent::KittyFileTransferApprovalDecision {
+                route_id,
+                id,
+                approved,
+            } => {
+                write!(
+                    f,
+                    "KittyFileTransferApprovalDecision(route={route_id}, {id}, {approved})"
+                )
             }
             RioEvent::Exit => write!(f, "Exit"),
             RioEvent::Quit => write!(f, "Quit"),

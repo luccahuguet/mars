@@ -219,12 +219,38 @@ pub enum KittyFileTransferAction {
     Finish,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KittyFileTransferFileType {
+    Regular,
+    Directory,
+    Symlink,
+    Link,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KittyFileTransferCompression {
+    None,
+    Zlib,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KittyFileTransferTransmission {
+    Simple,
+    Rsync,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KittyFileTransfer {
     pub action: KittyFileTransferAction,
     pub id: String,
     pub file_id: Option<String>,
     pub quiet: u8,
+    pub file_type: KittyFileTransferFileType,
+    pub compression: KittyFileTransferCompression,
+    pub transmission: KittyFileTransferTransmission,
+    pub size: Option<u64>,
+    pub name: Option<String>,
+    pub data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

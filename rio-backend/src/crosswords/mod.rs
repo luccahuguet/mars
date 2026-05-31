@@ -45,9 +45,10 @@ use crate::event::WindowId;
 use crate::event::{EventListener, RioEvent, TerminalDamage};
 use crate::performer::handler::{
     Handler, KittyClipboard, KittyClipboardLocation, KittyClipboardOperation,
-    KittyFileTransfer, KittyFileTransferAction, KittyNotification, KittyNotificationKind,
-    SemanticPrompt, SemanticPromptAction, SemanticPromptKind, TextSizing,
-    TextSizingAlign,
+    KittyFileTransfer, KittyFileTransferAction, KittyFileTransferCompression,
+    KittyFileTransferFileType, KittyFileTransferTransmission, KittyNotification,
+    KittyNotificationKind, SemanticPrompt, SemanticPromptAction, SemanticPromptKind,
+    TextSizing, TextSizingAlign,
 };
 use crate::performer::parser::Params;
 use crate::selection::{Selection, SelectionRange, SelectionType};
@@ -66,9 +67,12 @@ use pos::{
 };
 use square::{Hyperlink, LineLength, Square};
 use std::collections::{BTreeSet, HashMap};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
 use std::option::Option;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::Arc;
 use sugarloaf::{GraphicData, MAX_GRAPHIC_DIMENSIONS};
@@ -86,6 +90,11 @@ const OSC5522_MAX_DECODED_BYTES: usize = 1024 * 1024;
 const OSC5522_MAX_CHUNK_DECODED_BYTES: usize = 4096;
 const KITTY_CLIPBOARD_TEXT_PLAIN: &[u8] = b"text/plain";
 const KITTY_CLIPBOARD_TEXT_PLAIN_BASE64: &str = "dGV4dC9wbGFpbg==";
+const KITTY_FILE_TRANSFER_MAX_ACTIVE_SESSIONS: usize = 1;
+const KITTY_FILE_TRANSFER_MAX_FILES: usize = 4096;
+const KITTY_FILE_TRANSFER_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
+const KITTY_FILE_TRANSFER_MAX_SESSION_BYTES: u64 = 1024 * 1024 * 1024;
+const KITTY_FILE_TRANSFER_STAGING_DIR: &str = ".staging";
 
 // Max. number of graphics stored in a single cell.
 // const MAX_GRAPHICS_PER_CELL: usize = 20;
@@ -128,6 +137,40 @@ struct KittyClipboardWriteState {
     clipboard_type: ClipboardType,
     text: String,
     errored: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KittyFileTransferApproval {
+    Pending,
+    Approved,
+}
+
+#[derive(Debug)]
+struct KittyFileTransferSession {
+    id: String,
+    terminator: String,
+    approval: KittyFileTransferApproval,
+    destination_root: PathBuf,
+    final_root: PathBuf,
+    staging_root: PathBuf,
+    files: HashMap<String, KittyFileTransferFile>,
+    total_written: u64,
+    errored: bool,
+}
+
+#[derive(Debug)]
+struct KittyFileTransferFile {
+    kind: KittyFileTransferFileKind,
+    expected_size: Option<u64>,
+    written: u64,
+    file: Option<File>,
+    errored: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KittyFileTransferFileKind {
+    Regular,
+    Directory,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -554,7 +597,7 @@ where
     kitty_notifications: HashMap<String, PendingKittyNotification>,
     kitty_live_notifications: BTreeSet<String>,
     kitty_clipboard_write: Option<KittyClipboardWriteState>,
-    kitty_file_transfer_denied: BTreeSet<String>,
+    kitty_file_transfer_sessions: HashMap<String, KittyFileTransferSession>,
 
     /// Whether a `TerminalDamaged` event is already in flight to the renderer.
     /// Set by PTY thread before sending; cleared by renderer after extracting damage.
@@ -622,7 +665,7 @@ impl<U: EventListener> Crosswords<U> {
             kitty_notifications: HashMap::new(),
             kitty_live_notifications: BTreeSet::new(),
             kitty_clipboard_write: None,
-            kitty_file_transfer_denied: BTreeSet::new(),
+            kitty_file_transfer_sessions: HashMap::new(),
             damage_event_in_flight: false,
             keyboard_mode_stack: Default::default(),
             keyboard_mode_idx: 0,
@@ -2564,28 +2607,584 @@ impl<U: EventListener> Crosswords<U> {
     }
 
     fn kitty_file_transfer_reply(
-        transfer: &KittyFileTransfer,
+        id: &str,
+        file_id: Option<&str>,
         status: &str,
+        size: Option<u64>,
         terminator: &str,
     ) -> String {
         let encoded_status = general_purpose::STANDARD.encode(status.as_bytes());
-        let mut reply = format!("\x1b]5113;ac=status;id={};", transfer.id);
-        if let Some(file_id) = &transfer.file_id {
+        let mut reply = format!("\x1b]5113;ac=status;id={id};");
+        if let Some(file_id) = file_id {
             reply.push_str(&format!("fid={file_id};"));
         }
-        reply.push_str(&format!("st={encoded_status}{terminator}"));
+        reply.push_str(&format!("st={encoded_status};"));
+        if let Some(size) = size {
+            reply.push_str(&format!("sz={size};"));
+        }
+        reply.push_str(terminator);
         reply
     }
 
     fn send_kitty_file_transfer_status(
         &mut self,
-        transfer: &KittyFileTransfer,
+        id: &str,
+        file_id: Option<&str>,
         status: &str,
+        size: Option<u64>,
         terminator: &str,
     ) {
-        let text = Self::kitty_file_transfer_reply(transfer, status, terminator);
+        let text = Self::kitty_file_transfer_reply(id, file_id, status, size, terminator);
         self.event_proxy
             .send_event(RioEvent::PtyWrite(self.route_id, text), self.window_id);
+    }
+
+    fn kitty_file_transfer_default_destination_root() -> Result<PathBuf, &'static str> {
+        if let Some(root) = std::env::var_os("XDG_DOWNLOAD_DIR") {
+            return Ok(PathBuf::from(root).join("yazelix-terminal-transfers"));
+        }
+        if let Some(home) =
+            std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+        {
+            return Ok(PathBuf::from(home)
+                .join("Downloads")
+                .join("yazelix-terminal-transfers"));
+        }
+        Err("EIO:No home directory for file transfer destination")
+    }
+
+    fn kitty_file_transfer_local_session_segment(id: &str) -> String {
+        let mut segment = String::from("session-");
+        for byte in id.as_bytes() {
+            match byte {
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'-' => {
+                    segment.push(*byte as char);
+                }
+                _ => segment.push_str(&format!("_{byte:02x}")),
+            }
+        }
+        segment
+    }
+
+    fn kitty_file_transfer_path(name: &str) -> Result<PathBuf, &'static str> {
+        if name.is_empty() || name.len() > 4096 || name.as_bytes().contains(&0) {
+            return Err("EINVAL:Invalid file transfer path");
+        }
+
+        let path = name
+            .strip_prefix("~/")
+            .unwrap_or(name)
+            .trim_start_matches('/');
+        let mut relative = PathBuf::new();
+        for component in path.split('/') {
+            if component.is_empty() || component == "." || component == ".." {
+                return Err("EINVAL:Invalid file transfer path");
+            }
+            if component.len() > 255
+                || component.bytes().any(|byte| {
+                    byte.is_ascii_control()
+                        || matches!(byte, b'\\' | b'*' | b'<' | b'>' | b'?' | b'|')
+                })
+            {
+                return Err("EINVAL:Invalid file transfer path");
+            }
+            relative.push(component);
+        }
+
+        if relative.as_os_str().is_empty() {
+            return Err("EINVAL:Invalid file transfer path");
+        }
+        Ok(relative)
+    }
+
+    fn kitty_file_transfer_destination(
+        root: &Path,
+        name: &str,
+    ) -> Result<PathBuf, &'static str> {
+        let relative = Self::kitty_file_transfer_path(name)?;
+        Ok(root.join(relative))
+    }
+
+    fn cleanup_kitty_file_transfer_session(session: &KittyFileTransferSession) {
+        let _ = fs::remove_dir_all(&session.staging_root);
+    }
+
+    fn prepare_kitty_file_transfer_session(
+        session: &mut KittyFileTransferSession,
+    ) -> Result<(), &'static str> {
+        if session.final_root.exists() || session.staging_root.exists() {
+            return Err("EEXIST:Destination already exists");
+        }
+        fs::create_dir_all(&session.destination_root)
+            .map_err(|_| "EIO:Could not create transfer destination")?;
+        let staging_parent = session
+            .staging_root
+            .parent()
+            .ok_or("EINVAL:Invalid staging directory")?;
+        fs::create_dir_all(staging_parent)
+            .map_err(|_| "EIO:Could not create transfer staging directory")?;
+        fs::create_dir(&session.staging_root)
+            .map_err(|_| "EIO:Could not create transfer staging directory")?;
+        session.approval = KittyFileTransferApproval::Approved;
+        Ok(())
+    }
+
+    pub fn handle_kitty_file_transfer_approval(&mut self, id: &str, approved: bool) {
+        if !approved {
+            let Some(session) = self.kitty_file_transfer_sessions.remove(id) else {
+                return;
+            };
+            Self::cleanup_kitty_file_transfer_session(&session);
+            self.send_kitty_file_transfer_status(
+                &session.id,
+                None,
+                "EPERM:User refused the transfer",
+                None,
+                &session.terminator,
+            );
+            return;
+        }
+
+        let result = self
+            .kitty_file_transfer_sessions
+            .get_mut(id)
+            .filter(|session| session.approval == KittyFileTransferApproval::Pending)
+            .ok_or("EPERM:No pending file transfer session")
+            .and_then(Self::prepare_kitty_file_transfer_session);
+
+        match result {
+            Ok(()) => {
+                let Some(session) = self.kitty_file_transfer_sessions.get(id) else {
+                    return;
+                };
+                let id = session.id.clone();
+                let terminator = session.terminator.clone();
+                self.send_kitty_file_transfer_status(&id, None, "OK", None, &terminator);
+            }
+            Err(status) => {
+                let Some(session) = self.kitty_file_transfer_sessions.remove(id) else {
+                    return;
+                };
+                Self::cleanup_kitty_file_transfer_session(&session);
+                self.send_kitty_file_transfer_status(
+                    &session.id,
+                    None,
+                    status,
+                    None,
+                    &session.terminator,
+                );
+            }
+        }
+    }
+
+    fn start_kitty_file_transfer_send(
+        &mut self,
+        transfer: KittyFileTransfer,
+        terminator: &str,
+    ) {
+        if transfer.transmission != KittyFileTransferTransmission::Simple
+            || transfer.compression != KittyFileTransferCompression::None
+        {
+            self.send_kitty_file_transfer_status(
+                &transfer.id,
+                transfer.file_id.as_deref(),
+                "ENOSYS:Compressed and rsync file transfers are not implemented",
+                None,
+                terminator,
+            );
+            return;
+        }
+        if self.kitty_file_transfer_sessions.contains_key(&transfer.id) {
+            self.send_kitty_file_transfer_status(
+                &transfer.id,
+                None,
+                "EEXIST:File transfer session id is already active",
+                None,
+                terminator,
+            );
+            return;
+        }
+        if self.kitty_file_transfer_sessions.len()
+            >= KITTY_FILE_TRANSFER_MAX_ACTIVE_SESSIONS
+        {
+            self.send_kitty_file_transfer_status(
+                &transfer.id,
+                None,
+                "EBUSY:Another file transfer session is active",
+                None,
+                terminator,
+            );
+            return;
+        }
+
+        let destination_root = match Self::kitty_file_transfer_default_destination_root()
+        {
+            Ok(root) => root,
+            Err(status) => {
+                self.send_kitty_file_transfer_status(
+                    &transfer.id,
+                    None,
+                    status,
+                    None,
+                    terminator,
+                );
+                return;
+            }
+        };
+        let segment = Self::kitty_file_transfer_local_session_segment(&transfer.id);
+        let final_root = destination_root.join(&segment);
+        let staging_root = destination_root
+            .join(KITTY_FILE_TRANSFER_STAGING_DIR)
+            .join(&segment);
+
+        self.kitty_file_transfer_sessions.insert(
+            transfer.id.clone(),
+            KittyFileTransferSession {
+                id: transfer.id.clone(),
+                terminator: terminator.to_owned(),
+                approval: KittyFileTransferApproval::Pending,
+                destination_root: destination_root.clone(),
+                final_root,
+                staging_root,
+                files: HashMap::new(),
+                total_written: 0,
+                errored: false,
+            },
+        );
+        self.event_proxy.send_event(
+            RioEvent::KittyFileTransferApprovalRequest {
+                route_id: self.route_id,
+                id: transfer.id,
+                destination_root,
+            },
+            self.window_id,
+        );
+    }
+
+    fn kitty_file_transfer_session_mut(
+        &mut self,
+        id: &str,
+    ) -> Result<&mut KittyFileTransferSession, &'static str> {
+        let session = self
+            .kitty_file_transfer_sessions
+            .get_mut(id)
+            .ok_or("EPERM:No approved file transfer session")?;
+        if session.approval != KittyFileTransferApproval::Approved {
+            return Err("EPERM:File transfer session is waiting for approval");
+        }
+        Ok(session)
+    }
+
+    fn drop_pending_kitty_file_transfer_session(&mut self, id: &str) -> bool {
+        if !matches!(
+            self.kitty_file_transfer_sessions
+                .get(id)
+                .map(|session| session.approval),
+            Some(KittyFileTransferApproval::Pending)
+        ) {
+            return false;
+        }
+        if let Some(session) = self.kitty_file_transfer_sessions.remove(id) {
+            Self::cleanup_kitty_file_transfer_session(&session);
+        }
+        true
+    }
+
+    fn handle_kitty_file_transfer_file(
+        &mut self,
+        transfer: KittyFileTransfer,
+        terminator: &str,
+    ) {
+        let file_id = transfer.file_id.clone();
+        let status = self.try_handle_kitty_file_transfer_file(&transfer);
+        self.send_kitty_file_transfer_status(
+            &transfer.id,
+            file_id.as_deref(),
+            status,
+            None,
+            terminator,
+        );
+    }
+
+    fn try_handle_kitty_file_transfer_file(
+        &mut self,
+        transfer: &KittyFileTransfer,
+    ) -> &'static str {
+        if transfer.transmission != KittyFileTransferTransmission::Simple
+            || transfer.compression != KittyFileTransferCompression::None
+        {
+            return "ENOSYS:Compressed and rsync file transfers are not implemented";
+        }
+        let Some(file_id) = &transfer.file_id else {
+            return "EINVAL:Missing file id";
+        };
+        let Some(name) = &transfer.name else {
+            return "EINVAL:Missing file name";
+        };
+        if self.drop_pending_kitty_file_transfer_session(&transfer.id) {
+            return "EPERM:File transfer command arrived before approval";
+        }
+
+        let session = match self.kitty_file_transfer_session_mut(&transfer.id) {
+            Ok(session) => session,
+            Err(status) => return status,
+        };
+        if session.files.len() >= KITTY_FILE_TRANSFER_MAX_FILES {
+            session.errored = true;
+            return "EFBIG:Too many files in transfer session";
+        }
+        if session.files.contains_key(file_id) {
+            session.errored = true;
+            return "EEXIST:File id already exists";
+        }
+        if matches!(
+            transfer.file_type,
+            KittyFileTransferFileType::Symlink | KittyFileTransferFileType::Link
+        ) {
+            session.errored = true;
+            return "ENOSYS:Links are not supported";
+        }
+        if transfer.size.unwrap_or(0) > KITTY_FILE_TRANSFER_MAX_FILE_BYTES {
+            session.errored = true;
+            return "EFBIG:File is too large";
+        }
+
+        let path =
+            match Self::kitty_file_transfer_destination(&session.staging_root, name) {
+                Ok(path) => path,
+                Err(status) => {
+                    session.errored = true;
+                    return status;
+                }
+            };
+        let Some(parent) = path.parent() else {
+            session.errored = true;
+            return "EINVAL:Invalid file transfer path";
+        };
+
+        match transfer.file_type {
+            KittyFileTransferFileType::Directory => {
+                if fs::create_dir_all(parent).is_err()
+                    || fs::create_dir_all(&path).is_err()
+                {
+                    session.errored = true;
+                    return "EIO:Could not create directory";
+                }
+                session.files.insert(
+                    file_id.clone(),
+                    KittyFileTransferFile {
+                        kind: KittyFileTransferFileKind::Directory,
+                        expected_size: transfer.size,
+                        written: 0,
+                        file: None,
+                        errored: false,
+                    },
+                );
+                "OK"
+            }
+            KittyFileTransferFileType::Regular => {
+                if fs::create_dir_all(parent).is_err() {
+                    session.errored = true;
+                    return "EIO:Could not create parent directory";
+                }
+                let file =
+                    match OpenOptions::new().write(true).create_new(true).open(&path) {
+                        Ok(file) => file,
+                        Err(_) => {
+                            session.errored = true;
+                            return "EEXIST:Destination file already exists";
+                        }
+                    };
+                session.files.insert(
+                    file_id.clone(),
+                    KittyFileTransferFile {
+                        kind: KittyFileTransferFileKind::Regular,
+                        expected_size: transfer.size,
+                        written: 0,
+                        file: Some(file),
+                        errored: false,
+                    },
+                );
+                "STARTED"
+            }
+            KittyFileTransferFileType::Symlink | KittyFileTransferFileType::Link => {
+                unreachable!("links were rejected before opening files")
+            }
+        }
+    }
+
+    fn handle_kitty_file_transfer_data(
+        &mut self,
+        transfer: KittyFileTransfer,
+        terminator: &str,
+        finish_file: bool,
+    ) {
+        let file_id = transfer.file_id.clone();
+        let (status, size) =
+            self.try_handle_kitty_file_transfer_data(&transfer, finish_file);
+        self.send_kitty_file_transfer_status(
+            &transfer.id,
+            file_id.as_deref(),
+            status,
+            size,
+            terminator,
+        );
+    }
+
+    fn try_handle_kitty_file_transfer_data(
+        &mut self,
+        transfer: &KittyFileTransfer,
+        finish_file: bool,
+    ) -> (&'static str, Option<u64>) {
+        let Some(file_id) = &transfer.file_id else {
+            return ("EINVAL:Missing file id", None);
+        };
+        if self.drop_pending_kitty_file_transfer_session(&transfer.id) {
+            return ("EPERM:File transfer command arrived before approval", None);
+        }
+        let session = match self.kitty_file_transfer_session_mut(&transfer.id) {
+            Ok(session) => session,
+            Err(status) => return (status, None),
+        };
+        let Some(file) = session.files.get_mut(file_id) else {
+            return ("EPERM:File was not started", None);
+        };
+        if file.errored {
+            return ("EIO:File transfer already failed", Some(file.written));
+        }
+        if file.kind != KittyFileTransferFileKind::Regular {
+            file.errored = true;
+            session.errored = true;
+            return (
+                "EINVAL:Cannot write data to a directory",
+                Some(file.written),
+            );
+        }
+
+        if let Some(data) = &transfer.data {
+            let chunk_len = data.len() as u64;
+            let new_file_size = match file.written.checked_add(chunk_len) {
+                Some(size) => size,
+                None => {
+                    file.errored = true;
+                    session.errored = true;
+                    return ("EFBIG:File is too large", Some(file.written));
+                }
+            };
+            let new_session_size = match session.total_written.checked_add(chunk_len) {
+                Some(size) => size,
+                None => {
+                    file.errored = true;
+                    session.errored = true;
+                    return ("EFBIG:Transfer session is too large", Some(file.written));
+                }
+            };
+            if new_file_size > KITTY_FILE_TRANSFER_MAX_FILE_BYTES
+                || file
+                    .expected_size
+                    .is_some_and(|expected| new_file_size > expected)
+            {
+                file.errored = true;
+                session.errored = true;
+                return ("EFBIG:File is too large", Some(file.written));
+            }
+            if new_session_size > KITTY_FILE_TRANSFER_MAX_SESSION_BYTES {
+                file.errored = true;
+                session.errored = true;
+                return ("EFBIG:Transfer session is too large", Some(file.written));
+            }
+            let Some(handle) = file.file.as_mut() else {
+                file.errored = true;
+                session.errored = true;
+                return ("EIO:File is not open", Some(file.written));
+            };
+            if handle.write_all(data).is_err() {
+                file.errored = true;
+                session.errored = true;
+                file.file = None;
+                return ("EIO:Failed to write file data", Some(file.written));
+            }
+            file.written = new_file_size;
+            session.total_written = new_session_size;
+        }
+
+        if !finish_file {
+            return ("PROGRESS", Some(file.written));
+        }
+
+        file.file = None;
+        if let Some(expected) = file.expected_size {
+            if file.written != expected {
+                file.errored = true;
+                session.errored = true;
+                return ("EIO:File size mismatch", Some(file.written));
+            }
+        }
+        ("OK", Some(file.written))
+    }
+
+    fn finish_kitty_file_transfer(
+        &mut self,
+        transfer: KittyFileTransfer,
+        terminator: &str,
+    ) {
+        let Some(mut session) = self.kitty_file_transfer_sessions.remove(&transfer.id)
+        else {
+            self.send_kitty_file_transfer_status(
+                &transfer.id,
+                transfer.file_id.as_deref(),
+                "EPERM:No approved file transfer session",
+                None,
+                terminator,
+            );
+            return;
+        };
+
+        let status = if session.approval != KittyFileTransferApproval::Approved {
+            "EPERM:File transfer session is waiting for approval"
+        } else if session.errored || session.files.values().any(|file| file.errored) {
+            "EIO:Transfer session has errors"
+        } else if session.files.values().any(|file| file.file.is_some()) {
+            "EIO:Transfer contains unfinished files"
+        } else if session.final_root.exists() {
+            "EEXIST:Destination already exists"
+        } else {
+            for file in session.files.values_mut() {
+                file.file = None;
+            }
+            match fs::rename(&session.staging_root, &session.final_root) {
+                Ok(()) => "OK",
+                Err(_) => "EIO:Could not commit transfer",
+            }
+        };
+
+        if status != "OK" {
+            Self::cleanup_kitty_file_transfer_session(&session);
+        }
+        self.send_kitty_file_transfer_status(
+            &session.id,
+            None,
+            status,
+            Some(session.total_written),
+            terminator,
+        );
+    }
+
+    fn cancel_kitty_file_transfer(
+        &mut self,
+        transfer: KittyFileTransfer,
+        terminator: &str,
+    ) {
+        if let Some(session) = self.kitty_file_transfer_sessions.remove(&transfer.id) {
+            Self::cleanup_kitty_file_transfer_session(&session);
+        }
+        self.send_kitty_file_transfer_status(
+            &transfer.id,
+            transfer.file_id.as_deref(),
+            "CANCELED",
+            None,
+            terminator,
+        );
     }
 
     fn handle_kitty_file_transfer(
@@ -2593,30 +3192,42 @@ impl<U: EventListener> Crosswords<U> {
         transfer: KittyFileTransfer,
         terminator: &str,
     ) {
-        // Security denials remain visible before a transfer session is approved.
         match transfer.action {
-            KittyFileTransferAction::Send | KittyFileTransferAction::Receive => {
-                self.kitty_file_transfer_denied.insert(transfer.id.clone());
+            KittyFileTransferAction::Send => {
+                self.start_kitty_file_transfer_send(transfer, terminator);
+            }
+            KittyFileTransferAction::Receive => {
                 self.send_kitty_file_transfer_status(
-                    &transfer,
-                    "EPERM:Yazelix-terminal file transfer approval is not implemented",
+                    &transfer.id,
+                    transfer.file_id.as_deref(),
+                    "EPERM:Yazelix-terminal receive/read transfers are not implemented",
+                    None,
                     terminator,
                 );
             }
             KittyFileTransferAction::Cancel => {
-                self.kitty_file_transfer_denied.remove(&transfer.id);
-                self.send_kitty_file_transfer_status(&transfer, "CANCELED", terminator);
+                self.cancel_kitty_file_transfer(transfer, terminator);
             }
-            KittyFileTransferAction::File
-            | KittyFileTransferAction::Data
-            | KittyFileTransferAction::EndData
-            | KittyFileTransferAction::Status
-            | KittyFileTransferAction::Finish => {
+            KittyFileTransferAction::File => {
+                self.handle_kitty_file_transfer_file(transfer, terminator);
+            }
+            KittyFileTransferAction::Data => {
+                self.handle_kitty_file_transfer_data(transfer, terminator, false);
+            }
+            KittyFileTransferAction::EndData => {
+                self.handle_kitty_file_transfer_data(transfer, terminator, true);
+            }
+            KittyFileTransferAction::Status => {
                 self.send_kitty_file_transfer_status(
-                    &transfer,
-                    "EPERM:No approved file transfer session",
+                    &transfer.id,
+                    transfer.file_id.as_deref(),
+                    "ENOSYS:Client status commands are not implemented",
+                    None,
                     terminator,
                 );
+            }
+            KittyFileTransferAction::Finish => {
+                self.finish_kitty_file_transfer(transfer, terminator);
             }
         }
     }
@@ -6262,6 +6873,66 @@ mod tests {
         (term, events)
     }
 
+    fn kitty_file_transfer(
+        action: KittyFileTransferAction,
+        id: &str,
+    ) -> KittyFileTransfer {
+        KittyFileTransfer {
+            action,
+            id: id.to_owned(),
+            file_id: None,
+            quiet: 0,
+            file_type: KittyFileTransferFileType::Regular,
+            compression: KittyFileTransferCompression::None,
+            transmission: KittyFileTransferTransmission::Simple,
+            size: None,
+            name: None,
+            data: None,
+        }
+    }
+
+    fn captured_pty_writes(events: &Rc<RefCell<Vec<RioEvent>>>) -> Vec<(usize, String)> {
+        events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                RioEvent::PtyWrite(route_id, reply) => Some((*route_id, reply.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "yazelix-terminal-{label}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    fn point_file_transfer_session_at(
+        term: &mut Crosswords<EventCaptureListener>,
+        id: &str,
+        destination_root: PathBuf,
+    ) {
+        let segment =
+            Crosswords::<EventCaptureListener>::kitty_file_transfer_local_session_segment(
+                id,
+            );
+        let session = term
+            .kitty_file_transfer_sessions
+            .get_mut(id)
+            .expect("file transfer session should exist");
+        session.destination_root = destination_root.clone();
+        session.final_root = destination_root.join(&segment);
+        session.staging_root = destination_root
+            .join(KITTY_FILE_TRANSFER_STAGING_DIR)
+            .join(segment);
+    }
+
     fn cell_has_text_sizing<U: EventListener>(
         term: &Crosswords<U>,
         row: usize,
@@ -7326,71 +7997,170 @@ mod tests {
     }
 
     #[test]
-    // Defends: OSC 5113 starts fail closed with EPERM and do not require any filesystem authority.
-    fn osc5113_file_transfer_start_replies_eperm_without_filesystem_access() {
+    // Defends: OSC 5113 send starts require a frontend approval event before filesystem writes.
+    fn osc5113_file_transfer_start_requests_user_approval_without_filesystem_access() {
         let (mut term, events) = make_capturing_crosswords(7);
 
         Handler::kitty_file_transfer(
             &mut term,
-            KittyFileTransfer {
-                action: KittyFileTransferAction::Send,
-                id: "session-1".to_owned(),
-                file_id: None,
-                quiet: 2,
-            },
+            kitty_file_transfer(KittyFileTransferAction::Send, "session-1"),
             "\x1b\\",
         );
 
-        let replies = events
-            .borrow()
-            .iter()
-            .filter_map(|event| match event {
-                RioEvent::PtyWrite(route_id, reply) => Some((*route_id, reply.clone())),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            replies,
-            vec![(
-                7,
-                "\x1b]5113;ac=status;id=session-1;st=RVBFUk06WWF6ZWxpeC10ZXJtaW5hbCBmaWxlIHRyYW5zZmVyIGFwcHJvdmFsIGlzIG5vdCBpbXBsZW1lbnRlZA==\x1b\\"
-                    .to_owned()
-            )]
-        );
+        assert!(captured_pty_writes(&events).is_empty());
+        let captured = events.borrow();
+        assert!(captured.iter().any(|event| matches!(
+            event,
+            RioEvent::KittyFileTransferApprovalRequest { route_id: 7, id, .. }
+                if id == "session-1"
+        )));
+        assert_eq!(term.kitty_file_transfer_sessions.len(), 1);
     }
 
     #[test]
     // Defends: out-of-order OSC 5113 file data is rejected with a file-scoped status reply.
     fn osc5113_file_transfer_data_without_session_is_rejected() {
         let (mut term, events) = make_capturing_crosswords(7);
+        let mut transfer =
+            kitty_file_transfer(KittyFileTransferAction::Data, "session-1");
+        transfer.file_id = Some("file_1".to_owned());
 
-        Handler::kitty_file_transfer(
-            &mut term,
-            KittyFileTransfer {
-                action: KittyFileTransferAction::Data,
-                id: "session-1".to_owned(),
-                file_id: Some("file_1".to_owned()),
-                quiet: 0,
-            },
-            "\x1b\\",
-        );
+        Handler::kitty_file_transfer(&mut term, transfer, "\x1b\\");
 
-        let replies = events
-            .borrow()
-            .iter()
-            .filter_map(|event| match event {
-                RioEvent::PtyWrite(route_id, reply) => Some((*route_id, reply.clone())),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
         assert_eq!(
-            replies,
+            captured_pty_writes(&events),
             vec![(
                 7,
-                "\x1b]5113;ac=status;id=session-1;fid=file_1;st=RVBFUk06Tm8gYXBwcm92ZWQgZmlsZSB0cmFuc2ZlciBzZXNzaW9u\x1b\\"
+                "\x1b]5113;ac=status;id=session-1;fid=file_1;st=RVBFUk06Tm8gYXBwcm92ZWQgZmlsZSB0cmFuc2ZlciBzZXNzaW9u;\x1b\\"
                     .to_owned()
             )]
         );
+    }
+
+    #[test]
+    // Defends: denied OSC 5113 approvals reply EPERM and drop the pending session.
+    fn osc5113_file_transfer_denied_approval_replies_eperm() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_file_transfer(
+            &mut term,
+            kitty_file_transfer(KittyFileTransferAction::Send, "session-1"),
+            "\x1b\\",
+        );
+        term.handle_kitty_file_transfer_approval("session-1", false);
+
+        assert_eq!(
+            captured_pty_writes(&events),
+            vec![(
+                7,
+                "\x1b]5113;ac=status;id=session-1;st=RVBFUk06VXNlciByZWZ1c2VkIHRoZSB0cmFuc2Zlcg==;\x1b\\"
+                    .to_owned()
+            )]
+        );
+        assert!(term.kitty_file_transfer_sessions.is_empty());
+    }
+
+    #[test]
+    // Defends: file commands that race ahead of UI approval tear down the pending OSC 5113 session.
+    fn osc5113_file_transfer_preapproval_file_command_drops_session() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_file_transfer(
+            &mut term,
+            kitty_file_transfer(KittyFileTransferAction::Send, "session-1"),
+            "\x1b\\",
+        );
+        let mut file = kitty_file_transfer(KittyFileTransferAction::File, "session-1");
+        file.file_id = Some("file_1".to_owned());
+        file.name = Some("example.txt".to_owned());
+        Handler::kitty_file_transfer(&mut term, file, "\x1b\\");
+
+        assert!(term.kitty_file_transfer_sessions.is_empty());
+        let status = general_purpose::STANDARD
+            .encode(b"EPERM:File transfer command arrived before approval");
+        assert!(captured_pty_writes(&events)
+            .iter()
+            .any(|(_, reply)| reply.contains(&format!("fid=file_1;st={status};"))));
+    }
+
+    #[test]
+    // Defends: approved OSC 5113 send writes stage regular files and commits only on finish.
+    fn osc5113_file_transfer_approved_send_commits_regular_file() {
+        let (mut term, events) = make_capturing_crosswords(7);
+        let temp_dir = unique_test_dir("file-transfer-commit");
+        let destination_root = temp_dir.join("downloads");
+
+        Handler::kitty_file_transfer(
+            &mut term,
+            kitty_file_transfer(KittyFileTransferAction::Send, "session-1"),
+            "\x1b\\",
+        );
+        point_file_transfer_session_at(&mut term, "session-1", destination_root.clone());
+        term.handle_kitty_file_transfer_approval("session-1", true);
+
+        let mut file = kitty_file_transfer(KittyFileTransferAction::File, "session-1");
+        file.file_id = Some("file_1".to_owned());
+        file.name = Some("/tmp/example.txt".to_owned());
+        file.size = Some(5);
+        Handler::kitty_file_transfer(&mut term, file, "\x1b\\");
+
+        let mut data = kitty_file_transfer(KittyFileTransferAction::Data, "session-1");
+        data.file_id = Some("file_1".to_owned());
+        data.data = Some(b"he".to_vec());
+        Handler::kitty_file_transfer(&mut term, data, "\x1b\\");
+
+        let mut end_data =
+            kitty_file_transfer(KittyFileTransferAction::EndData, "session-1");
+        end_data.file_id = Some("file_1".to_owned());
+        end_data.data = Some(b"llo".to_vec());
+        Handler::kitty_file_transfer(&mut term, end_data, "\x1b\\");
+
+        Handler::kitty_file_transfer(
+            &mut term,
+            kitty_file_transfer(KittyFileTransferAction::Finish, "session-1"),
+            "\x1b\\",
+        );
+
+        let committed_file = destination_root
+            .join("session-session-1")
+            .join("tmp")
+            .join("example.txt");
+        assert_eq!(fs::read(&committed_file).unwrap(), b"hello");
+        assert!(!destination_root
+            .join(KITTY_FILE_TRANSFER_STAGING_DIR)
+            .join("session-session-1")
+            .exists());
+        assert!(captured_pty_writes(&events)
+            .iter()
+            .any(|(_, reply)| reply.contains("id=session-1;st=T0s=;")));
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    // Defends: approved OSC 5113 writes still reject path traversal before opening files.
+    fn osc5113_file_transfer_rejects_path_escape() {
+        let (mut term, events) = make_capturing_crosswords(7);
+        let temp_dir = unique_test_dir("file-transfer-escape");
+        let destination_root = temp_dir.join("downloads");
+
+        Handler::kitty_file_transfer(
+            &mut term,
+            kitty_file_transfer(KittyFileTransferAction::Send, "session-1"),
+            "\x1b\\",
+        );
+        point_file_transfer_session_at(&mut term, "session-1", destination_root);
+        term.handle_kitty_file_transfer_approval("session-1", true);
+
+        let mut file = kitty_file_transfer(KittyFileTransferAction::File, "session-1");
+        file.file_id = Some("file_1".to_owned());
+        file.name = Some("../escape.txt".to_owned());
+        Handler::kitty_file_transfer(&mut term, file, "\x1b\\");
+
+        assert!(captured_pty_writes(&events)
+            .iter()
+            .any(|(_, reply)| reply.contains("fid=file_1;st=RUlOVkFM")));
+        assert!(!temp_dir.join("escape.txt").exists());
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     // Minimum-valid simple glyph: one contour, one on-curve point.
