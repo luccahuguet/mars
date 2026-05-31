@@ -192,12 +192,15 @@ required for the first usable Yazelix terminal:
 
 ## Current Parity Blockers
 
-The remaining open Beads are the current source of truth for why this epic is
-not yet complete:
+There are no current open implementation blockers for the experimental Ghostty
+parity target.
 
-- `yzt-7p3.40`: OSC 5522 rich clipboard handles text/plain-compatible payloads,
-  but still needs arbitrary MIME/platform clipboard work before it matches the
-  full modern protocol surface
+Full Kitty OSC 5522 arbitrary-MIME clipboard support remains frontier work, not
+a Ghostty parity blocker. The checked Ghostty `main` reference at `c4eba3da3`
+has an OSC 5522 parser, but routes `.kitty_clipboard_protocol` through an
+unimplemented stream callback. Yazelix-terminal already implements the safe
+text/plain-compatible OSC 5522 runtime slice. The rich provider boundary is
+documented in `docs/yazelix/kitty_rich_clipboard_provider.md`.
 
 ## Absorption Rules
 
