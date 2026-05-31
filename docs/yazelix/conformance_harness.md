@@ -36,6 +36,17 @@ Launch the built Rio binary with CPU renderer and capture a COSMIC screenshot:
 python3 tools/yazelix_conformance.py launch-cpu-screenshot
 ```
 
+The WGPU renderer probe config lives at
+`artifacts/shader_probe/rio_wgpu_config/config.toml`. It only sets:
+
+```toml
+[renderer]
+backend = "Webgpu"
+```
+
+Use it when validating shader work so failures clearly belong to WGPU or the
+host graphics stack, not to Rio's default native Vulkan backend.
+
 ## Current Fixture Scope
 
 The first manifest covers:
