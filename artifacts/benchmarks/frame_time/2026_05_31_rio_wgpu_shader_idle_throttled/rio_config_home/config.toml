@@ -1,0 +1,4 @@
+[renderer]
+backend = "Webgpu"
+strategy = "Game"
+custom-shader = ["/home/lucca/pjs/yazelix-terminal/conformance/shaders/ghostty_cursor_probe.glsl"]

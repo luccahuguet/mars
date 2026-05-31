@@ -1,0 +1,69 @@
+{
+  "command": {
+    "config_path": "artifacts/benchmarks/frame_time/2026_05_31_rio_wgpu_shader_idle_throttled/rio_config_home/config.toml",
+    "config_template": "wgpu-shader",
+    "frame_log": "artifacts/benchmarks/frame_time/2026_05_31_rio_wgpu_shader_idle_throttled/frame_log.jsonl",
+    "gpu_samples": "artifacts/benchmarks/frame_time/2026_05_31_rio_wgpu_shader_idle_throttled/gpu_samples.csv",
+    "proc_samples": "artifacts/benchmarks/frame_time/2026_05_31_rio_wgpu_shader_idle_throttled/proc_samples.csv",
+    "returncode": 0,
+    "terminal_argv": [
+      "target/release/rio",
+      "-e",
+      "bash",
+      "--noprofile",
+      "--norc",
+      "-c",
+      "printf 'yazelix frame benchmark idle\\n'; sleep 4.0"
+    ],
+    "timed_out": false,
+    "wall_time_seconds": 4.253098372
+  },
+  "first_presented_frame_ms": 12.849376,
+  "first_redraw_ms": 12.849376,
+  "frame_count": 237,
+  "presented_delta_ms": {
+    "count": 236,
+    "max": 27.031514,
+    "mean": 16.958896716101695,
+    "median": 16.994654,
+    "min": 3.964505,
+    "p95": 17.089234500000003,
+    "p99": 17.13331435
+  },
+  "presented_frame_count": 237,
+  "process": {
+    "cpu_percent": 2.4765644599724617,
+    "cpu_seconds": 0.1,
+    "max_rss_kb": 26008,
+    "sample_count": 81,
+    "wall_seconds": 4.037851694
+  },
+  "redraw_delta_ms": {
+    "count": 236,
+    "max": 27.031514,
+    "mean": 16.958896716101695,
+    "median": 16.994654,
+    "min": 3.964505,
+    "p95": 17.089234500000003,
+    "p99": 17.13331435
+  },
+  "render_duration_ms": {
+    "count": 237,
+    "max": 1.650883,
+    "mean": 0.22638739662447258,
+    "median": 0.232768,
+    "min": 0.072679,
+    "p95": 0.2765062,
+    "p99": 0.37097283999999986
+  },
+  "schema": 1,
+  "target_vblank_ms": {
+    "count": 237,
+    "max": 16.666,
+    "mean": 16.666,
+    "median": 16.666,
+    "min": 16.666,
+    "p95": 16.666,
+    "p99": 16.666
+  }
+}

@@ -1988,6 +1988,10 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             WindowEvent::RedrawRequested => {
                 route.begin_render();
                 let render_start = route.window.render_timestamp;
+                let is_game_mode = self.config.renderer.strategy.is_game();
+                if !is_game_mode {
+                    route.window.winit_window.pre_present_notify();
+                }
 
                 match route.path {
                     RoutePath::Welcome => {
@@ -2070,10 +2074,10 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     RoutePath::Terminal => "terminal",
                     RoutePath::ConfirmQuit => "confirm_quit",
                 };
-                let window_id = format!("{:?}", route.window.winit_window.id());
+                let window_id_label = format!("{:?}", route.window.winit_window.id());
                 crate::frame_metrics::record_redraw(
                     crate::frame_metrics::RedrawMetrics {
-                        window_id: &window_id,
+                        window_id: &window_id_label,
                         route: route_name,
                         presented,
                         dirty_after,
@@ -2084,16 +2088,26 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     },
                 );
 
-                // Game mode = unlocked framerate, so keep the event loop
-                // spinning. Every other case is vsync-paced: a
-                // `request_redraw` tells winit to deliver
-                // `RedrawRequested` at the next platform vsync, and the
-                // OS parks the thread until that event arrives. Busy-
-                // polling between vsyncs here would burn CPU without
-                // delivering more frames.
-                if self.config.renderer.strategy.is_game() {
-                    route.request_redraw();
-                    event_loop.set_control_flow(ControlFlow::Poll);
+                // Game mode still needs continuous redraws for animated
+                // shaders, but they must be paced. An immediate
+                // request_redraw here hot-loops on Wayland/WGPU; pure
+                // platform frame callbacks under-drive the animation path.
+                // Use Rio's scheduler to request the next frame at the
+                // window vblank interval.
+                if is_game_mode {
+                    let route_id = route.window.screen.ctx().current_route();
+                    let timer_id = TimerId::new(Topic::GameRender, route_id);
+                    let event =
+                        EventPayload::new(RioEventType::Rio(RioEvent::Render), window_id);
+                    if !self.scheduler.scheduled(timer_id) {
+                        self.scheduler.schedule(
+                            event,
+                            route.window.vblank_interval,
+                            false,
+                            timer_id,
+                        );
+                    }
+                    event_loop.set_control_flow(ControlFlow::Wait);
                 } else {
                     if route.path == RoutePath::Welcome
                         || route.path == RoutePath::ConfirmQuit

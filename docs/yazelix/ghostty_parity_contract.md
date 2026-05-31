@@ -206,9 +206,6 @@ not yet complete:
   implementation through platform APIs or documented impossibility
 - `yzt-7p3.44`: OSC 72 drag-and-drop remains unadvertised until the spec and OS
   routing boundary are mature enough for a safe runtime implementation
-- `yzt-7p3.46`: Rio shader/game mode currently hot-loops above display cadence
-  in the local shader idle benchmark and needs throttling before cursor shader
-  parity is performance-safe
 
 ## Absorption Rules
 

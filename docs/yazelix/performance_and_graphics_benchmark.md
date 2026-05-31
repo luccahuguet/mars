@@ -180,6 +180,7 @@ Raw summary and sample artifacts:
 - `artifacts/benchmarks/frame_time/2026_05_31_rio_wgpu_scroll/`
 - `artifacts/benchmarks/frame_time/2026_05_31_ghostty_opengl_scroll/`
 - `artifacts/benchmarks/frame_time/2026_05_31_rio_wgpu_shader_idle/`
+- `artifacts/benchmarks/frame_time/2026_05_31_rio_wgpu_shader_idle_throttled/`
 - `artifacts/benchmarks/frame_time/2026_05_31_ghostty_opengl_shader_idle/`
 
 The Rio runs use `target/release/rio` under `nix develop`. The Ghostty runs use
@@ -191,7 +192,8 @@ the same `conformance/shaders/ghostty_cursor_probe.glsl` source.
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Rio WGPU/Vulkan | 20k-line scroll + 0.5s hold | 0.869s | 12.4ms | 5 redraw / 4 presented | 19.9% | 38.8 MiB | 0% |
 | Ghostty OpenGL | 20k-line scroll + 0.5s hold | 1.072s | n/a | n/a | 44.3% | 149.8 MiB | 0% |
-| Rio WGPU/Vulkan + shader | idle + 4s hold | 4.239s | 13.0ms | 69,688 presented | 96.9% | 25.0 MiB | 0% |
+| Rio WGPU/Vulkan + shader, before `yzt-7p3.46` | idle + 4s hold | 4.239s | 13.0ms | 69,688 presented | 96.9% | 25.0 MiB | 0% |
+| Rio WGPU/Vulkan + shader, after `yzt-7p3.46` | idle + 4s hold | 4.253s | 12.8ms | 237 presented | 2.5% | 25.4 MiB | 0% |
 | Ghostty OpenGL + shader | idle + 4s hold | 4.459s | n/a | n/a | 18.2% | 164.5 MiB | 0% |
 
 Interpretation:
@@ -199,9 +201,12 @@ Interpretation:
 - The scroll sample favors Rio on local wall time, process CPU, and RSS. Rio
   also produces internal frame timing while Ghostty does not expose comparable
   frame events through this external harness.
-- The shader idle sample reveals a Rio problem: the current shader/game render
-  strategy spins far above display cadence and consumes almost a full CPU core.
-  That is tracked as `yzt-7p3.46`.
+- The original shader idle sample revealed a Rio problem: the game render
+  strategy spun far above display cadence and consumed almost a full CPU core.
+  `yzt-7p3.46` fixed that by scheduling the next game redraw at the window
+  vblank interval instead of immediately requesting another redraw. The
+  post-fix run presented 237 frames over four seconds with a 16.99ms median
+  frame delta and 2.5% sampled process CPU.
 - The `nvidia-smi` samples saw 0% utilization and 2 MiB memory on the discrete
   NVIDIA GPU for every run. On this host that likely means the sampled GPU is
   not the compositor/render path for these windows; it is not proof of zero GPU
@@ -214,7 +219,6 @@ The next useful benchmark work should add:
 - repeated samples with aggregation instead of one local sample per case
 - direct Ghostty frame pacing instrumentation if an external or source-level
   hook is found
-- a fix for `yzt-7p3.46` so Rio shader/game mode is throttled to useful frame
-  cadence instead of hot-looping
+- longer shader stability runs after the throttled game loop fix
 
 Tracked as Bead `yzt-7p3.41`.
