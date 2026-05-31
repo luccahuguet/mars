@@ -166,5 +166,20 @@ None of those pivot criteria were proven by source inspection. The current block
 - render order: Rio grid/text/UI, Ghostty shaders, then existing librashader filters
 
 The implementation is source-compatible with the checked-in
-`conformance/shaders/ghostty_cursor_probe.glsl` probe. Visual screenshot proof is
-still blocked by the local GPU/surface issue listed above.
+`conformance/shaders/ghostty_cursor_probe.glsl` probe.
+
+## Visual Validation Update
+
+`yzt-7p3.17` fixed the WGPU surface path enough for local screenshot validation:
+
+- Sugarloaf now passes its raw display handle into `wgpu::InstanceDescriptor`
+  instead of constructing WGPU without a display handle
+- `python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot` launches
+  the checked-in shader probe with `WGPU_BACKEND=gl`
+- `artifacts/shader_probe/screenshots/wgpu_shader_probe_gl.png` captures the
+  WGPU shader-probe window and shows the magenta cursor block produced through
+  the Ghostty cursor uniform path
+
+WGPU/Vulkan still fails surface creation on this COSMIC Wayland/NVIDIA host, so
+the current validation recipe is WGPU/GL. That is good enough for shader-path
+evidence, but it is not proof that Vulkan is release-ready.

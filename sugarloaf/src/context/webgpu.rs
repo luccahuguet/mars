@@ -1,5 +1,20 @@
 use crate::sugarloaf::{Colorspace, SugarloafWindow, SugarloafWindowSize};
 use crate::SugarloafRenderer;
+use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle, RawDisplayHandle};
+
+#[derive(Debug)]
+struct WgpuDisplayHandle {
+    handle: RawDisplayHandle,
+}
+
+impl HasDisplayHandle for WgpuDisplayHandle {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        Ok(unsafe { DisplayHandle::borrow_raw(self.handle) })
+    }
+}
+
+unsafe impl Send for WgpuDisplayHandle {}
+unsafe impl Sync for WgpuDisplayHandle {}
 
 pub struct WgpuContext<'a> {
     pub device: wgpu::Device,
@@ -36,7 +51,11 @@ impl<'a> WgpuContext<'a> {
         // - `webgpu`
         // - `primary`
         let backend = wgpu::Backends::from_env().unwrap_or(wgpu_backend);
-        let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
+        let mut instance_desc = wgpu::InstanceDescriptor::new_with_display_handle(
+            Box::new(WgpuDisplayHandle {
+                handle: sugarloaf_window.display,
+            }),
+        );
         instance_desc.backends = backend;
         let instance = wgpu::Instance::new(instance_desc);
 

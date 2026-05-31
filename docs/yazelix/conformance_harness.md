@@ -36,6 +36,13 @@ Launch the built Rio binary with CPU renderer and capture a COSMIC screenshot:
 python3 tools/yazelix_conformance.py launch-cpu-screenshot
 ```
 
+Launch the built WGPU Rio binary with the Ghostty cursor shader probe and
+capture a COSMIC screenshot:
+
+```text
+python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot
+```
+
 The WGPU renderer probe config lives at
 `artifacts/shader_probe/rio_wgpu_config/config.toml`. It sets the WGPU backend
 and loads the checked-in Ghostty cursor probe:
@@ -50,6 +57,12 @@ Use it when validating shader work so failures clearly belong to WGPU or the
 host graphics stack, not to Rio's default native Vulkan backend. On a working
 GPU stack, that probe should compile through Naga's GLSL frontend and tint the
 cursor area from `iCurrentCursor`.
+
+The default screenshot command uses `WGPU_BACKEND=gl` because the local COSMIC
+Wayland/NVIDIA stack can create a WGPU/GL surface while WGPU/Vulkan currently
+fails surface creation. That is a validation recipe, not a renderer contract:
+Vulkan still needs separate fixing before it can be treated as the default WGPU
+backend for this host.
 
 ## Current Fixture Scope
 

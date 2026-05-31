@@ -20,6 +20,8 @@ MANIFEST = ROOT / "conformance" / "fixtures" / "manifest.json"
 DEFAULT_ENV_OUTPUT = ROOT / "artifacts" / "conformance" / "env.json"
 DEFAULT_SCREENSHOT_DIR = ROOT / "artifacts" / "conformance" / "screenshots"
 DEFAULT_CPU_CONFIG = ROOT / "artifacts" / "conformance" / "rio_cpu_config"
+DEFAULT_SHADER_SCREENSHOT_DIR = ROOT / "artifacts" / "shader_probe" / "screenshots"
+DEFAULT_SHADER_CONFIG = ROOT / "artifacts" / "shader_probe" / "rio_wgpu_config"
 
 
 def load_manifest() -> dict[str, Any]:
@@ -145,41 +147,29 @@ def ensure_cpu_config(path: Path) -> None:
     config.write_text("[renderer]\nuse-cpu = true\n", encoding="utf-8")
 
 
-def command_launch_cpu_screenshot(args: argparse.Namespace) -> int:
+def ensure_shader_config(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    config = path / "config.toml"
+    config.write_text(
+        "[renderer]\n"
+        'backend = "Webgpu"\n'
+        'custom-shader = ["conformance/shaders/ghostty_cursor_probe.glsl"]\n',
+        encoding="utf-8",
+    )
+
+
+def capture_cosmic_screenshot(
+    output_dir: Path,
+    process: subprocess.Popen[Any],
+    settle_seconds: int,
+    sleep_seconds: int,
+) -> int:
     screenshot_tool = shutil.which("cosmic-screenshot")
     if screenshot_tool is None:
         raise SystemExit("cosmic-screenshot not found")
 
-    output_dir = Path(args.output_dir).expanduser().resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    cpu_config = Path(args.config_dir).expanduser().resolve()
-    ensure_cpu_config(cpu_config)
-
-    env = os.environ.copy()
-    env["RIO_CONFIG_HOME"] = str(cpu_config)
-
-    command = [
-        "nix",
-        "develop",
-        "-c",
-        args.rio_bin,
-        "--app-id",
-        "yazelix-terminal-conformance",
-        "--title-placeholder",
-        "Yazelix Terminal Conformance",
-        "-e",
-        "bash",
-        "-lc",
-        (
-            "printf 'yazelix-terminal conformance\\n"
-            "CPU renderer screenshot probe\\n"
-            "PID $$\\n'; "
-            f"sleep {int(args.sleep_seconds)}"
-        ),
-    ]
-    process = subprocess.Popen(command, cwd=ROOT, env=env)
     try:
-        time.sleep(max(1, int(args.settle_seconds)))
+        time.sleep(max(1, int(settle_seconds)))
         shot = subprocess.run(
             [
                 screenshot_tool,
@@ -200,10 +190,89 @@ def command_launch_cpu_screenshot(args: argparse.Namespace) -> int:
         return 0
     finally:
         try:
-            process.wait(timeout=max(1, int(args.sleep_seconds) + 3))
+            process.wait(timeout=max(1, int(sleep_seconds) + 3))
         except subprocess.TimeoutExpired:
             process.terminate()
             process.wait(timeout=5)
+
+
+def command_launch_cpu_screenshot(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cpu_config = Path(args.config_dir).expanduser().resolve()
+    ensure_cpu_config(cpu_config)
+
+    env = os.environ.copy()
+    env["RIO_CONFIG_HOME"] = str(cpu_config)
+
+    command = [
+        "nix",
+        "develop",
+        "-c",
+        args.rio_bin,
+        "--app-id",
+        "yazelix-terminal-conformance",
+        "--title-placeholder",
+        "Yazelix Terminal Conformance",
+        "-e",
+        "bash",
+        "--noprofile",
+        "--norc",
+        "-c",
+        (
+            "printf 'yazelix-terminal conformance\\n"
+            "CPU renderer screenshot probe\\n"
+            "PID $$\\n'; "
+            f"sleep {int(args.sleep_seconds)}"
+        ),
+    ]
+    process = subprocess.Popen(command, cwd=ROOT, env=env)
+    return capture_cosmic_screenshot(
+        output_dir,
+        process,
+        args.settle_seconds,
+        args.sleep_seconds,
+    )
+
+
+def command_launch_wgpu_shader_screenshot(args: argparse.Namespace) -> int:
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    shader_config = Path(args.config_dir).expanduser().resolve()
+    ensure_shader_config(shader_config)
+
+    env = os.environ.copy()
+    env["RIO_CONFIG_HOME"] = str(shader_config)
+    env["WGPU_BACKEND"] = args.wgpu_backend
+
+    command = [
+        "nix",
+        "develop",
+        "-c",
+        args.rio_bin,
+        "--app-id",
+        "yazelix-terminal-shader-probe",
+        "--title-placeholder",
+        "Yazelix Terminal Shader Probe",
+        "-e",
+        "bash",
+        "--noprofile",
+        "--norc",
+        "-c",
+        (
+            "printf 'yazelix-terminal shader probe\\n"
+            "Ghostty cursor uniforms via WGPU\\n"
+            "PID $$\\n'; "
+            f"sleep {int(args.sleep_seconds)}"
+        ),
+    ]
+    process = subprocess.Popen(command, cwd=ROOT, env=env)
+    return capture_cosmic_screenshot(
+        output_dir,
+        process,
+        args.settle_seconds,
+        args.sleep_seconds,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -235,6 +304,20 @@ def build_parser() -> argparse.ArgumentParser:
     shot_parser.add_argument("--sleep-seconds", default=8, type=int)
     shot_parser.add_argument("--settle-seconds", default=2, type=int)
     shot_parser.set_defaults(func=command_launch_cpu_screenshot)
+
+    shader_shot_parser = subcommands.add_parser(
+        "launch-wgpu-shader-screenshot",
+        help="Launch Rio with WGPU custom shader probe and capture a COSMIC screenshot",
+    )
+    shader_shot_parser.add_argument(
+        "--output-dir", default=str(DEFAULT_SHADER_SCREENSHOT_DIR)
+    )
+    shader_shot_parser.add_argument("--config-dir", default=str(DEFAULT_SHADER_CONFIG))
+    shader_shot_parser.add_argument("--rio-bin", default="target/debug/rio")
+    shader_shot_parser.add_argument("--wgpu-backend", default="gl")
+    shader_shot_parser.add_argument("--sleep-seconds", default=8, type=int)
+    shader_shot_parser.add_argument("--settle-seconds", default=2, type=int)
+    shader_shot_parser.set_defaults(func=command_launch_wgpu_shader_screenshot)
 
     return parser
 
