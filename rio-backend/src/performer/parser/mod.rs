@@ -1147,6 +1147,7 @@ pub(crate) trait Perform {
 }
 
 #[cfg(test)]
+// Test lane: default
 mod tests {
     use super::*;
 
@@ -1450,6 +1451,32 @@ mod tests {
             }
             _ => panic!("expected osc sequence"),
         }
+    }
+
+    #[test]
+    // Defends: arbitrary parser input must not panic, even across chunk boundaries and partial escape states.
+    fn deterministic_parser_noise_does_not_panic() {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut parser = Parser::default();
+        let mut dispatcher = Dispatcher::default();
+
+        for chunk_idx in 0..256 {
+            let len = ((next_fuzz_byte(&mut state) as usize) ^ (chunk_idx * 17)) % 257;
+            let mut chunk = Vec::with_capacity(len);
+            for _ in 0..len {
+                chunk.push(next_fuzz_byte(&mut state));
+            }
+
+            parser.advance(&mut dispatcher, &chunk);
+            dispatcher.dispatched.clear();
+        }
+    }
+
+    fn next_fuzz_byte(state: &mut u64) -> u8 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((*state >> 32) & 0xff) as u8
     }
 
     #[test]
