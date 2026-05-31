@@ -4085,6 +4085,8 @@ impl<U: EventListener> Handler for Crosswords<U> {
         // GPU never sees the pixel data and the placeholder cells render
         // as blank space.
         if placement.virtual_placement {
+            let mut placement = placement;
+            self.infer_virtual_placement_grid(&mut placement, Some(&graphic_data));
             let pixel_data = graphic_data.clone();
             self.graphics
                 .store_kitty_image(image_id, None, graphic_data);
@@ -4106,7 +4108,7 @@ impl<U: EventListener> Handler for Crosswords<U> {
     #[inline]
     fn place_graphic(
         &mut self,
-        placement: crate::ansi::kitty_graphics_protocol::PlacementRequest,
+        mut placement: crate::ansi::kitty_graphics_protocol::PlacementRequest,
     ) {
         debug!(
             "Kitty graphics placement: image_id={}, x={}, y={}, columns={}, rows={}, virtual={}",
@@ -4122,6 +4124,7 @@ impl<U: EventListener> Handler for Crosswords<U> {
         // emits U+10EEEE placeholder cells itself. The renderer scans
         // visible cells and composites the image at those positions.
         if placement.virtual_placement {
+            self.infer_virtual_placement_grid(&mut placement, None);
             self.place_virtual_graphic(placement);
             return;
         }
@@ -4798,6 +4801,47 @@ impl<U: EventListener> Crosswords<U> {
         self.graphics
             .kitty_virtual_placements
             .insert((placement.image_id, placement.placement_id), vp);
+    }
+
+    fn infer_virtual_placement_grid(
+        &self,
+        placement: &mut crate::ansi::kitty_graphics_protocol::PlacementRequest,
+        transmitted: Option<&GraphicData>,
+    ) {
+        if !placement.virtual_placement || (placement.columns != 0 && placement.rows != 0)
+        {
+            return;
+        }
+
+        let dimensions = transmitted
+            .map(|image| {
+                (
+                    image.display_width.unwrap_or(image.width) as u32,
+                    image.display_height.unwrap_or(image.height) as u32,
+                )
+            })
+            .or_else(|| {
+                self.graphics
+                    .get_kitty_image(placement.image_id)
+                    .map(|image| {
+                        (
+                            image.data.display_width.unwrap_or(image.data.width) as u32,
+                            image.data.display_height.unwrap_or(image.data.height) as u32,
+                        )
+                    })
+            });
+        let Some((width, height)) = dimensions else {
+            return;
+        };
+
+        let cell_width = (self.graphics.cell_width as u32).max(1);
+        let cell_height = (self.graphics.cell_height as u32).max(1);
+        if placement.columns == 0 {
+            placement.columns = width.div_ceil(cell_width).max(1);
+        }
+        if placement.rows == 0 {
+            placement.rows = height.div_ceil(cell_height).max(1);
+        }
     }
 }
 

@@ -8,7 +8,10 @@ Current protocol state:
 - OSC 52 stores reject encoded payloads above 2 MiB and decoded payloads above
   1 MiB
 - XTVERSION replies as `Rio <version>` because the terminal core is still Rio
-- Yazelix host mode sets `TERM_PROGRAM=yazelix-terminal`
+- Yazelix host mode keeps `TERM_PROGRAM=rio` so child applications detect the
+  Rio protocol surface
+- Yazelix host mode sets `YAZELIX_TERMINAL_HOST=yazelix-terminal` for
+  fork-specific detection
 - Yazelix host mode defaults the Wayland app id / X11 class to
   `yazelix-terminal`
 - `TERM` still follows Rio's packaged terminfo discovery:

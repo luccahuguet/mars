@@ -528,7 +528,7 @@ pub struct RunGeometry {
     /// Pixel size of the rendered slice.
     pub width: f32,
     pub height: f32,
-    /// Source rect on the image, normalised `[u0, v0, u1, v1]`.
+    /// Source rect on the image, normalised `[u0, v0, width, height]`.
     pub source_rect: [f32; 4],
 }
 
@@ -617,11 +617,12 @@ pub fn compute_run_geometry(
         y: origin_y + screen_line as f32 * cell_height + intra_y,
         width: vis_x1 - vis_x0,
         height: vis_y1 - vis_y0,
-        source_rect: [src_u0, src_v0, src_u1, src_v1],
+        source_rect: [src_u0, src_v0, src_u1 - src_u0, src_v1 - src_v0],
     })
 }
 
 #[cfg(test)]
+// Test lane: default
 mod tests {
     use super::*;
 
@@ -925,15 +926,15 @@ mod tests {
         .expect("visible");
         // Visible intersection (in placement-box coords): 30..40 × 0..10.
         // intra_x = 30 - 30 = 0, so screen_x = 3*10 = 30.
-        // Source x = (30 - 25)..(40 - 25) of fit_w=50 → u 0.10..0.30.
-        // Source y = 0..10 of fit_h=100 → v 0..0.10.
+        // Source x = (30 - 25)..(40 - 25) of fit_w=50 → u 0.10, width 0.20.
+        // Source y = 0..10 of fit_h=100 → v 0, height 0.10.
         approx(g.x, 30.0);
         approx(g.y, 0.0);
         approx(g.width, 10.0);
         approx(g.height, 10.0);
         approx(g.source_rect[0], 0.10);
         approx(g.source_rect[1], 0.0);
-        approx(g.source_rect[2], 0.30);
+        approx(g.source_rect[2], 0.20);
         approx(g.source_rect[3], 0.10);
     }
 
@@ -978,7 +979,7 @@ mod tests {
         .expect("visible");
         // Visible rect: y 40..50, x 0..100. intra_y = 40 - 40 = 0,
         // screen_y = 4*10 = 40. Image y 37.5..62.5 → src y 2.5..12.5
-        // of fit_h=25 → v 0.10..0.50. Full width: u 0..1.
+        // of fit_h=25 → v 0.10, height 0.40. Full width: u 0, width 1.
         approx(g.x, 0.0);
         approx(g.y, 40.0);
         approx(g.width, 100.0);
@@ -986,7 +987,7 @@ mod tests {
         approx(g.source_rect[0], 0.0);
         approx(g.source_rect[1], 0.10);
         approx(g.source_rect[2], 1.0);
-        approx(g.source_rect[3], 0.50);
+        approx(g.source_rect[3], 0.40);
     }
 
     #[test]
@@ -1018,7 +1019,7 @@ mod tests {
         approx(g.height, 10.0);
         // Source rect still picks the row-2 slice of the image.
         approx(g.source_rect[1], 0.20);
-        approx(g.source_rect[3], 0.30);
+        approx(g.source_rect[3], 0.10);
     }
 
     #[test]

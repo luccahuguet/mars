@@ -9,6 +9,7 @@ mod bindings;
 mod cli;
 mod constants;
 mod context;
+mod graphics_namespace;
 mod grid_emit;
 mod hints;
 mod ime;
@@ -41,11 +42,67 @@ use windows_sys::Win32::System::Console::{
 };
 
 const LOG_LEVEL_ENV: &str = "RIO_LOG_LEVEL";
+const RIO_TERM_PROGRAM: &str = "rio";
+const YAZELIX_TERMINAL_HOST_ENV: &str = "YAZELIX_TERMINAL_HOST";
+const YAZELIX_TERMINAL_HOST: &str = "yazelix-terminal";
+const INHERITED_TERMINAL_IDENTITY_ENV: &[&str] = &[
+    "ALACRITTY_LOG",
+    "ALACRITTY_SOCKET",
+    "ALACRITTY_WINDOW_ID",
+    "GHOSTTY_BIN_DIR",
+    "GHOSTTY_RESOURCES_DIR",
+    "GHOSTTY_SHELL_FEATURES",
+    "ITERM_PROFILE",
+    "ITERM_SESSION_ID",
+    "KITTY_LISTEN_ON",
+    "KITTY_PID",
+    "KITTY_PUBLIC_KEY",
+    "KITTY_WINDOW_ID",
+    "KONSOLE_DBUS_SESSION",
+    "KONSOLE_DBUS_SERVICE",
+    "KONSOLE_VERSION",
+    "TABBY_CONFIG_DIRECTORY",
+    "TERMCAP",
+    "TERMINFO",
+    "VSCODE_INJECTION",
+    "WARP_HONOR_PS1",
+    "WEZTERM_EXECUTABLE",
+    "WEZTERM_PANE",
+    "WEZTERM_UNIX_SOCKET",
+    "WT_PROFILE_ID",
+    "WT_SESSION",
+    "WT_Session",
+];
+
+#[derive(Debug, PartialEq, Eq)]
+struct ChildTerminalIdentity {
+    term_program: &'static str,
+    yazelix_terminal_host: Option<&'static str>,
+}
+
+fn child_terminal_identity(yazelix_mode: bool) -> ChildTerminalIdentity {
+    ChildTerminalIdentity {
+        term_program: RIO_TERM_PROGRAM,
+        yazelix_terminal_host: yazelix_mode.then_some(YAZELIX_TERMINAL_HOST),
+    }
+}
+
+fn scrub_inherited_terminal_identity(yazelix_mode: bool) {
+    if !yazelix_mode {
+        return;
+    }
+
+    for name in INHERITED_TERMINAL_IDENTITY_ENV {
+        std::env::remove_var(name);
+    }
+}
 
 pub fn setup_environment_variables(
     config: &rio_backend::config::Config,
     yazelix_mode: bool,
 ) {
+    scrub_inherited_terminal_identity(yazelix_mode);
+
     #[cfg(unix)]
     {
         let terminfo = match (
@@ -66,14 +123,17 @@ pub fn setup_environment_variables(
         std::env::set_var("TERM", terminfo);
     }
 
-    // https://github.com/raphamorim/rio/issues/200
-    let term_program = if yazelix_mode {
-        "yazelix-terminal"
-    } else {
-        "rio"
-    };
-    std::env::set_var("TERM_PROGRAM", term_program);
+    // TERM/TERM_PROGRAM are capability signals consumed by tools like Yazi.
+    // Yazelix host identity lives in its own marker so child tools still
+    // detect the Rio protocol surface.
+    let identity = child_terminal_identity(yazelix_mode);
+    std::env::set_var("TERM_PROGRAM", identity.term_program);
     std::env::set_var("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    if let Some(host) = identity.yazelix_terminal_host {
+        std::env::set_var(YAZELIX_TERMINAL_HOST_ENV, host);
+    } else {
+        std::env::remove_var(YAZELIX_TERMINAL_HOST_ENV);
+    }
 
     std::env::set_var("COLORTERM", "truecolor");
     std::env::remove_var("DESKTOP_STARTUP_ID");
@@ -326,5 +386,17 @@ mod tests {
         assert!(config.navigation.hide_if_single);
         assert!(!config.use_fork);
         assert_eq!(app_id.as_deref(), Some("yazelix-terminal"));
+    }
+
+    #[test]
+    // Defends: Child applications detect Rio protocols while Yazelix host mode remains visible separately.
+    fn yazelix_mode_keeps_rio_child_terminal_identity() {
+        assert_eq!(
+            child_terminal_identity(true),
+            ChildTerminalIdentity {
+                term_program: "rio",
+                yazelix_terminal_host: Some("yazelix-terminal"),
+            }
+        );
     }
 }

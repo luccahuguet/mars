@@ -14,6 +14,7 @@ use crate::context::renderable::{PendingUpdate, RenderableContent};
 use crate::context::ContextManager;
 use crate::crosswords::pos::Pos;
 use crate::crosswords::style::{Style as CellStyle, StyleFlags};
+use crate::graphics_namespace::{atlas_cell_slice, atlas_image_id};
 use rio_backend::config::colors::term::TermColors;
 use rio_backend::config::colors::{
     term::{List, DIM_FACTOR},
@@ -408,7 +409,8 @@ impl Renderer {
             let rc = &context.renderable_content;
             let has_overlays = !rc.kitty_placements.is_empty();
             let has_virtual = !rc.kitty_virtual_placements.is_empty();
-            if has_overlays || has_virtual {
+            let has_atlas = Self::has_atlas_graphics(rc);
+            if has_overlays || has_virtual || has_atlas {
                 let layout = context.dimension;
                 // Canonical integer cell stride — line_height already
                 // baked into `cell.cell_height`. Same value the GPU
@@ -451,6 +453,17 @@ impl Renderer {
 
                 if has_virtual {
                     Self::push_virtual_placeholder_overlays(
+                        overlays,
+                        rc,
+                        origin_x,
+                        origin_y,
+                        cell_width,
+                        cell_height,
+                    );
+                }
+
+                if has_atlas {
+                    Self::push_atlas_graphic_overlays(
                         overlays,
                         rc,
                         origin_x,
@@ -867,6 +880,67 @@ impl Renderer {
                 z_index,
                 source_rect: geom.source_rect,
             });
+        }
+    }
+
+    fn has_atlas_graphics(rc: &RenderableContent) -> bool {
+        rc.visible_rows.iter().any(|row| {
+            row.has_extras && row.inner.iter().any(|square| square.has_graphics())
+        })
+    }
+
+    fn push_atlas_graphic_overlays(
+        overlays: &mut Vec<rio_backend::sugarloaf::GraphicOverlay>,
+        rc: &RenderableContent,
+        origin_x: f32,
+        origin_y: f32,
+        cell_width: f32,
+        cell_height: f32,
+    ) {
+        for (line_idx, row) in rc.visible_rows.iter().enumerate() {
+            if !row.has_extras {
+                continue;
+            }
+
+            for (col_idx, square) in row.inner.iter().enumerate() {
+                if !square.has_graphics() {
+                    continue;
+                }
+
+                let Some(graphics) = square
+                    .extras_id()
+                    .and_then(|id| rc.extras.get(&id))
+                    .and_then(|extras| extras.graphic.as_ref())
+                else {
+                    continue;
+                };
+
+                for graphic in graphics {
+                    let Some(image_id) = atlas_image_id(graphic.texture.id) else {
+                        continue;
+                    };
+                    let Some(slice) = atlas_cell_slice(
+                        graphic.offset_x,
+                        graphic.offset_y,
+                        graphic.texture.width,
+                        graphic.texture.height,
+                        cell_width,
+                        cell_height,
+                    ) else {
+                        continue;
+                    };
+
+                    overlays.push(rio_backend::sugarloaf::GraphicOverlay {
+                        image_id,
+                        x: origin_x + col_idx as f32 * cell_width,
+                        y: origin_y + line_idx as f32 * cell_height,
+                        width: slice.width,
+                        height: slice.height,
+                        z_index: 0,
+                        source_rect: slice.source_rect,
+                    });
+                }
+            }
         }
     }
 }

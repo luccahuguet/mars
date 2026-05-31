@@ -1,4 +1,5 @@
 use crate::event::{ClickState, EventPayload, EventProxy, RioEvent, RioEventType};
+use crate::graphics_namespace::atlas_image_id;
 use crate::ime::Preedit;
 use crate::renderer::utils::update_colors_based_on_theme;
 use crate::router::{routes::RoutePath, Router};
@@ -316,7 +317,19 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                     // Atlas graphics (sixel/iTerm2)
                     for graphic_data in queues.pending {
-                        sugarloaf.graphics.insert(graphic_data);
+                        if let Some(image_id) = atlas_image_id(graphic_data.id) {
+                            sugarloaf.image_data.insert(
+                                image_id,
+                                rio_backend::sugarloaf::GraphicDataEntry::from_graphic_data(
+                                    graphic_data,
+                                ),
+                            );
+                        } else {
+                            tracing::warn!(
+                                "Skipping atlas graphic with image id outside renderer namespace: {}",
+                                graphic_data.id.get()
+                            );
+                        }
                     }
 
                     // Image textures (kitty) → separate store, no clone
@@ -330,6 +343,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     }
 
                     for graphic_data in queues.remove_queue {
+                        if let Some(image_id) = atlas_image_id(graphic_data) {
+                            sugarloaf.image_data.remove(&image_id);
+                        }
                         sugarloaf.graphics.remove(&graphic_data);
                     }
 
