@@ -29,9 +29,9 @@
       "id": "osc21_kitty_color_control",
       "tier": "should",
       "protocol": "Kitty OSC 21",
-      "description": "Query foreground, set background, reset cursor, and query an unsupported keyed color.",
+      "description": "Query foreground, set background, reset cursor, query selection background, set visual bell color, and query the second transparent background color.",
       "source": "Kitty keyed color protocol and Ghostty OSC 21 parser behavior.",
-      "hex": "1b5d32313b666f726567726f756e643d3f3b6261636b67726f756e643d233031303230333b637572736f723b73656c656374696f6e5f6261636b67726f756e643d3f07"
+      "hex": "1b5d32313b666f726567726f756e643d3f3b6261636b67726f756e643d233031303230333b637572736f723b73656c656374696f6e5f6261636b67726f756e643d3f3b76697375616c5f62656c6c3d236666666666663b7365636f6e645f7472616e73706172656e745f6261636b67726f756e643d3f07"
     },
     {
       "id": "osc22_pointer_shapes",

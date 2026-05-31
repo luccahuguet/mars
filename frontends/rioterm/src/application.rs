@@ -565,6 +565,10 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 if self.config.bell.audio {
                     self.handle_audio_bell();
                 }
+                if let Some(route) = self.router.routes.get_mut(&window_id) {
+                    route.window.screen.renderer.trigger_visual_bell();
+                    route.request_redraw();
+                }
             }
             RioEventType::Rio(RioEvent::DesktopNotification { title, body }) => {
                 self.handle_desktop_notification(&title, &body);

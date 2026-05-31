@@ -41,8 +41,11 @@ Already implemented or partially validated in Yazelix-terminal:
 - OSC 52 hardened clipboard policy
 - OSC 5522 Kitty rich clipboard text/plain read/write/wdata/walias first slice
 - OSC 21 keyed color set/query/reset for foreground, background, cursor,
-  cursor text, selection colors, visual bell color, transparent background
-  color, and ANSI palette slots
+  cursor text, selection colors, visual bell color, Ghostty/Kitty second
+  transparent background color, and ANSI palette slots
+- OSC 21 visual bell color drives a fading renderer overlay on BEL, and the
+  second transparent background color drives transparent-window background
+  composition when no background image is configured
 - OSC 22 pointer shape set/reset, push/pop, current/support query, and
   frontend cursor selection
 - Kitty multiple cursors support/state/color queries, coordinate mutation,
@@ -55,9 +58,6 @@ Already implemented or partially validated in Yazelix-terminal:
 
 Important gaps found during this audit:
 
-- OSC 21 unsupported special color keys such as cursor text, selection colors,
-  visual bell, and transparent background slots still need representable terminal
-  storage before they can be more than query-visible.
 - OSC 5522 Kitty rich clipboard still needs arbitrary MIME, OS-backed rich
   clipboard integration, password trust prompts, and chunk/session hardening
   beyond the current text/plain first slice.
@@ -89,6 +89,19 @@ Scope:
 - Return `key=?` for unknown query fields
 - Preserve existing legacy color behavior
 - Add conformance fixtures and query reply tests
+
+Result:
+
+- Implemented keyed set/query/reset for foreground, background, cursor, cursor
+  text, selection foreground/background, visual bell, transparent background,
+  and ANSI palette slots
+- Added Ghostty-compatible `second_transparent_background` as an alias for
+  Rio's transparent-background slot while preserving the older
+  `transparent_background` alias
+- Visual bell color now renders a short fading full-window overlay on BEL
+- Transparent-background color now affects window background composition only
+  when the configured window is actually transparent and no background image is
+  active
 
 ### OSC 5522 Kitty Rich Clipboard
 

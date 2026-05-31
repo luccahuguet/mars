@@ -24,6 +24,11 @@ use rio_backend::config::navigation::Navigation;
 use rio_backend::config::Config;
 use rio_backend::event::EventProxy;
 use rio_backend::sugarloaf::Sugarloaf;
+use std::time::{Duration, Instant};
+
+const VISUAL_BELL_DURATION: Duration = Duration::from_millis(180);
+const VISUAL_BELL_MAX_ALPHA: f32 = 0.28;
+const VISUAL_BELL_ORDER: u8 = 10;
 
 /// The window-bg clear alpha that flows into sugarloaf's
 /// `set_background_color`. Stored on the renderer and re-applied on
@@ -40,6 +45,52 @@ fn window_bg_alpha(config: &Config) -> f32 {
         0.0
     } else {
         config.window.opacity.clamp(0.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Test lane: default
+    use super::*;
+
+    #[test]
+    // Defends: visual bell overlay fades to zero and stops requesting redraws.
+    fn visual_bell_alpha_fades_over_duration() {
+        let start = visual_bell_alpha_for_elapsed(Duration::ZERO).unwrap();
+        let middle = visual_bell_alpha_for_elapsed(VISUAL_BELL_DURATION / 2).unwrap();
+        assert!((start - VISUAL_BELL_MAX_ALPHA).abs() < f32::EPSILON);
+        assert!(middle > 0.0 && middle < start);
+        assert!(visual_bell_alpha_for_elapsed(VISUAL_BELL_DURATION).is_none());
+    }
+
+    #[test]
+    // Defends: transparent-background composition keeps the configured window alpha.
+    fn transparent_background_color_uses_window_alpha() {
+        let color = color_array_to_sugarloaf_color([0.1, 0.2, 0.3, 1.0], 0.42);
+        assert!((color.r - 0.1).abs() < 0.000001);
+        assert!((color.g - 0.2).abs() < 0.000001);
+        assert!((color.b - 0.3).abs() < 0.000001);
+        assert!((color.a - 0.42).abs() < 0.000001);
+    }
+}
+
+fn visual_bell_alpha_for_elapsed(elapsed: Duration) -> Option<f32> {
+    if elapsed >= VISUAL_BELL_DURATION {
+        return None;
+    }
+    let progress = elapsed.as_secs_f32() / VISUAL_BELL_DURATION.as_secs_f32();
+    Some((1.0 - progress).powi(2) * VISUAL_BELL_MAX_ALPHA)
+}
+
+fn color_array_to_sugarloaf_color(
+    color: ColorArray,
+    alpha: f32,
+) -> rio_backend::sugarloaf::Color {
+    rio_backend::sugarloaf::Color {
+        r: color[0] as f64,
+        g: color[1] as f64,
+        b: color[2] as f64,
+        a: alpha as f64,
     }
 }
 
@@ -87,6 +138,8 @@ pub struct Renderer {
     pub custom_mouse_cursor: bool,
     pub trail_cursor_enabled: bool,
     pub trail_cursor: trail_cursor::TrailCursor,
+    visual_bell_started_at: Option<Instant>,
+    use_osc21_transparent_background: bool,
 }
 
 impl Renderer {
@@ -158,6 +211,9 @@ impl Renderer {
             custom_mouse_cursor: config.effects.custom_mouse_cursor,
             trail_cursor_enabled: config.effects.trail_cursor,
             trail_cursor: trail_cursor::TrailCursor::new(),
+            visual_bell_started_at: None,
+            use_osc21_transparent_background: config.window.background_image.is_none()
+                && (config.window.opacity < 1.0 || config.window.blur.is_glass()),
         }
     }
 
@@ -262,6 +318,59 @@ impl Renderer {
     #[inline]
     pub fn color(&self, color: usize, term_colors: &TermColors) -> ColorArray {
         term_colors[color].unwrap_or(self.colors[color])
+    }
+
+    #[inline]
+    pub fn trigger_visual_bell(&mut self) {
+        self.visual_bell_started_at = Some(Instant::now());
+    }
+
+    fn visual_bell_alpha(&mut self) -> Option<f32> {
+        let alpha = visual_bell_alpha_for_elapsed(self.visual_bell_started_at?.elapsed());
+        if alpha.is_none() {
+            self.visual_bell_started_at = None;
+        }
+        alpha
+    }
+
+    fn special_color(&self, term_colors: &TermColors, color: NamedColor) -> ColorArray {
+        self.color(color as usize, &term_colors)
+    }
+
+    fn transparent_background_color(
+        &self,
+        term_colors: &TermColors,
+    ) -> rio_backend::sugarloaf::Color {
+        if !self.use_osc21_transparent_background {
+            return self.dynamic_background.1;
+        }
+
+        let color = self.special_color(term_colors, NamedColor::TransparentBackground);
+        color_array_to_sugarloaf_color(color, self.window_bg_alpha)
+    }
+
+    fn render_visual_bell(
+        &mut self,
+        sugarloaf: &mut Sugarloaf,
+        term_colors: &TermColors,
+        window_size: rio_backend::sugarloaf::SugarloafWindowSize,
+        scale_factor: f32,
+    ) {
+        let Some(alpha) = self.visual_bell_alpha() else {
+            return;
+        };
+        let base = self.special_color(term_colors, NamedColor::VisualBell);
+        let color = [base[0], base[1], base[2], alpha];
+        sugarloaf.rect(
+            None,
+            0.0,
+            0.0,
+            window_size.width / scale_factor,
+            window_size.height / scale_factor,
+            color,
+            0.0,
+            VISUAL_BELL_ORDER,
+        );
     }
 
     #[inline]
@@ -533,6 +642,13 @@ impl Renderer {
 
         let window_size = sugarloaf.window_size();
         let scale_factor = sugarloaf.scale_factor();
+        let active_term_colors = grid.current().terminal.lock().colors;
+        self.render_visual_bell(
+            sugarloaf,
+            &active_term_colors,
+            window_size,
+            scale_factor,
+        );
 
         // Dim overlay for unfocused splits. Drawn after the split content is
         // built so it composites on top. The tint comes from
@@ -641,13 +757,14 @@ impl Renderer {
         // want it to follow focus the way does (each surface's
         // `terminal.colors.background` drives its own window chrome).
         let current_context = context_manager.current_grid_mut().current_mut();
+        let active_term_colors = current_context.terminal.lock().colors;
         let mut effective_bg = match &current_context.renderable_content.background {
             Some(crate::context::renderable::BackgroundState::Set(color)) => *color,
             // Explicit OSC 111 reset OR panel that never ran OSC 11 →
             // fall back to the config / dynamic_background (honors
             // window-opacity / background-image).
             Some(crate::context::renderable::BackgroundState::Reset) | None => {
-                self.dynamic_background.1
+                self.transparent_background_color(&active_term_colors)
             }
         };
         // Re-apply the configured window-bg alpha. Without this, an
@@ -675,6 +792,9 @@ impl Renderer {
     /// Check if the renderer needs continuous redraw (for animations)
     #[inline]
     pub fn needs_redraw(&mut self) -> bool {
+        if self.visual_bell_alpha().is_some() {
+            return true;
+        }
         if self.trail_cursor_enabled && self.trail_cursor.is_animating() {
             return true;
         }

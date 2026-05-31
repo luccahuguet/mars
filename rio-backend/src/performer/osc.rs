@@ -284,7 +284,9 @@ fn kitty_color_index(key: &str) -> Option<usize> {
         "selection_foreground" => Some(NamedColor::SelectionForeground as usize),
         "selection_background" => Some(NamedColor::SelectionBackground as usize),
         "visual_bell" => Some(NamedColor::VisualBell as usize),
-        "transparent_background" => Some(NamedColor::TransparentBackground as usize),
+        "second_transparent_background" | "transparent_background" => {
+            Some(NamedColor::TransparentBackground as usize)
+        }
         _ => key.parse::<u8>().ok().map(usize::from),
     }
 }
@@ -925,6 +927,23 @@ mod tests {
             })
         ));
         assert_eq!(entries[8].index, Some(3));
+    }
+
+    #[test]
+    // Defends: Ghostty/Kitty's second transparent background key maps to Rio's transparent-background slot.
+    fn kitty_color_parses_second_transparent_background_key() {
+        let entries = parse_kitty_color_entries(&[
+            b"21".as_slice(),
+            b"second_transparent_background=?".as_slice(),
+        ])
+        .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(entries[0].spec, KittyColorSpec::Query));
+        assert_eq!(
+            entries[0].index,
+            Some(NamedColor::TransparentBackground as usize)
+        );
     }
 
     #[test]

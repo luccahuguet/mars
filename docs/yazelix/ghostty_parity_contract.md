@@ -121,6 +121,9 @@ Required:
 - OSC 52 clipboard read/write policy with visible, secure failure behavior
 - dynamic colors for foreground, background, cursor, and palette
   set/query/reset, including Kitty OSC 21 keyed color control
+- OSC 21 `visual_bell` renders a visual bell overlay, and
+  `second_transparent_background` participates in transparent-window background
+  composition without overriding configured background images
 - OSC 9/777 notifications and OSC 9;4 progress reporting, gated by sane user
   policy
 - OSC 22 mouse pointer shape where supported by the platform
