@@ -255,6 +255,34 @@ impl<T: GridSquare + Default + PartialEq + Clone> Grid<T> {
         }
     }
 
+    #[inline]
+    pub fn unscroll_from_history(&mut self, region: &Range<Line>, positions: usize) {
+        let positions = min(positions, (region.end - region.start).0 as usize);
+        if positions == 0 {
+            return;
+        }
+
+        let full_screen = region.start == Line(0) && region.end.0 == self.lines as i32;
+        if !full_screen || self.history_size() == 0 {
+            self.scroll_down(region, positions);
+            return;
+        }
+
+        let history_lines = min(positions, self.history_size());
+        self.raw.rotate_down(history_lines);
+        self.decrease_scroll_limit(history_lines);
+
+        let blank_lines = positions - history_lines;
+        if blank_lines > 0 {
+            self.scroll_down(region, blank_lines);
+            return;
+        }
+
+        for i in (region.start.0..region.end.0).map(Line::from) {
+            self.raw[i].dirty = true;
+        }
+    }
+
     pub fn cursor_square(&mut self) -> &mut T {
         let pos = &self.cursor.pos;
         &mut self.raw[pos.row][pos.col]

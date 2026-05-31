@@ -2,6 +2,8 @@
 // https://github.com/alacritty/alacritty/blob/e35e5ad14fce8456afdd89f2b392b9924bb27471/alacritty_terminal/src/grid/tests.rs
 // which is licensed under Apache 2.0 license.
 
+// Test lane: default
+
 use super::*;
 
 use crate::crosswords::square::Square;
@@ -110,6 +112,63 @@ fn scroll_down_with_history() {
     assert_eq!(grid[Line(8)].occ, 1);
     assert_eq!(grid[Line(9)][Column(0)], 7);
     assert_eq!(grid[Line(9)].occ, 1);
+}
+
+// Defends: Kitty CSI n + T pulls the most recent scrollback lines into the viewport.
+#[test]
+fn unscroll_from_history_pulls_scrollback_into_viewport() {
+    let mut grid = Grid::<usize>::new(3, 1, 2);
+    grid.raw.initialize(2, 1);
+    grid[Line(-2)][Column(0)] = 10;
+    grid[Line(-1)][Column(0)] = 11;
+    grid[Line(0)][Column(0)] = 1;
+    grid[Line(1)][Column(0)] = 2;
+    grid[Line(2)][Column(0)] = 3;
+
+    grid.unscroll_from_history(&(Line(0)..Line(3)), 2);
+
+    assert_eq!(grid.history_size(), 0);
+    assert_eq!(grid[Line(0)][Column(0)], 10);
+    assert_eq!(grid[Line(1)][Column(0)], 11);
+    assert_eq!(grid[Line(2)][Column(0)], 1);
+}
+
+// Defends: unscroll falls back to blank top lines when scrollback has fewer rows than requested.
+#[test]
+fn unscroll_blanks_missing_lines_before_history() {
+    let mut grid = Grid::<usize>::new(3, 1, 1);
+    grid.raw.initialize(1, 1);
+    grid[Line(-1)][Column(0)] = 9;
+    grid[Line(0)][Column(0)] = 1;
+    grid[Line(1)][Column(0)] = 2;
+    grid[Line(2)][Column(0)] = 3;
+
+    grid.unscroll_from_history(&(Line(0)..Line(3)), 2);
+
+    assert_eq!(grid.history_size(), 0);
+    assert_eq!(grid[Line(0)][Column(0)], 0);
+    assert_eq!(grid[Line(0)].occ, 0);
+    assert_eq!(grid[Line(1)][Column(0)], 9);
+    assert_eq!(grid[Line(2)][Column(0)], 1);
+}
+
+// Defends: non-full-screen SD+ keeps the ordinary blank-scroll behavior.
+#[test]
+fn unscroll_partial_region_does_not_consume_scrollback() {
+    let mut grid = Grid::<usize>::new(3, 1, 1);
+    grid.raw.initialize(1, 1);
+    grid[Line(-1)][Column(0)] = 9;
+    grid[Line(0)][Column(0)] = 1;
+    grid[Line(1)][Column(0)] = 2;
+    grid[Line(2)][Column(0)] = 3;
+
+    grid.unscroll_from_history(&(Line(1)..Line(3)), 1);
+
+    assert_eq!(grid.history_size(), 1);
+    assert_eq!(grid[Line(0)][Column(0)], 1);
+    assert_eq!(grid[Line(1)][Column(0)], 0);
+    assert_eq!(grid[Line(1)].occ, 0);
+    assert_eq!(grid[Line(2)][Column(0)], 2);
 }
 
 // Test that GridIterator works.

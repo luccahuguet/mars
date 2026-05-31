@@ -2801,6 +2801,41 @@ impl<U: EventListener> Handler for Crosswords<U> {
     }
 
     #[inline]
+    fn unscroll(&mut self, lines: usize) {
+        if self.mode.contains(Mode::ALT_SCREEN) {
+            self.scroll_down(lines);
+            return;
+        }
+
+        let origin = self.scroll_region.start;
+        let lines = std::cmp::min(
+            lines,
+            (self.scroll_region.end - self.scroll_region.start).0 as usize,
+        );
+        let lines = std::cmp::min(lines, (self.scroll_region.end - origin).0 as usize);
+        if lines == 0 {
+            return;
+        }
+
+        let region = origin..self.scroll_region.end;
+        self.selection = self
+            .selection
+            .take()
+            .and_then(|s| s.rotate(&self.grid, &region, -(lines as i32)));
+
+        let line = &mut self.vi_mode_cursor.pos.row;
+        if region.start <= *line && region.end > *line {
+            *line = std::cmp::min(*line + lines, region.end - 1);
+        }
+
+        self.grid.unscroll_from_history(&region, lines);
+        self.mark_fully_damaged();
+        if !self.graphics.kitty_placements.is_empty() {
+            self.graphics.kitty_graphics_dirty = true;
+        }
+    }
+
+    #[inline]
     fn insert_blank_lines(&mut self, lines: usize) {
         let origin = self.grid.cursor.pos.row;
         if self.scroll_region.contains(&origin) {
@@ -5759,6 +5794,31 @@ mod tests {
         assert_eq!(cw.grid[Line(8)].occ, 0);
         assert_eq!(cw.grid[Line(9)][Column(0)].c(), '\0'); // was 1.
         assert_eq!(cw.grid[Line(9)].occ, 0);
+    }
+
+    #[test]
+    // Defends: Kitty CSI n + T dispatches to unscroll and fills the viewport from scrollback.
+    fn kitty_unscroll_csi_pulls_scrollback_lines() {
+        use crate::performer::handler::Processor;
+
+        let size = CrosswordsSize::new(1, 3);
+        let window_id = crate::event::WindowId::from(0);
+        let mut cw =
+            Crosswords::new(size, CursorShape::Block, VoidListener {}, window_id, 0, 10);
+        cw.grid.raw.initialize(2, cw.grid.columns());
+        cw.grid[Line(-2)][Column(0)].set_c('h');
+        cw.grid[Line(-1)][Column(0)].set_c('i');
+        cw.grid[Line(0)][Column(0)].set_c('a');
+        cw.grid[Line(1)][Column(0)].set_c('b');
+        cw.grid[Line(2)][Column(0)].set_c('c');
+
+        let mut processor = Processor::default();
+        processor.advance(&mut cw, b"\x1b[2+T");
+
+        assert_eq!(cw.history_size(), 0);
+        assert_eq!(cw.grid[Line(0)][Column(0)].c(), 'h');
+        assert_eq!(cw.grid[Line(1)][Column(0)].c(), 'i');
+        assert_eq!(cw.grid[Line(2)][Column(0)].c(), 'a');
     }
 
     #[test]

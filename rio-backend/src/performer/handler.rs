@@ -325,6 +325,11 @@ pub trait Handler {
     /// Scroll down `rows` rows.
     fn scroll_down(&mut self, _: usize) {}
 
+    /// Scroll down `rows` rows, filling from scrollback when possible.
+    fn unscroll(&mut self, rows: usize) {
+        self.scroll_down(rows)
+    }
+
     /// Insert `count` blank lines.
     fn insert_blank_lines(&mut self, _: usize) {}
 
@@ -1557,6 +1562,7 @@ impl<U: Handler> Perform for Performer<'_, U> {
             }
             ('s', []) => handler.save_cursor_position(),
             ('T', []) => handler.scroll_down(next_param_or(1) as usize),
+            ('T', [b'+']) => handler.unscroll(next_param_or(1) as usize),
             ('t', []) => match next_param_or(1) as usize {
                 14 => handler.text_area_size_pixels(),
                 16 => handler.cells_size_pixels(),

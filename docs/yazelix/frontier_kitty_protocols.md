@@ -164,6 +164,13 @@ Scope:
 - Fall back to blank lines on alternate screen or empty scrollback
 - Add focused scrollback regression tests
 
+Result:
+
+- Implemented in the experiment branch for primary-screen full-screen regions
+- Non-full-screen regions and alternate screen intentionally fall back to ordinary
+  blank `SD` behavior
+- The conformance harness includes `kitty_unscroll_three_lines`
+
 ### Kitty DECCARA Extension
 
 Why: arbitrary-region SGR styling is a useful modern screen mutation primitive

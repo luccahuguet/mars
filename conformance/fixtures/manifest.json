@@ -82,6 +82,14 @@
       "hex": "1b5b3e31751b5b3d383b32751b5b3f751b5b3c751b5b3f75"
     },
     {
+      "id": "kitty_unscroll_three_lines",
+      "tier": "should",
+      "protocol": "Kitty unscroll",
+      "description": "Request three lines of Kitty unscrolling with CSI 3 + T.",
+      "source": "Kitty unscrolling protocol uses CSI n + T to pan down while filling from scrollback.",
+      "hex": "1b5b332b54"
+    },
+    {
       "id": "kitty_graphics_1x1_rgba",
       "tier": "must",
       "protocol": "Kitty graphics",
