@@ -72,13 +72,6 @@ mod tests {
         assert!((color.b - 0.3).abs() < 0.000001);
         assert!((color.a - 0.42).abs() < 0.000001);
     }
-
-    #[test]
-    // Regression: game render strategy must not rebuild every terminal row every frame.
-    fn game_mode_alone_does_not_force_full_damage() {
-        assert!(!force_full_damage_for_frame(false, true));
-        assert!(force_full_damage_for_frame(true, true));
-    }
 }
 
 fn visual_bell_alpha_for_elapsed(elapsed: Duration) -> Option<f32> {
@@ -99,18 +92,6 @@ fn color_array_to_sugarloaf_color(
         b: color[2] as f64,
         a: alpha as f64,
     }
-}
-
-#[inline]
-fn force_full_damage_for_frame(
-    has_active_changed: bool,
-    _is_game_mode_enabled: bool,
-) -> bool {
-    // Game mode is an event-loop wake strategy. It keeps Wayland/COSMIC
-    // desktop launches responsive, but terminal damage still has to come from
-    // actual terminal/UI state; otherwise multiplexers rebuild every visible
-    // row on each scheduled frame.
-    has_active_changed
 }
 
 pub struct Renderer {
@@ -445,10 +426,7 @@ impl Renderer {
                     context.renderable_content.cursor.content_ref;
             }
 
-            let force_full_damage = force_full_damage_for_frame(
-                has_active_changed,
-                self.is_game_mode_enabled,
-            );
+            let force_full_damage = has_active_changed || self.is_game_mode_enabled;
 
             let is_dirty = context.renderable_content.pending_update.is_dirty();
 
