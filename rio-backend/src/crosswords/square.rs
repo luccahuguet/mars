@@ -140,6 +140,9 @@ bitflags! {
         const HYPERLINK        = 1 << 2;
  /// Cell carries multi-codepoint grapheme cluster. Lookup via extras_id.
         const GRAPHEME         = 1 << 3;
+ /// Cell is the top-left anchor of a Kitty OSC 66 sized-text block.
+ /// Lookup via extras_id.
+        const TEXT_SIZING      = 1 << 4;
     }
 }
 
@@ -195,6 +198,23 @@ impl HyperlinkInner {
 /// Index into `Grid::extras_table`. `0` means "no extras".
 pub type ExtrasId = u16;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextSizingAlignment {
+    Start,
+    End,
+    Center,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextSizingExtra {
+    pub text: Arc<str>,
+    pub occupied_width: u16,
+    pub scale: u8,
+    pub fractional_scale: Option<(u8, u8)>,
+    pub vertical_align: TextSizingAlignment,
+    pub horizontal_align: TextSizingAlignment,
+}
+
 /// Storage for the rare per-cell data that used to live inside `CellExtra`.
 /// Allocated only for cells that need it; pooled in a `Vec` on the grid.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -202,12 +222,16 @@ pub struct Extras {
     pub zerowidth: Vec<char>,
     pub hyperlink: Option<Hyperlink>,
     pub graphic: Option<crate::ansi::graphics::GraphicsCell>,
+    pub text_sizing: Option<TextSizingExtra>,
 }
 
 impl Extras {
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.zerowidth.is_empty() && self.hyperlink.is_none() && self.graphic.is_none()
+        self.zerowidth.is_empty()
+            && self.hyperlink.is_none()
+            && self.graphic.is_none()
+            && self.text_sizing.is_none()
     }
 }
 
@@ -458,6 +482,11 @@ impl Square {
     #[inline]
     pub fn has_graphics(self) -> bool {
         self.contains_cell_flag(CellFlags::GRAPHICS)
+    }
+
+    #[inline]
+    pub fn has_text_sizing(self) -> bool {
+        self.contains_cell_flag(CellFlags::TEXT_SIZING)
     }
 }
 

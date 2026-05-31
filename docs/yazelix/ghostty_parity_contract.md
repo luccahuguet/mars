@@ -147,7 +147,9 @@ The current experimental command surface is documented in
 These are expected before calling the fork release-quality, but they should not
 block the first cursor-shader proof:
 
-- Kitty OSC 66 text sizing
+- Kitty OSC 66 text sizing visual rendering is implemented for scaled and
+  fractional text; full multicell overwrite/editing semantics remain follow-up
+  work
 - parser fixtures copied from observed Ghostty/WezTerm/Kitty behavior where
   licensing allows
 - fuzzing or property coverage for escape sequence parsers

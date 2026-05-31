@@ -28,7 +28,9 @@ use rio_backend::config::colors::{AnsiColor, ColorArray, NamedColor};
 use rio_backend::crosswords::grid::row::Row;
 use rio_backend::crosswords::pos::{Column, Line, Pos};
 use rio_backend::crosswords::search::Match;
-use rio_backend::crosswords::square::{ContentTag, Extras, Square};
+use rio_backend::crosswords::square::{
+    ContentTag, Extras, Square, TextSizingAlignment, TextSizingExtra,
+};
 use rio_backend::crosswords::style::{Style, StyleFlags};
 use rio_backend::selection::SelectionRange;
 use rustc_hash::FxHashMap;
@@ -1364,6 +1366,203 @@ fn is_skipped_spacer(sq: Square) -> bool {
     matches!(sq.wide(), Wide::Spacer | Wide::LeadingSpacer)
 }
 
+#[inline]
+fn text_sizing_payload<'a>(
+    extras_table: &'a ExtrasMap,
+    sq: Square,
+) -> Option<&'a TextSizingExtra> {
+    if !sq.has_text_sizing() {
+        return None;
+    }
+    let id = sq.extras_id()?;
+    extras_table.get(&id)?.text_sizing.as_ref()
+}
+
+#[inline]
+fn text_sizing_fraction(sizing: &TextSizingExtra) -> f32 {
+    let Some((numerator, denominator)) = sizing.fractional_scale else {
+        return 1.0;
+    };
+    if numerator == 0 || denominator == 0 || numerator >= denominator {
+        return 1.0;
+    }
+    (numerator as f32 / denominator as f32).clamp(0.05, 1.0)
+}
+
+#[inline]
+fn text_sizing_font_multiplier(sizing: &TextSizingExtra) -> f32 {
+    (sizing.scale.max(1) as f32 * text_sizing_fraction(sizing)).max(0.05)
+}
+
+#[inline]
+fn text_sizing_align_offset(space_px: f32, align: TextSizingAlignment) -> f32 {
+    match align {
+        TextSizingAlignment::Start => 0.0,
+        TextSizingAlignment::End => space_px.max(0.0),
+        TextSizingAlignment::Center => (space_px.max(0.0) / 2.0).round(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn text_sizing_cell_color(
+    sq: Square,
+    x: usize,
+    style_table: &[Style],
+    renderer: &Renderer,
+    term_colors: &TermColors,
+    row_sel: Option<RowSelection>,
+    row_hints: &[RowHint],
+) -> [u8; 4] {
+    let style = resolve_style(style_table, sq);
+    let is_sel = cell_in_row_sel(row_sel, x as u16);
+    let hint_tag = if is_sel {
+        None
+    } else {
+        cell_in_row_hints(row_hints, x as u16)
+    };
+
+    if is_sel {
+        cell_fg_selected(sq, style, renderer, term_colors)
+    } else if let Some(tag) = hint_tag {
+        cell_fg_hinted(tag, renderer)
+    } else {
+        cell_fg(sq, style, renderer, term_colors)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_sized_text(
+    sizing: &TextSizingExtra,
+    sq: Square,
+    x: usize,
+    y: u16,
+    style_table: &[Style],
+    renderer: &Renderer,
+    term_colors: &TermColors,
+    rasterizer: &mut GridGlyphRasterizer,
+    grid: &mut GridRenderer,
+    size_px: f32,
+    cell_w: f32,
+    cell_h: f32,
+    row_sel: Option<RowSelection>,
+    row_hints: &[RowHint],
+    font_library: &FontLibrary,
+    route_id: usize,
+    fg_scratch: &mut Vec<CellText>,
+) {
+    if sizing.text.is_empty() {
+        return;
+    }
+
+    let run_style_flags =
+        (resolve_style(style_table, sq).flags.bits() & SHAPING_FLAG_MASK) as u8;
+    let first_ch = sizing.text.chars().next().unwrap_or(' ');
+    let (font_id, is_emoji) =
+        rasterizer.resolve_font(first_ch, run_style_flags, font_library, route_id);
+
+    let scaled_size_px = (size_px * text_sizing_font_multiplier(sizing))
+        .round()
+        .clamp(1.0, u16::MAX as f32);
+    let size_bucket = (scaled_size_px * 4.0).round().clamp(0.0, u16::MAX as f32) as u16;
+    let size_u16 = scaled_size_px.clamp(1.0, u16::MAX as f32) as u16;
+
+    #[cfg(target_os = "macos")]
+    {
+        rasterizer.run_utf16_scratch.clear();
+        for ch in sizing.text.chars() {
+            let mut buf = [0u16; 2];
+            rasterizer
+                .run_utf16_scratch
+                .extend_from_slice(ch.encode_utf16(&mut buf));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        rasterizer.run_str_scratch.clear();
+        rasterizer.run_str_scratch.push_str(&sizing.text);
+    }
+
+    #[cfg(target_os = "macos")]
+    let shaped_opt =
+        shape_run_ct(rasterizer, font_id, size_u16, size_bucket, font_library);
+    #[cfg(not(target_os = "macos"))]
+    let shaped_opt =
+        shape_run_swash(rasterizer, font_id, size_u16, size_bucket, font_library);
+    let Some((glyphs, ascent_px)) = shaped_opt else {
+        return;
+    };
+
+    let (synthetic_bold, synthetic_italic) =
+        rasterizer.get_synthesis(font_id, font_library);
+    let color = text_sizing_cell_color(
+        sq,
+        x,
+        style_table,
+        renderer,
+        term_colors,
+        row_sel,
+        row_hints,
+    );
+
+    let fraction = text_sizing_fraction(sizing);
+    let block_w = cell_w * sizing.occupied_width.max(1) as f32;
+    let block_h = cell_h * sizing.scale.max(1) as f32;
+    let align_x =
+        text_sizing_align_offset(block_w * (1.0 - fraction), sizing.horizontal_align);
+    let align_y =
+        text_sizing_align_offset(block_h * (1.0 - fraction), sizing.vertical_align);
+
+    let mut pen_x = align_x;
+    for glyph in glyphs {
+        let Some((_, slot, is_color)) = ensure_glyph_by_id(
+            rasterizer,
+            grid,
+            font_id,
+            glyph.id,
+            size_bucket,
+            size_u16,
+            cell_h,
+            ascent_px,
+            is_emoji,
+            synthetic_italic,
+            synthetic_bold,
+        ) else {
+            pen_x += glyph.advance;
+            continue;
+        };
+        if slot.w == 0 || slot.h == 0 {
+            pen_x += glyph.advance;
+            continue;
+        }
+
+        let (atlas, color) = if is_color {
+            (CellText::ATLAS_COLOR, [255, 255, 255, 255])
+        } else {
+            (CellText::ATLAS_GRAYSCALE, color)
+        };
+        let bearing_x = (slot.bearing_x as f32 + pen_x + glyph.x)
+            .round()
+            .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+        let bearing_y = (slot.bearing_y as f32 - align_y - glyph.y.max(0.0))
+            .round()
+            .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+
+        fg_scratch.push(CellText {
+            glyph_pos: [slot.x as u32, slot.y as u32],
+            glyph_size: [slot.w as u32, slot.h as u32],
+            bearings: [bearing_x, bearing_y],
+            grid_pos: [x as u16, y],
+            color,
+            atlas,
+            bools: 0,
+            page: slot.page,
+            _pad: 0,
+        });
+
+        pen_x += glyph.advance;
+    }
+}
+
 /// Lookup. Hash → bucket; scan from most-recent; rotate on hit. No
 /// secondary comparison — we trust the 64-bit rapidhash to be
 /// collision-free across realistic workloads. Matches
@@ -1606,6 +1805,29 @@ pub fn build_row_fg(
             x += 1;
             continue;
         }
+        if let Some(sizing) = text_sizing_payload(extras_table, sq) {
+            emit_sized_text(
+                sizing,
+                sq,
+                x,
+                y,
+                style_table,
+                renderer,
+                term_colors,
+                rasterizer,
+                grid,
+                size_px,
+                cell_w,
+                cell_h,
+                row_sel,
+                row_hints,
+                font_library,
+                route_id,
+                fg_scratch,
+            );
+            x = x.saturating_add(usize::from(sizing.occupied_width.max(1)));
+            continue;
+        }
 
         // Open a run at x.
         let ch = sq.c();
@@ -1813,6 +2035,9 @@ pub fn build_row_fg(
             if is_skipped_spacer(sq2) {
                 end += 1;
                 continue;
+            }
+            if sq2.has_text_sizing() {
+                break;
             }
             // Built-in drawable sprites are emitted one cell at a time by
             // the per-cell hook above; they must not be swallowed into a

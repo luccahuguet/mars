@@ -40,13 +40,13 @@ use crate::clipboard::ClipboardType;
 use crate::config::colors::{self, ColorRgb};
 use crate::crosswords::colors::term::TermColors;
 use crate::crosswords::grid::{Dimensions, Grid, Scroll};
-use crate::crosswords::square::{CellFlags, Wide};
+use crate::crosswords::square::{CellFlags, TextSizingAlignment, TextSizingExtra, Wide};
 use crate::event::WindowId;
 use crate::event::{EventListener, RioEvent, TerminalDamage};
 use crate::performer::handler::{
     Handler, KittyClipboard, KittyClipboardLocation, KittyClipboardOperation,
     KittyNotification, KittyNotificationKind, SemanticPrompt, SemanticPromptAction,
-    SemanticPromptKind, TextSizing,
+    SemanticPromptKind, TextSizing, TextSizingAlign,
 };
 use crate::performer::parser::Params;
 use crate::selection::{Selection, SelectionRange, SelectionType};
@@ -1188,6 +1188,42 @@ impl<U: EventListener> Crosswords<U> {
                 self.grid.cursor.should_wrap = true;
             }
         }
+    }
+
+    fn text_sizing_alignment(align: TextSizingAlign) -> TextSizingAlignment {
+        match align {
+            TextSizingAlign::Start => TextSizingAlignment::Start,
+            TextSizingAlign::End => TextSizingAlignment::End,
+            TextSizingAlign::Center => TextSizingAlignment::Center,
+        }
+    }
+
+    fn set_text_sizing_anchor(
+        &mut self,
+        pos: Pos,
+        sizing: TextSizing,
+        occupied_width: usize,
+    ) {
+        let occupied_width = occupied_width.min(u16::MAX as usize) as u16;
+        let mut extras = self.grid[pos.row][pos.col]
+            .extras_id()
+            .and_then(|id| self.grid.extras_table.get(id).cloned())
+            .unwrap_or_default();
+
+        extras.text_sizing = Some(TextSizingExtra {
+            text: Arc::<str>::from(sizing.text),
+            occupied_width,
+            scale: sizing.scale,
+            fractional_scale: sizing.fractional_scale,
+            vertical_align: Self::text_sizing_alignment(sizing.vertical_align),
+            horizontal_align: Self::text_sizing_alignment(sizing.horizontal_align),
+        });
+
+        let id = self.grid.extras_table.alloc(extras);
+        let cell = &mut self.grid[pos.row][pos.col];
+        cell.set_extras_id(Some(id));
+        cell.insert_cell_flag(CellFlags::TEXT_SIZING);
+        self.grid[pos.row].has_extras = true;
     }
 
     fn push_zerowidth_to_cursor_cell(&mut self, c: char) {
@@ -3921,7 +3957,9 @@ impl<U: EventListener> Handler for Crosswords<U> {
         let Some(width) = self.text_sizing_width(&sizing) else {
             return;
         };
+        let anchor = self.grid.cursor.pos;
         self.input_text_sized_to_width(&sizing.text, width);
+        self.set_text_sizing_anchor(anchor, sizing, width);
     }
 
     #[inline]
@@ -6132,6 +6170,38 @@ mod tests {
         Handler::input_sized_text(&mut term, sizing);
 
         assert_eq!(term.grid.cursor.pos, Pos::new(Line(0), Column(2)));
+    }
+
+    #[test]
+    // Defends: OSC 66 visual metadata is carried through the packed-cell side table without growing Square.
+    fn text_sizing_stores_render_metadata_on_anchor_cell() {
+        let mut term = make_crosswords();
+        let mut sizing = TextSizing::new("ab".to_string());
+        sizing.scale = 2;
+        sizing.fractional_scale = Some((1, 2));
+        sizing.horizontal_align = TextSizingAlign::Center;
+        sizing.vertical_align = TextSizingAlign::End;
+
+        Handler::input_sized_text(&mut term, sizing);
+
+        let cell = term.grid[Line(0)][Column(0)];
+        assert!(cell.has_text_sizing());
+        let extras = term
+            .grid
+            .extras_table
+            .get(cell.extras_id().expect("anchor should carry extras"))
+            .expect("anchor extras should be live");
+        let text_sizing = extras
+            .text_sizing
+            .as_ref()
+            .expect("anchor should carry text sizing metadata");
+
+        assert_eq!(&*text_sizing.text, "ab");
+        assert_eq!(text_sizing.occupied_width, 4);
+        assert_eq!(text_sizing.scale, 2);
+        assert_eq!(text_sizing.fractional_scale, Some((1, 2)));
+        assert_eq!(text_sizing.horizontal_align, TextSizingAlignment::Center);
+        assert_eq!(text_sizing.vertical_align, TextSizingAlignment::End);
     }
 
     #[test]

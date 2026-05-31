@@ -30,7 +30,8 @@ Already implemented or partially validated in Yazelix-terminal:
 - Kitty keyboard protocol mode stack and CSI-u emission paths
 - Kitty keyboard all-flags and stack fixture streams in the conformance harness
 - Sixel and iTerm2 inline image paths through the renderer
-- OSC 66 parser and cell-width behavior
+- OSC 66 parser, cell-width behavior, and first visual rendering path for
+  scaled/fractional text
 - OSC 99 notification parsing/display, support query replies, alive query
   replies, and untracked close replies
 - OSC 133 semantic prompt regions, prompt navigation, and output selection
@@ -57,6 +58,9 @@ Important gaps found during this audit:
   reverse-video text color handling and multi-cursor Ghostty shader uniforms.
   The checked Ghostty source does not appear to implement the protocol, so this
   remains modern Kitty-frontier work rather than strict Ghostty parity.
+- OSC 66 still needs the full Kitty multicell overwrite/editing semantics
+  around ICH/DCH/ECH/EL/IL/DL and multi-row block erasure. The current renderer
+  draws the anchored sized text visually without growing the packed cell.
 - Kitty file transfer and OSC 72 drag/drop are absent. Both cross a security and
   OS-integration boundary and should not be treated as parser-only work.
 
@@ -131,7 +135,6 @@ Scope:
 
 These already have beads and should stay ahead of new frontier features:
 
-- Render OSC 66 scale and fractional text visually
 - Fix the WGPU Vulkan surface issue on this COSMIC/NVIDIA setup, or clearly
   scope GL as the supported validation renderer for now
 
