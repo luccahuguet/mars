@@ -18,6 +18,19 @@ Validate fixture manifest bytes and the Ghostty cursor shader probe:
 python3 tools/yazelix_conformance.py verify
 ```
 
+List Kitty keyboard black-box capture cases:
+
+```text
+python3 tools/yazelix_conformance.py keyboard-list
+```
+
+Capture and verify terminal keyboard bytes for Rio, Ghostty, or Kitty:
+
+```text
+python3 tools/yazelix_conformance.py keyboard-capture --terminal rio
+python3 tools/yazelix_conformance.py keyboard-verify-capture artifacts/conformance/keyboard_captures/rio.json --require-all
+```
+
 Emit one fixture byte stream to a terminal or file:
 
 ```text
@@ -87,6 +100,7 @@ The first manifest covers:
 - Kitty keyboard mode query
 - Kitty keyboard all-flags query
 - Kitty keyboard stack push/union/pop/query stream
+- Kitty keyboard black-box key-event case matrix
 - Kitty graphics 1x1 RGBA transmit/place
 - minimal Sixel DCS path
 - synchronized output DECSET 2026
@@ -96,6 +110,10 @@ The first manifest covers:
 The fixtures are not proof that Rio supports every protocol correctly. They are
 stable byte streams that future beads can feed into Rio, Ghostty, WezTerm, or
 black-box probes and compare against expected behavior.
+
+The Kitty keyboard black-box matrix is separate from `manifest.json` because it
+is a manual capture protocol, not a byte stream sent to the terminal. It is
+documented in `docs/yazelix/kitty_keyboard_blackbox.md`.
 
 ## Shader Probe
 

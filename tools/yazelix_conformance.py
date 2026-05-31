@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import select
 import subprocess
 import sys
 import time
@@ -17,6 +18,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "conformance" / "fixtures" / "manifest.json"
+KEYBOARD_MANIFEST = ROOT / "conformance" / "fixtures" / "kitty_keyboard_blackbox.json"
 DEFAULT_ENV_OUTPUT = ROOT / "artifacts" / "conformance" / "env.json"
 DEFAULT_SCREENSHOT_DIR = ROOT / "artifacts" / "conformance" / "screenshots"
 DEFAULT_CPU_CONFIG = ROOT / "artifacts" / "conformance" / "rio_cpu_config"
@@ -32,6 +34,14 @@ def load_manifest() -> dict[str, Any]:
     return manifest
 
 
+def load_keyboard_manifest() -> dict[str, Any]:
+    with KEYBOARD_MANIFEST.open("r", encoding="utf-8") as manifest_file:
+        manifest = json.load(manifest_file)
+    if manifest.get("version") != 1:
+        raise SystemExit(f"unsupported keyboard manifest version in {KEYBOARD_MANIFEST}")
+    return manifest
+
+
 def fixture_bytes(fixture: dict[str, Any]) -> bytes:
     try:
         return bytes.fromhex(fixture["hex"])
@@ -39,8 +49,73 @@ def fixture_bytes(fixture: dict[str, Any]) -> bytes:
         raise SystemExit(f"fixture {fixture.get('id')} has invalid hex: {err}") from err
 
 
+def hex_bytes(value: str, context: str) -> bytes:
+    try:
+        return bytes.fromhex(value)
+    except ValueError as err:
+        raise SystemExit(f"{context} has invalid hex: {err}") from err
+
+
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def keyboard_cases_by_id(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    cases: dict[str, dict[str, Any]] = {}
+    for case in manifest.get("cases", []):
+        case_id = case.get("id")
+        if not case_id:
+            raise SystemExit("keyboard case missing id")
+        if case_id in cases:
+            raise SystemExit(f"duplicate keyboard case id: {case_id}")
+        cases[case_id] = case
+    return cases
+
+
+def expected_keyboard_fragments(case: dict[str, Any]) -> list[bytes]:
+    expect = case.get("expect", {})
+    mode = expect.get("mode")
+    if mode == "exact":
+        return [hex_bytes(expect.get("hex", ""), f"keyboard case {case['id']} expected hex")]
+    if mode == "contains":
+        fragments = expect.get("fragments", [])
+        if not fragments:
+            raise SystemExit(f"keyboard case {case['id']} has no expected fragments")
+        return [
+            hex_bytes(fragment, f"keyboard case {case['id']} expected fragment")
+            for fragment in fragments
+        ]
+    raise SystemExit(f"keyboard case {case['id']} has unsupported expectation mode: {mode}")
+
+
+def keyboard_capture_matches(case: dict[str, Any], captured: bytes) -> bool:
+    expect = case["expect"]
+    fragments = expected_keyboard_fragments(case)
+    if expect["mode"] == "exact":
+        return captured == fragments[0]
+
+    cursor = 0
+    for fragment in fragments:
+        offset = captured.find(fragment, cursor)
+        if offset == -1:
+            return False
+        cursor = offset + len(fragment)
+    return True
+
+
+def validate_keyboard_manifest() -> None:
+    manifest = load_keyboard_manifest()
+    cleanup = hex_bytes(manifest.get("cleanup_hex", ""), "keyboard cleanup")
+    if not cleanup:
+        raise SystemExit("keyboard cleanup is empty")
+    for case in keyboard_cases_by_id(manifest).values():
+        setup = hex_bytes(case.get("setup_hex", ""), f"keyboard case {case['id']} setup")
+        if not setup:
+            raise SystemExit(f"keyboard case {case['id']} setup is empty")
+        expected_keyboard_fragments(case)
+        for field in ("tier", "keys", "workflow", "source"):
+            if not case.get(field):
+                raise SystemExit(f"keyboard case {case['id']} missing {field}")
 
 
 def run_capture(argv: list[str]) -> dict[str, Any]:
@@ -117,7 +192,150 @@ def command_verify(_: argparse.Namespace) -> int:
         if required not in shader_text:
             raise SystemExit(f"shader probe missing {required}")
     print(f"ok {shader.relative_to(ROOT)}")
+    validate_keyboard_manifest()
+    print(f"ok {KEYBOARD_MANIFEST.relative_to(ROOT)}")
     return 0
+
+
+def command_keyboard_list(_: argparse.Namespace) -> int:
+    manifest = load_keyboard_manifest()
+    for case in manifest["cases"]:
+        expect = case["expect"]
+        if expect["mode"] == "exact":
+            expectation = expect["hex"]
+        else:
+            expectation = ",".join(expect["fragments"])
+        print(
+            f"{case['id']}\t{case['tier']}\t{case['keys']}\t"
+            f"{expect['mode']}\t{expectation}"
+        )
+    return 0
+
+
+def selected_keyboard_cases(
+    manifest: dict[str, Any],
+    selected_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    cases = keyboard_cases_by_id(manifest)
+    if not selected_ids:
+        return list(cases.values())
+
+    selected: list[dict[str, Any]] = []
+    for case_id in selected_ids:
+        try:
+            selected.append(cases[case_id])
+        except KeyError as err:
+            known = ", ".join(cases)
+            raise SystemExit(f"unknown keyboard case {case_id!r}; known cases: {known}") from err
+    return selected
+
+
+def read_keyboard_capture(timeout_seconds: float, idle_seconds: float) -> bytes:
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    data = bytearray()
+    start = time.monotonic()
+    last_input: float | None = None
+
+    try:
+        tty.setraw(fd)
+        while time.monotonic() - start < timeout_seconds:
+            readable, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if readable:
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break
+                data.extend(chunk)
+                last_input = time.monotonic()
+            elif data and last_input is not None:
+                if time.monotonic() - last_input >= idle_seconds:
+                    break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    return bytes(data)
+
+
+def command_keyboard_capture(args: argparse.Namespace) -> int:
+    manifest = load_keyboard_manifest()
+    cleanup = hex_bytes(manifest["cleanup_hex"], "keyboard cleanup")
+    cases = selected_keyboard_cases(manifest, args.case)
+    output = Path(args.output).expanduser().resolve() if args.output else (
+        ROOT / "artifacts" / "conformance" / "keyboard_captures" / f"{args.terminal}.json"
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "version": 1,
+        "terminal": args.terminal,
+        "timestamp_unix": int(time.time()),
+        "spec": manifest["spec"],
+        "cases": [],
+    }
+
+    for index, case in enumerate(cases, start=1):
+        print(
+            f"[{index}/{len(cases)}] {case['id']}: {case['keys']}\n"
+            f"  {case['workflow']}\n"
+            "  Press Enter to arm capture, then press the requested key sequence.",
+            file=sys.stderr,
+        )
+        input()
+        sys.stdout.buffer.write(hex_bytes(case["setup_hex"], f"keyboard case {case['id']} setup"))
+        sys.stdout.buffer.flush()
+        try:
+            captured = read_keyboard_capture(args.timeout, args.idle_timeout)
+        finally:
+            sys.stdout.buffer.write(cleanup)
+            sys.stdout.buffer.flush()
+        matched = keyboard_capture_matches(case, captured)
+        print(
+            f"  captured {len(captured)} bytes: {captured.hex()} "
+            f"{'ok' if matched else 'mismatch'}",
+            file=sys.stderr,
+        )
+        report["cases"].append(
+            {
+                "id": case["id"],
+                "captured_hex": captured.hex(),
+                "matched": matched,
+            }
+        )
+
+    output.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    print(output)
+    return 0 if all(case["matched"] for case in report["cases"]) else 1
+
+
+def command_keyboard_verify_capture(args: argparse.Namespace) -> int:
+    manifest = load_keyboard_manifest()
+    cases = keyboard_cases_by_id(manifest)
+    capture_path = Path(args.capture).expanduser()
+    report = json.loads(capture_path.read_text(encoding="utf-8"))
+    if report.get("version") != 1:
+        raise SystemExit(f"unsupported capture version in {capture_path}")
+
+    captured_by_id = {
+        capture["id"]: capture
+        for capture in report.get("cases", [])
+        if capture.get("id")
+    }
+    if args.require_all:
+        missing = sorted(set(cases) - set(captured_by_id))
+        if missing:
+            raise SystemExit(f"capture missing keyboard cases: {', '.join(missing)}")
+
+    failed = False
+    for case_id, capture in captured_by_id.items():
+        if case_id not in cases:
+            raise SystemExit(f"capture has unknown keyboard case: {case_id}")
+        data = hex_bytes(capture.get("captured_hex", ""), f"capture {case_id}")
+        matched = keyboard_capture_matches(cases[case_id], data)
+        print(f"{'ok' if matched else 'fail'} {case_id} {len(data)} bytes")
+        failed = failed or not matched
+    return 1 if failed else 0
 
 
 def command_record_env(args: argparse.Namespace) -> int:
@@ -300,6 +518,35 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify_parser = subcommands.add_parser("verify", help="Validate fixtures and shader probe")
     verify_parser.set_defaults(func=command_verify)
+
+    keyboard_list_parser = subcommands.add_parser(
+        "keyboard-list",
+        help="List Kitty keyboard black-box comparison cases",
+    )
+    keyboard_list_parser.set_defaults(func=command_keyboard_list)
+
+    keyboard_capture_parser = subcommands.add_parser(
+        "keyboard-capture",
+        help="Capture Kitty keyboard bytes from the terminal running this command",
+    )
+    keyboard_capture_parser.add_argument("--terminal", required=True)
+    keyboard_capture_parser.add_argument(
+        "--case",
+        action="append",
+        help="Case id to capture; repeat to capture multiple ids",
+    )
+    keyboard_capture_parser.add_argument("--output")
+    keyboard_capture_parser.add_argument("--timeout", default=4.0, type=float)
+    keyboard_capture_parser.add_argument("--idle-timeout", default=0.35, type=float)
+    keyboard_capture_parser.set_defaults(func=command_keyboard_capture)
+
+    keyboard_verify_parser = subcommands.add_parser(
+        "keyboard-verify-capture",
+        help="Verify a keyboard capture JSON report against checked-in expectations",
+    )
+    keyboard_verify_parser.add_argument("capture")
+    keyboard_verify_parser.add_argument("--require-all", action="store_true")
+    keyboard_verify_parser.set_defaults(func=command_keyboard_verify_capture)
 
     env_parser = subcommands.add_parser("record-env", help="Record local version/source evidence")
     env_parser.add_argument("--output", default=str(DEFAULT_ENV_OUTPUT))

@@ -7,6 +7,7 @@ Reviewed on 2026-05-31 against:
 - Frontend dispatch: `frontends/rioterm/src/screen/mod.rs`
 - Backend mode state: `rio-backend/src/ansi/mod.rs`
 - Backend handler state: `rio-backend/src/crosswords/mod.rs`
+- Black-box comparison fixtures: `docs/yazelix/kitty_keyboard_blackbox.md`
 
 The result is strong but not yet parity-complete. The mode bits, query path,
 screen-local stacks, common CSI-u emission, repeat/release emission, associated
@@ -130,5 +131,5 @@ cases:
 - Add full modifier-bit support where platform events expose the needed state
 - Implement base-layout alternate keys from `physical_key`
 - Fill the remaining Kitty functional/keypad private-use mappings
-- Add black-box key-sequence fixtures that compare Rio, Ghostty, and Kitty for
-  the Helix/Yazi/Nushell/Zellij key combinations that motivated this audit
+- Run black-box key captures comparing Rio, Ghostty, and Kitty for the checked-in
+  Helix/Yazi/Nushell/Zellij-oriented case matrix
