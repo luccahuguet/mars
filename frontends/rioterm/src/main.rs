@@ -137,8 +137,9 @@ pub fn setup_environment_variables(
     }
 
     std::env::set_var("COLORTERM", "truecolor");
-    std::env::remove_var("DESKTOP_STARTUP_ID");
-    std::env::remove_var("XDG_ACTIVATION_TOKEN");
+    // Keep startup-notification tokens available for RouteWindow::from_target,
+    // which applies them to the first window and clears them before spawning
+    // the child process.
     #[cfg(target_os = "macos")]
     {
         platform::macos::set_locale_environment();
@@ -356,6 +357,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // Test lane: default
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     // Defends: Yazelix mode is explicit and never silently falls back to a host shell.
@@ -400,5 +404,38 @@ mod tests {
                 yazelix_terminal_host: Some("yazelix-terminal"),
             }
         );
+    }
+
+    #[test]
+    // Invariant: Desktop startup tokens survive environment setup so the first Wayland/X11 window can be focused.
+    fn setup_environment_preserves_startup_activation_tokens() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_desktop_startup_id = std::env::var("DESKTOP_STARTUP_ID").ok();
+        let previous_xdg_activation_token = std::env::var("XDG_ACTIVATION_TOKEN").ok();
+
+        std::env::set_var("DESKTOP_STARTUP_ID", "x11-token");
+        std::env::set_var("XDG_ACTIVATION_TOKEN", "wayland-token");
+
+        setup_environment_variables(&rio_backend::config::Config::default(), false);
+
+        assert_eq!(
+            std::env::var("DESKTOP_STARTUP_ID").as_deref(),
+            Ok("x11-token")
+        );
+        assert_eq!(
+            std::env::var("XDG_ACTIVATION_TOKEN").as_deref(),
+            Ok("wayland-token")
+        );
+
+        restore_env("DESKTOP_STARTUP_ID", previous_desktop_startup_id);
+        restore_env("XDG_ACTIVATION_TOKEN", previous_xdg_activation_token);
+    }
+
+    fn restore_env(name: &str, value: Option<String>) {
+        if let Some(value) = value {
+            std::env::set_var(name, value);
+        } else {
+            std::env::remove_var(name);
+        }
     }
 }
