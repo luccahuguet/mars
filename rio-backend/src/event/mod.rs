@@ -143,6 +143,16 @@ pub enum RioEvent {
     /// Request to store a text string in the clipboard.
     ClipboardStore(ClipboardType, String),
 
+    /// Request to store text and reply to the originating PTY after the
+    /// frontend clipboard policy accepts or denies the write.
+    ClipboardStoreWithReply {
+        route_id: usize,
+        clipboard_type: ClipboardType,
+        content: String,
+        success_reply: String,
+        denied_reply: String,
+    },
+
     /// Request to write the contents of the clipboard to the PTY.
     ///
     /// `route_id` identifies the panel that emitted the request so
@@ -154,6 +164,15 @@ pub enum RioEvent {
         usize,
         ClipboardType,
         Arc<dyn Fn(&str) -> String + Sync + Send + 'static>,
+    ),
+
+    /// Request to load clipboard text with an explicit denial response for
+    /// permission or focus-policy failures.
+    ClipboardLoadWithReply(
+        usize,
+        ClipboardType,
+        Arc<dyn Fn(&str) -> String + Sync + Send + 'static>,
+        String,
     ),
 
     /// Request to write the RGB value of a color to the PTY.
@@ -230,8 +249,21 @@ impl Debug for RioEvent {
             RioEvent::ClipboardStore(ty, text) => {
                 write!(f, "ClipboardStore({ty:?}, {text})")
             }
+            RioEvent::ClipboardStoreWithReply {
+                route_id,
+                clipboard_type,
+                ..
+            } => {
+                write!(
+                    f,
+                    "ClipboardStoreWithReply(route={route_id}, {clipboard_type:?})"
+                )
+            }
             RioEvent::ClipboardLoad(route_id, ty, _) => {
                 write!(f, "ClipboardLoad(route={route_id}, {ty:?})")
+            }
+            RioEvent::ClipboardLoadWithReply(route_id, ty, _, _) => {
+                write!(f, "ClipboardLoadWithReply(route={route_id}, {ty:?})")
             }
             RioEvent::TextAreaSizeRequest(route_id, _) => {
                 write!(f, "TextAreaSizeRequest(route={route_id})")

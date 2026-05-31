@@ -44,8 +44,9 @@ use crate::crosswords::square::{CellFlags, Wide};
 use crate::event::WindowId;
 use crate::event::{EventListener, RioEvent, TerminalDamage};
 use crate::performer::handler::{
-    Handler, KittyNotification, KittyNotificationKind, SemanticPrompt,
-    SemanticPromptAction, SemanticPromptKind, TextSizing,
+    Handler, KittyClipboard, KittyClipboardLocation, KittyClipboardOperation,
+    KittyNotification, KittyNotificationKind, SemanticPrompt, SemanticPromptAction,
+    SemanticPromptKind, TextSizing,
 };
 use crate::performer::parser::Params;
 use crate::selection::{Selection, SelectionRange, SelectionType};
@@ -79,6 +80,11 @@ pub const MIN_COLUMNS: usize = 2;
 pub const MIN_LINES: usize = 1;
 const OSC52_MAX_ENCODED_BYTES: usize = 2 * 1024 * 1024;
 const OSC52_MAX_DECODED_BYTES: usize = 1024 * 1024;
+const OSC5522_MAX_ENCODED_BYTES: usize = 2 * 1024 * 1024;
+const OSC5522_MAX_DECODED_BYTES: usize = 1024 * 1024;
+const OSC5522_MAX_CHUNK_DECODED_BYTES: usize = 4096;
+const KITTY_CLIPBOARD_TEXT_PLAIN: &[u8] = b"text/plain";
+const KITTY_CLIPBOARD_TEXT_PLAIN_BASE64: &str = "dGV4dC9wbGFpbg==";
 
 // Max. number of graphics stored in a single cell.
 // const MAX_GRAPHICS_PER_CELL: usize = 20;
@@ -99,6 +105,13 @@ impl PendingKittyNotification {
             _ => {}
         }
     }
+}
+
+#[derive(Debug)]
+struct KittyClipboardWriteState {
+    clipboard_type: ClipboardType,
+    text: String,
+    errored: bool,
 }
 
 bitflags! {
@@ -497,6 +510,7 @@ where
     pub current_directory: Option<std::path::PathBuf>,
     kitty_notifications: HashMap<String, PendingKittyNotification>,
     kitty_live_notifications: BTreeSet<String>,
+    kitty_clipboard_write: Option<KittyClipboardWriteState>,
 
     /// Whether a `TerminalDamaged` event is already in flight to the renderer.
     /// Set by PTY thread before sending; cleared by renderer after extracting damage.
@@ -563,6 +577,7 @@ impl<U: EventListener> Crosswords<U> {
             current_directory: None,
             kitty_notifications: HashMap::new(),
             kitty_live_notifications: BTreeSet::new(),
+            kitty_clipboard_write: None,
             damage_event_in_flight: false,
             keyboard_mode_stack: Default::default(),
             keyboard_mode_idx: 0,
@@ -1977,6 +1992,271 @@ impl<U: EventListener> Crosswords<U> {
         }
     }
 
+    fn kitty_clipboard_type(location: KittyClipboardLocation) -> Option<ClipboardType> {
+        match location {
+            KittyClipboardLocation::Clipboard => Some(ClipboardType::Clipboard),
+            KittyClipboardLocation::Selection => Some(ClipboardType::Selection),
+            KittyClipboardLocation::Unsupported => None,
+        }
+    }
+
+    fn kitty_clipboard_reply(operation: &str, status: &str, terminator: &str) -> String {
+        format!("\x1b]5522;type={operation}:status={status}{terminator}")
+    }
+
+    fn kitty_clipboard_read_text_reply(text: &str, terminator: &str) -> String {
+        let mut reply = Self::kitty_clipboard_reply("read", "OK", terminator);
+        let chunks = text.as_bytes().chunks(OSC5522_MAX_CHUNK_DECODED_BYTES);
+        for chunk in chunks {
+            let payload = general_purpose::STANDARD.encode(chunk);
+            reply.push_str(&format!(
+                "\x1b]5522;type=read:status=DATA:mime={KITTY_CLIPBOARD_TEXT_PLAIN_BASE64};{payload}{terminator}"
+            ));
+        }
+        if text.is_empty() {
+            reply.push_str(&format!(
+                "\x1b]5522;type=read:status=DATA:mime={KITTY_CLIPBOARD_TEXT_PLAIN_BASE64};{terminator}"
+            ));
+        }
+        reply.push_str(&Self::kitty_clipboard_reply("read", "DONE", terminator));
+        reply
+    }
+
+    fn kitty_clipboard_mime_list_reply(terminator: &str) -> String {
+        let mut reply = Self::kitty_clipboard_reply("read", "OK", terminator);
+        reply.push_str(&format!(
+            "\x1b]5522;type=read:status=DATA:mime={KITTY_CLIPBOARD_TEXT_PLAIN_BASE64};{KITTY_CLIPBOARD_TEXT_PLAIN_BASE64}{terminator}"
+        ));
+        reply.push_str(&Self::kitty_clipboard_reply("read", "DONE", terminator));
+        reply
+    }
+
+    fn send_kitty_clipboard_status(
+        &mut self,
+        operation: &str,
+        status: &str,
+        terminator: &str,
+    ) {
+        let text = Self::kitty_clipboard_reply(operation, status, terminator);
+        self.event_proxy
+            .send_event(RioEvent::PtyWrite(self.route_id, text), self.window_id);
+    }
+
+    fn decode_kitty_clipboard_base64(&self, encoded: &[u8]) -> Option<Vec<u8>> {
+        if encoded.len() > OSC5522_MAX_ENCODED_BYTES {
+            return None;
+        }
+        let decoded = crate::simd_base64::decode(encoded)?;
+        (decoded.len() <= OSC5522_MAX_DECODED_BYTES).then_some(decoded)
+    }
+
+    fn decode_kitty_clipboard_mime(&self, encoded: &[u8]) -> Option<Vec<u8>> {
+        let mime = self.decode_kitty_clipboard_base64(encoded)?;
+        (!mime.is_empty()).then_some(mime)
+    }
+
+    fn handle_kitty_clipboard_read(
+        &mut self,
+        clipboard: KittyClipboard<'_>,
+        terminator: &str,
+    ) {
+        let Some(clipboard_type) = Self::kitty_clipboard_type(clipboard.location) else {
+            self.send_kitty_clipboard_status("read", "ENOSYS", terminator);
+            return;
+        };
+        let Some(payload) = clipboard.payload else {
+            self.send_kitty_clipboard_status("read", "EINVAL", terminator);
+            return;
+        };
+        let Some(requested) = self.decode_kitty_clipboard_base64(payload) else {
+            self.send_kitty_clipboard_status("read", "EINVAL", terminator);
+            return;
+        };
+
+        if requested == b"." {
+            let text = Self::kitty_clipboard_mime_list_reply(terminator);
+            self.event_proxy
+                .send_event(RioEvent::PtyWrite(self.route_id, text), self.window_id);
+            return;
+        }
+
+        let Ok(requested) = simd_utf8::from_utf8_fast(&requested) else {
+            self.send_kitty_clipboard_status("read", "EINVAL", terminator);
+            return;
+        };
+        if !requested
+            .split_ascii_whitespace()
+            .any(|mime| mime.as_bytes() == KITTY_CLIPBOARD_TEXT_PLAIN)
+        {
+            self.send_kitty_clipboard_status("read", "ENOSYS", terminator);
+            return;
+        }
+
+        let terminator = terminator.to_owned();
+        let denied_reply = Self::kitty_clipboard_reply("read", "EPERM", &terminator);
+        self.event_proxy.send_event(
+            RioEvent::ClipboardLoadWithReply(
+                self.route_id,
+                clipboard_type,
+                Arc::new(move |text| {
+                    Crosswords::<U>::kitty_clipboard_read_text_reply(text, &terminator)
+                }),
+                denied_reply,
+            ),
+            self.window_id,
+        );
+    }
+
+    fn handle_kitty_clipboard_write_start(
+        &mut self,
+        clipboard: KittyClipboard<'_>,
+        terminator: &str,
+    ) {
+        let Some(clipboard_type) = Self::kitty_clipboard_type(clipboard.location) else {
+            self.kitty_clipboard_write = Some(KittyClipboardWriteState {
+                clipboard_type: ClipboardType::Clipboard,
+                text: String::new(),
+                errored: true,
+            });
+            self.send_kitty_clipboard_status("write", "ENOSYS", terminator);
+            return;
+        };
+        self.kitty_clipboard_write = Some(KittyClipboardWriteState {
+            clipboard_type,
+            text: String::new(),
+            errored: false,
+        });
+    }
+
+    fn fail_kitty_clipboard_write(&mut self, status: &str, terminator: &str) {
+        if let Some(state) = &mut self.kitty_clipboard_write {
+            state.errored = true;
+        } else {
+            self.kitty_clipboard_write = Some(KittyClipboardWriteState {
+                clipboard_type: ClipboardType::Clipboard,
+                text: String::new(),
+                errored: true,
+            });
+        }
+        self.send_kitty_clipboard_status("write", status, terminator);
+    }
+
+    fn finish_kitty_clipboard_write(&mut self, terminator: &str) {
+        let Some(state) = self.kitty_clipboard_write.take() else {
+            self.send_kitty_clipboard_status("write", "EINVAL", terminator);
+            return;
+        };
+        if state.errored {
+            return;
+        }
+
+        self.event_proxy.send_event(
+            RioEvent::ClipboardStoreWithReply {
+                route_id: self.route_id,
+                clipboard_type: state.clipboard_type,
+                content: state.text,
+                success_reply: Self::kitty_clipboard_reply("write", "DONE", terminator),
+                denied_reply: Self::kitty_clipboard_reply("write", "EPERM", terminator),
+            },
+            self.window_id,
+        );
+    }
+
+    fn handle_kitty_clipboard_wdata(
+        &mut self,
+        clipboard: KittyClipboard<'_>,
+        terminator: &str,
+    ) {
+        if clipboard.mime.is_none() && clipboard.payload.is_none() {
+            self.finish_kitty_clipboard_write(terminator);
+            return;
+        }
+        let Some(state) = &self.kitty_clipboard_write else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        if state.errored {
+            return;
+        }
+
+        let Some(mime) = clipboard.mime else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        let Some(mime) = self.decode_kitty_clipboard_mime(mime) else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        if mime != KITTY_CLIPBOARD_TEXT_PLAIN {
+            self.fail_kitty_clipboard_write("ENOSYS", terminator);
+            return;
+        }
+
+        let Some(payload) = clipboard.payload else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        let Some(decoded) = self.decode_kitty_clipboard_base64(payload) else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        if decoded.len() > OSC5522_MAX_CHUNK_DECODED_BYTES {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        }
+        let Ok(text) = simd_utf8::from_utf8_fast(&decoded) else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+
+        let Some(state) = &mut self.kitty_clipboard_write else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        if state.text.len() + text.len() > OSC5522_MAX_DECODED_BYTES {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        }
+        state.text.push_str(text);
+    }
+
+    fn handle_kitty_clipboard_walias(
+        &mut self,
+        clipboard: KittyClipboard<'_>,
+        terminator: &str,
+    ) {
+        let Some(state) = &self.kitty_clipboard_write else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        if state.errored {
+            return;
+        }
+        let Some(mime) = clipboard.mime else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        let Some(mime) = self.decode_kitty_clipboard_mime(mime) else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        if mime != KITTY_CLIPBOARD_TEXT_PLAIN {
+            self.fail_kitty_clipboard_write("ENOSYS", terminator);
+            return;
+        }
+        let Some(payload) = clipboard.payload else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        let Some(aliases) = self.decode_kitty_clipboard_base64(payload) else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        if simd_utf8::from_utf8_fast(&aliases).is_err() {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+        }
+    }
+
     fn deccolm(&mut self)
     where
         U: EventListener,
@@ -3146,6 +3426,7 @@ impl<U: EventListener> Handler for Crosswords<U> {
         self.inactive_mouse_cursor_stack.clear();
         self.extra_cursors.clear();
         self.extra_cursor_colors = KittyExtraCursorColors::default();
+        self.kitty_clipboard_write = None;
 
         // Clear kitty graphics on full reset (both active and inactive
         // screens, so a reset doesn't leave stale images on the other
@@ -3355,6 +3636,24 @@ impl<U: EventListener> Handler for Crosswords<U> {
             RioEvent::ClipboardStore(clipboard_type, text),
             self.window_id,
         );
+    }
+
+    #[inline]
+    fn kitty_clipboard(&mut self, clipboard: KittyClipboard<'_>, terminator: &str) {
+        match clipboard.operation {
+            KittyClipboardOperation::Read => {
+                self.handle_kitty_clipboard_read(clipboard, terminator)
+            }
+            KittyClipboardOperation::Write => {
+                self.handle_kitty_clipboard_write_start(clipboard, terminator)
+            }
+            KittyClipboardOperation::Wdata => {
+                self.handle_kitty_clipboard_wdata(clipboard, terminator)
+            }
+            KittyClipboardOperation::Walias => {
+                self.handle_kitty_clipboard_walias(clipboard, terminator)
+            }
+        }
     }
 
     #[inline]
@@ -6017,6 +6316,191 @@ mod tests {
             &captured[0],
             RioEvent::ClipboardStore(ClipboardType::Clipboard, text) if text == "hello"
         ));
+    }
+
+    #[test]
+    // Defends: OSC 5522 text/plain reads use the frontend clipboard policy and format OK/DATA/DONE replies.
+    fn osc5522_text_plain_read_routes_through_clipboard_load() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Read,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: Some(b"dGV4dC9wbGFpbg=="),
+            },
+            "\x1b\\",
+        );
+
+        let captured = events.borrow();
+        assert_eq!(captured.len(), 1);
+        let RioEvent::ClipboardLoadWithReply(route_id, clipboard_type, format, denied) =
+            &captured[0]
+        else {
+            panic!("expected rich clipboard load event");
+        };
+        assert_eq!((*route_id, *clipboard_type), (7, ClipboardType::Clipboard));
+        assert_eq!(denied, "\x1b]5522;type=read:status=EPERM\x1b\\");
+        assert_eq!(
+            format("hello"),
+            "\x1b]5522;type=read:status=OK\x1b\\\
+\x1b]5522;type=read:status=DATA:mime=dGV4dC9wbGFpbg==;aGVsbG8=\x1b\\\
+\x1b]5522;type=read:status=DONE\x1b\\"
+        );
+    }
+
+    #[test]
+    // Defends: OSC 5522 MIME-list reads are answered without touching the system clipboard.
+    fn osc5522_mime_list_read_replies_immediately() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Read,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: Some(b"Lg=="),
+            },
+            "\x1b\\",
+        );
+
+        let replies = events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                RioEvent::PtyWrite(route_id, reply) => Some((*route_id, reply.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            replies,
+            vec![(
+                7,
+                "\x1b]5522;type=read:status=OK\x1b\\\
+\x1b]5522;type=read:status=DATA:mime=dGV4dC9wbGFpbg==;dGV4dC9wbGFpbg==\x1b\\\
+\x1b]5522;type=read:status=DONE\x1b\\"
+                    .to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    // Defends: OSC 5522 write/wdata/end stores text/plain only after a complete valid transaction.
+    fn osc5522_text_plain_write_stores_on_done() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Write,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: Some(b"dGV4dC9wbGFpbg=="),
+                payload: Some(b"aGVs"),
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: Some(b"dGV4dC9wbGFpbg=="),
+                payload: Some(b"bG8="),
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+
+        let captured = events.borrow();
+        assert_eq!(captured.len(), 1);
+        let RioEvent::ClipboardStoreWithReply {
+            route_id,
+            clipboard_type,
+            content,
+            success_reply,
+            denied_reply,
+        } = &captured[0]
+        else {
+            panic!("expected rich clipboard store event");
+        };
+        assert_eq!(
+            (*route_id, *clipboard_type, content.as_str()),
+            (7, ClipboardType::Clipboard, "hello")
+        );
+        assert_eq!(success_reply, "\x1b]5522;type=write:status=DONE\x1b\\");
+        assert_eq!(denied_reply, "\x1b]5522;type=write:status=EPERM\x1b\\");
+    }
+
+    #[test]
+    // Defends: OSC 5522 write fails closed on unsupported MIME and ignores later write chunks until a new write starts.
+    fn osc5522_write_rejects_unsupported_mime() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Write,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: Some(b"aW1hZ2UvcG5n"),
+                payload: Some(b"aGVsbG8="),
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+
+        let replies = events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                RioEvent::PtyWrite(route_id, reply) => Some((*route_id, reply.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            replies,
+            vec![(7, "\x1b]5522;type=write:status=ENOSYS\x1b\\".to_owned())]
+        );
     }
 
     // Minimum-valid simple glyph: one contour, one on-curve point.

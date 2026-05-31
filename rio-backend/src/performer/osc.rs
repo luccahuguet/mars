@@ -16,9 +16,9 @@ use crate::event::{ProgressReport, ProgressState};
 use crate::simd_utf8;
 
 use super::handler::{
-    KittyNotification, KittyNotificationKind, SemanticPrompt, SemanticPromptAction,
-    SemanticPromptClick, SemanticPromptKind, SemanticPromptRedraw, TextSizing,
-    TextSizingAlign,
+    KittyClipboard, KittyClipboardLocation, KittyClipboardOperation, KittyNotification,
+    KittyNotificationKind, SemanticPrompt, SemanticPromptAction, SemanticPromptClick,
+    SemanticPromptKind, SemanticPromptRedraw, TextSizing, TextSizingAlign,
 };
 
 /// Either a concrete color value or a query for the current value.
@@ -696,6 +696,58 @@ pub(super) fn parse_clipboard<'a>(params: &[&'a [u8]]) -> Option<ClipboardOp<'a>
             payload: params[2],
         }
     })
+}
+
+/// OSC 5522: Kitty rich clipboard metadata/payload parser.
+pub(super) fn parse_kitty_clipboard<'a>(
+    params: &[&'a [u8]],
+) -> Option<KittyClipboard<'a>> {
+    let metadata = *params.get(1)?;
+    let operation = match metadata_value(metadata, b"type")? {
+        b"read" => KittyClipboardOperation::Read,
+        b"write" => KittyClipboardOperation::Write,
+        b"wdata" => KittyClipboardOperation::Wdata,
+        b"walias" => KittyClipboardOperation::Walias,
+        _ => return None,
+    };
+    let location = match metadata_value(metadata, b"loc") {
+        None => KittyClipboardLocation::Clipboard,
+        Some(b"primary") => KittyClipboardLocation::Selection,
+        Some(_) => KittyClipboardLocation::Unsupported,
+    };
+
+    Some(KittyClipboard {
+        operation,
+        location,
+        mime: metadata_value(metadata, b"mime"),
+        payload: params.get(2).copied(),
+    })
+}
+
+fn metadata_value<'a>(metadata: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
+    for item in metadata.split(|b| *b == b':') {
+        let item = trim_ascii(item);
+        let Some(eq) = item.iter().position(|b| *b == b'=') else {
+            continue;
+        };
+        let item_key = trim_ascii(&item[..eq]);
+        if item_key == key {
+            return Some(trim_ascii(&item[eq + 1..]));
+        }
+    }
+    None
+}
+
+fn trim_ascii(bytes: &[u8]) -> &[u8] {
+    let mut start = 0;
+    let mut end = bytes.len();
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    &bytes[start..end]
 }
 
 /// OSC 104: reset palette colors. Empty/omitted parameter list means "all".

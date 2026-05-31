@@ -679,6 +679,31 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     }
                 }
             }
+            RioEventType::Rio(RioEvent::ClipboardLoadWithReply(
+                route_id,
+                clipboard_type,
+                format,
+                denied_reply,
+            )) => {
+                let Router {
+                    routes, clipboard, ..
+                } = &mut self.router;
+                if let Some(route) = routes.get_mut(&window_id) {
+                    let reply = if route.window.is_focused {
+                        format(clipboard.get(clipboard_type).as_str())
+                    } else {
+                        denied_reply
+                    };
+                    if let Some(item) = route
+                        .window
+                        .screen
+                        .context_manager
+                        .get_by_route_id(route_id)
+                    {
+                        item.val.messenger.send_bytes(reply.into_bytes());
+                    }
+                }
+            }
             RioEventType::Rio(RioEvent::ClipboardStore(clipboard_type, content)) => {
                 let Router {
                     routes, clipboard, ..
@@ -686,6 +711,33 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 if let Some(route) = routes.get_mut(&window_id) {
                     if route.window.is_focused {
                         clipboard.set(clipboard_type, content);
+                    }
+                }
+            }
+            RioEventType::Rio(RioEvent::ClipboardStoreWithReply {
+                route_id,
+                clipboard_type,
+                content,
+                success_reply,
+                denied_reply,
+            }) => {
+                let Router {
+                    routes, clipboard, ..
+                } = &mut self.router;
+                if let Some(route) = routes.get_mut(&window_id) {
+                    let reply = if route.window.is_focused {
+                        clipboard.set(clipboard_type, content);
+                        success_reply
+                    } else {
+                        denied_reply
+                    };
+                    if let Some(item) = route
+                        .window
+                        .screen
+                        .context_manager
+                        .get_by_route_id(route_id)
+                    {
+                        item.val.messenger.send_bytes(reply.into_bytes());
                     }
                 }
             }

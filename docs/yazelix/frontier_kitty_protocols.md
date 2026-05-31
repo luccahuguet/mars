@@ -35,6 +35,7 @@ Already implemented or partially validated in Yazelix-terminal:
   replies, and untracked close replies
 - OSC 133 semantic prompt regions, prompt navigation, and output selection
 - OSC 52 hardened clipboard policy
+- OSC 5522 Kitty rich clipboard text/plain read/write/wdata/walias first slice
 - OSC 21 keyed color set/query/reset for foreground, background, cursor,
   cursor text, selection colors, visual bell color, transparent background
   color, and ANSI palette slots
@@ -49,8 +50,9 @@ Important gaps found during this audit:
 - OSC 21 unsupported special color keys such as cursor text, selection colors,
   visual bell, and transparent background slots still need representable terminal
   storage before they can be more than query-visible.
-- OSC 5522 Kitty rich clipboard is absent. Ghostty has a dedicated parser and
-  fuzz coverage for it.
+- OSC 5522 Kitty rich clipboard still needs arbitrary MIME, OS-backed rich
+  clipboard integration, password trust prompts, and chunk/session hardening
+  beyond the current text/plain first slice.
 - Kitty multiple cursors still need deeper visual parity work for exact
   reverse-video text color handling and multi-cursor Ghostty shader uniforms.
   The checked Ghostty source does not appear to implement the protocol, so this
@@ -93,6 +95,21 @@ Scope:
 - Start with `text/plain` support before image/rich-data writes
 - Fail closed on unsupported MIME, invalid base64, oversized chunks, and missing
   policy decisions
+
+Result:
+
+- Implemented metadata/payload parser for `type=read`, `type=write`,
+  `type=wdata`, and `type=walias`
+- Implemented `text/plain` reads with OK/DATA/DONE replies and MIME-list reads
+  without touching the system clipboard
+- Implemented `text/plain` writes with transaction state, chunk append, no-op
+  text/plain alias handling, and DONE/EPERM frontend replies
+- Rejected unsupported MIME types, malformed base64, oversized chunks, missing
+  sessions, and invalid locations with protocol error replies
+- Routed actual clipboard access through frontend clipboard events so focus
+  policy remains outside the parser
+- Remaining limitation: non-text MIME data, platform rich clipboard APIs, and
+  password-based trust prompts are intentionally deferred
 
 ### OSC 22 Pointer Shape End-To-End
 

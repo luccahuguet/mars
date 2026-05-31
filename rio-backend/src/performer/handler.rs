@@ -185,6 +185,29 @@ impl TextSizing {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KittyClipboardOperation {
+    Read,
+    Write,
+    Wdata,
+    Walias,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KittyClipboardLocation {
+    Clipboard,
+    Selection,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KittyClipboard<'a> {
+    pub operation: KittyClipboardOperation,
+    pub location: KittyClipboardLocation,
+    pub mime: Option<&'a [u8]>,
+    pub payload: Option<&'a [u8]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KittyNotificationKind {
     Title,
     Body,
@@ -447,6 +470,9 @@ pub trait Handler {
 
     /// Load data from clipboard.
     fn clipboard_load(&mut self, _: u8, _: &str) {}
+
+    /// Kitty OSC 5522 rich clipboard.
+    fn kitty_clipboard(&mut self, _clipboard: KittyClipboard<'_>, _terminator: &str) {}
 
     /// Run the decaln routine.
     fn decaln(&mut self) {}
@@ -1293,6 +1319,12 @@ impl<U: Handler> Perform for Performer<'_, U> {
                 Some(osc::ClipboardOp::Store { kind, payload }) => {
                     self.handler.clipboard_store(kind, payload)
                 }
+                None => unhandled(params),
+            },
+
+            // Kitty OSC 5522 rich clipboard.
+            b"5522" => match osc::parse_kitty_clipboard(params) {
+                Some(clipboard) => self.handler.kitty_clipboard(clipboard, terminator),
                 None => unhandled(params),
             },
 
@@ -2536,6 +2568,52 @@ mod tests {
             handler.calls,
             vec![vec![vec![0]], vec![vec![29], vec![2, 4, 5]]]
         );
+    }
+
+    #[test]
+    // Defends: real Kitty OSC 5522 bytes reach Handler::kitty_clipboard with metadata and payload preserved.
+    fn osc5522_dispatches_to_kitty_clipboard_handler() {
+        #[derive(Default)]
+        struct TestHandler {
+            operation: Option<KittyClipboardOperation>,
+            location: Option<KittyClipboardLocation>,
+            mime: Option<Vec<u8>>,
+            payload: Option<Vec<u8>>,
+            terminator: Option<String>,
+        }
+
+        impl Handler for TestHandler {
+            fn kitty_clipboard(
+                &mut self,
+                clipboard: KittyClipboard<'_>,
+                terminator: &str,
+            ) {
+                self.operation = Some(clipboard.operation);
+                self.location = Some(clipboard.location);
+                self.mime = clipboard.mime.map(|m| m.to_vec());
+                self.payload = clipboard.payload.map(|p| p.to_vec());
+                self.terminator = Some(terminator.to_owned());
+            }
+        }
+
+        let mut state = ProcessorState::default();
+        let mut handler = TestHandler::default();
+        let mut performer = Performer::new(&mut state, &mut handler);
+        let mut parser = Parser::default();
+
+        parser.advance(
+            &mut performer,
+            b"\x1b]5522;type=wdata:loc=primary:mime=dGV4dC9wbGFpbg==;aGVsbG8=\x1b\\",
+        );
+
+        assert_eq!(handler.operation, Some(KittyClipboardOperation::Wdata));
+        assert_eq!(handler.location, Some(KittyClipboardLocation::Selection));
+        assert_eq!(
+            handler.mime.as_deref(),
+            Some(b"dGV4dC9wbGFpbg==".as_slice())
+        );
+        assert_eq!(handler.payload.as_deref(), Some(b"aGVsbG8=".as_slice()));
+        assert_eq!(handler.terminator.as_deref(), Some("\x1b\\"));
     }
 
     #[test]

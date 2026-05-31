@@ -18,6 +18,14 @@
       "hex": "1b5d35323b633b3f07"
     },
     {
+      "id": "osc5522_rich_clipboard_text_plain",
+      "tier": "should",
+      "protocol": "Kitty OSC 5522",
+      "description": "Read text/plain, begin a text/plain write, send a no-op alias for text/plain, send text/plain data, then finish the write.",
+      "source": "Kitty rich clipboard protocol uses OSC 5522 metadata and base64 payload packets.",
+      "hex": "1b5d353532323b747970653d726561643b64475634644339776247467062673d3d1b5c1b5d353532323b747970653d77726974651b5c1b5d353532323b747970653d77616c6961733a6d696d653d64475634644339776247467062673d3d3b644756346443396f644731731b5c1b5d353532323b747970653d77646174613a6d696d653d64475634644339776247467062673d3d3b614756736247383d1b5c1b5d353532323b747970653d77646174611b5c"
+    },
+    {
       "id": "osc21_kitty_color_control",
       "tier": "should",
       "protocol": "Kitty OSC 21",

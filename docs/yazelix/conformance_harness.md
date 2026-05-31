@@ -92,6 +92,7 @@ The first manifest covers:
 
 - OSC 8 hyperlinks
 - OSC 52 clipboard query
+- Kitty OSC 5522 rich clipboard text/plain read/write stream
 - Kitty OSC 21 keyed color control
 - Kitty OSC 22 pointer shapes
 - OSC 133 semantic prompt regions
