@@ -2060,6 +2060,13 @@ impl<U: EventListener> Crosswords<U> {
     }
 
     #[inline]
+    fn sync_keyboard_mode_from_stack(&mut self) {
+        let current_mode = self.keyboard_mode_stack[self.keyboard_mode_idx];
+        self.mode &= !Mode::KITTY_KEYBOARD_PROTOCOL;
+        self.mode |= Mode::from(KeyboardModes::from_bits_truncate(current_mode));
+    }
+
+    #[inline]
     fn set_keyboard_mode(&mut self, mode: u8, apply: KeyboardModesApplyBehavior) {
         // println!("{:?}", mode);
         let active_mode = self.keyboard_mode_stack[self.keyboard_mode_idx];
@@ -2070,10 +2077,7 @@ impl<U: EventListener> Crosswords<U> {
         };
         info!("Setting keyboard mode to {new_mode:?}");
         self.keyboard_mode_stack[self.keyboard_mode_idx] = new_mode;
-
-        // Sync self.mode with keyboard_mode_stack
-        self.mode &= !Mode::KITTY_KEYBOARD_PROTOCOL;
-        self.mode |= Mode::from(KeyboardModes::from_bits_truncate(new_mode));
+        self.sync_keyboard_mode_from_stack();
     }
 
     /// Find the beginning of the current line across linewraps.
@@ -3387,39 +3391,37 @@ impl<U: EventListener> Handler for Crosswords<U> {
 
     #[inline]
     fn push_keyboard_mode(&mut self, mode: KeyboardModes) {
-        self.keyboard_mode_idx = self.keyboard_mode_idx.wrapping_add(1);
-        if self.keyboard_mode_idx >= KEYBOARD_MODE_STACK_MAX_DEPTH {
-            self.keyboard_mode_idx %= KEYBOARD_MODE_STACK_MAX_DEPTH;
+        if self.keyboard_mode_idx + 1 == KEYBOARD_MODE_STACK_MAX_DEPTH {
+            self.keyboard_mode_stack.copy_within(1.., 0);
+        } else {
+            self.keyboard_mode_idx += 1;
         }
         self.keyboard_mode_stack[self.keyboard_mode_idx] = mode.bits();
-
-        // Sync self.mode with keyboard_mode_stack
-        self.mode &= !Mode::KITTY_KEYBOARD_PROTOCOL;
-        self.mode |= Mode::from(mode);
+        self.sync_keyboard_mode_from_stack();
     }
 
     #[inline]
     fn pop_keyboard_modes(&mut self, to_pop: u16) {
-        // If popping more modes than we have, just clear the stack.
-        if usize::from(to_pop) >= KEYBOARD_MODE_STACK_MAX_DEPTH {
-            self.keyboard_mode_stack.fill(KeyboardModes::NO_MODE.bits());
-            self.keyboard_mode_idx = 0;
-            self.mode &= !Mode::KITTY_KEYBOARD_PROTOCOL;
+        let to_pop = usize::from(to_pop);
+        if to_pop == 0 {
             return;
         }
-        for _ in 0..to_pop {
-            self.keyboard_mode_stack[self.keyboard_mode_idx] =
-                KeyboardModes::NO_MODE.bits();
-            self.keyboard_mode_idx = self.keyboard_mode_idx.wrapping_sub(1);
-            if self.keyboard_mode_idx >= KEYBOARD_MODE_STACK_MAX_DEPTH {
-                self.keyboard_mode_idx %= KEYBOARD_MODE_STACK_MAX_DEPTH;
-            }
+
+        // The base entry at index zero is the reset state. Popping every
+        // active entry leaves the stack empty, which Kitty defines as all
+        // flags reset.
+        if to_pop > self.keyboard_mode_idx {
+            self.keyboard_mode_stack.fill(KeyboardModes::NO_MODE.bits());
+            self.keyboard_mode_idx = 0;
+            self.sync_keyboard_mode_from_stack();
+            return;
         }
 
-        // Sync self.mode with keyboard_mode_stack
-        let current_mode = self.keyboard_mode_stack[self.keyboard_mode_idx];
-        self.mode &= !Mode::KITTY_KEYBOARD_PROTOCOL;
-        self.mode |= Mode::from(KeyboardModes::from_bits_truncate(current_mode));
+        let old_idx = self.keyboard_mode_idx;
+        self.keyboard_mode_idx -= to_pop;
+        self.keyboard_mode_stack[self.keyboard_mode_idx + 1..=old_idx]
+            .fill(KeyboardModes::NO_MODE.bits());
+        self.sync_keyboard_mode_from_stack();
     }
 
     #[inline]
@@ -6700,15 +6702,16 @@ mod tests {
     ///
     /// Test coverage:
     /// - test_keyboard_mode_push_pop: Basic push and pop operations
-    /// - test_keyboard_mode_stack_wraparound: Stack overflow protection and wraparound
+    /// - test_keyboard_mode_stack_overflow_evicts_oldest: Stack overflow evicts oldest entry
     /// - test_keyboard_mode_pop_excessive: Handling of excessive pop operations
     /// - test_keyboard_mode_set_replace: Replace behavior for keyboard modes
     /// - test_keyboard_mode_set_union: Union behavior for keyboard modes
     /// - test_keyboard_mode_set_difference: Difference behavior for keyboard modes
     /// - test_keyboard_mode_report: Current mode reporting functionality
     /// - test_keyboard_mode_reset: Terminal reset behavior on keyboard stack
-    /// - test_keyboard_mode_stack_underflow_protection: Stack underflow protection
+    /// - test_keyboard_mode_pop_empty_stack_resets_flags: Stack underflow resets flags
 
+    // Defends: Kitty keyboard push/pop preserves a base mode and restores it after one pop.
     #[test]
     fn test_keyboard_mode_push_pop() {
         let size = CrosswordsSize::new(10, 10);
@@ -6754,10 +6757,12 @@ mod tests {
         Handler::pop_keyboard_modes(&mut term, 1);
         assert_eq!(term.keyboard_mode_idx, 0);
         assert_eq!(term.keyboard_mode_stack[1], KeyboardModes::NO_MODE.bits()); // Should be cleared
+        assert!(!term.mode().intersects(Mode::KITTY_KEYBOARD_PROTOCOL));
     }
 
+    // Defends: Kitty requires full keyboard-mode stacks to evict the oldest entry, not wrap the active index.
     #[test]
-    fn test_keyboard_mode_stack_wraparound() {
+    fn test_keyboard_mode_stack_overflow_evicts_oldest() {
         let size = CrosswordsSize::new(10, 10);
         let window_id = WindowId::from(0);
         let mut term = Crosswords::new(
@@ -6769,24 +6774,38 @@ mod tests {
             10_000,
         );
 
-        // Fill the stack to maximum depth using Handler trait
-        for i in 0..KEYBOARD_MODE_STACK_MAX_DEPTH {
-            Handler::push_keyboard_mode(&mut term, KeyboardModes::DISAMBIGUATE_ESC_CODES);
-            assert_eq!(
-                term.keyboard_mode_idx,
-                (i + 1) % KEYBOARD_MODE_STACK_MAX_DEPTH
-            );
+        let modes = [
+            KeyboardModes::DISAMBIGUATE_ESC_CODES,
+            KeyboardModes::REPORT_EVENT_TYPES,
+            KeyboardModes::REPORT_ALTERNATE_KEYS,
+            KeyboardModes::REPORT_ALL_KEYS_AS_ESC,
+            KeyboardModes::REPORT_ASSOCIATED_TEXT,
+            KeyboardModes::DISAMBIGUATE_ESC_CODES | KeyboardModes::REPORT_EVENT_TYPES,
+            KeyboardModes::DISAMBIGUATE_ESC_CODES | KeyboardModes::REPORT_ALTERNATE_KEYS,
+            KeyboardModes::REPORT_EVENT_TYPES | KeyboardModes::REPORT_ALTERNATE_KEYS,
+        ];
+
+        for mode in modes {
+            Handler::push_keyboard_mode(&mut term, mode);
         }
 
-        // Push one more - should wrap around
-        Handler::push_keyboard_mode(&mut term, KeyboardModes::REPORT_EVENT_TYPES);
-        assert_eq!(term.keyboard_mode_idx, 1); // Should wrap to 1
+        assert_eq!(term.keyboard_mode_idx, KEYBOARD_MODE_STACK_MAX_DEPTH - 1);
         assert_eq!(
-            term.keyboard_mode_stack[1],
-            KeyboardModes::REPORT_EVENT_TYPES.bits()
+            term.keyboard_mode_stack,
+            [
+                modes[0].bits(),
+                modes[1].bits(),
+                modes[2].bits(),
+                modes[3].bits(),
+                modes[4].bits(),
+                modes[5].bits(),
+                modes[6].bits(),
+                modes[7].bits(),
+            ]
         );
     }
 
+    // Defends: Excessive Kitty keyboard pops reset every stack entry and active mode bit.
     #[test]
     fn test_keyboard_mode_pop_excessive() {
         let size = CrosswordsSize::new(10, 10);
@@ -6813,8 +6832,10 @@ mod tests {
         for i in 0..KEYBOARD_MODE_STACK_MAX_DEPTH {
             assert_eq!(term.keyboard_mode_stack[i], KeyboardModes::NO_MODE.bits());
         }
+        assert!(!term.mode().intersects(Mode::KITTY_KEYBOARD_PROTOCOL));
     }
 
+    // Defends: Replace mode updates only the current keyboard-mode stack entry.
     #[test]
     fn test_keyboard_mode_set_replace() {
         let size = CrosswordsSize::new(10, 10);
@@ -6851,6 +6872,7 @@ mod tests {
         );
     }
 
+    // Defends: Union mode merges requested Kitty keyboard flags with the current entry.
     #[test]
     fn test_keyboard_mode_set_union() {
         let size = CrosswordsSize::new(10, 10);
@@ -6883,6 +6905,7 @@ mod tests {
         assert_eq!(term.keyboard_mode_stack[term.keyboard_mode_idx], expected);
     }
 
+    // Defends: Difference mode clears only requested Kitty keyboard flags from the current entry.
     #[test]
     fn test_keyboard_mode_set_difference() {
         let size = CrosswordsSize::new(10, 10);
@@ -6918,6 +6941,7 @@ mod tests {
         );
     }
 
+    // Defends: Kitty keyboard current-mode query reads the active stack entry.
     #[test]
     fn test_keyboard_mode_report() {
         let size = CrosswordsSize::new(10, 10);
@@ -6936,6 +6960,7 @@ mod tests {
         assert_eq!(current_mode, KeyboardModes::DISAMBIGUATE_ESC_CODES.bits());
     }
 
+    // Defends: Full terminal reset clears main and alternate keyboard-mode stacks.
     #[test]
     fn test_keyboard_mode_reset() {
         let size = CrosswordsSize::new(10, 10);
@@ -6966,8 +6991,9 @@ mod tests {
         }
     }
 
+    // Defends: Popping the final Kitty keyboard stack entry resets flags instead of wrapping.
     #[test]
-    fn test_keyboard_mode_stack_underflow_protection() {
+    fn test_keyboard_mode_pop_empty_stack_resets_flags() {
         let size = CrosswordsSize::new(10, 10);
         let window_id = WindowId::from(0);
         let mut term = Crosswords::new(
@@ -6979,15 +7005,19 @@ mod tests {
             10_000,
         );
 
-        // Start at index 0, try to pop using Handler trait - should wrap correctly
+        Handler::set_keyboard_mode(
+            &mut term,
+            KeyboardModes::DISAMBIGUATE_ESC_CODES,
+            KeyboardModesApplyBehavior::Replace,
+        );
         assert_eq!(term.keyboard_mode_idx, 0);
+        assert!(term.mode().contains(Mode::DISAMBIGUATE_ESC_CODES));
 
         Handler::pop_keyboard_modes(&mut term, 1);
 
-        // With wraparound logic, index should wrap to max-1
-        let expected_idx = (0_usize.wrapping_sub(1)) % KEYBOARD_MODE_STACK_MAX_DEPTH;
-        assert_eq!(term.keyboard_mode_idx, expected_idx);
-        assert_eq!(term.keyboard_mode_stack[0], KeyboardModes::NO_MODE.bits()); // Should be cleared
+        assert_eq!(term.keyboard_mode_idx, 0);
+        assert_eq!(term.keyboard_mode_stack[0], KeyboardModes::NO_MODE.bits());
+        assert!(!term.mode().intersects(Mode::KITTY_KEYBOARD_PROTOCOL));
     }
 
     #[test]
