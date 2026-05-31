@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "osc8_hyperlink",
+      "tier": "must",
+      "protocol": "OSC 8",
+      "description": "Open a hyperlink span, write linked text, close the span, then write plain text.",
+      "source": "Common OSC 8 behavior, cross-checked against Rio hyperlink tests.",
+      "hex": "706c61696e201b5d383b69643d79747a3b68747470733a2f2f6578616d706c652e636f6d076c696e6b1b5d383b3b07646f6e650d0a"
+    },
+    {
+      "id": "osc52_clipboard_query",
+      "tier": "must",
+      "protocol": "OSC 52",
+      "description": "Query the clipboard using the c clipboard designator.",
+      "source": "OSC 52 clipboard query syntax.",
+      "hex": "1b5d35323b633b3f07"
+    },
+    {
+      "id": "osc133_semantic_prompt",
+      "tier": "must",
+      "protocol": "OSC 133",
+      "description": "Mark prompt start, input start, output start, and command end.",
+      "source": "Ghostty semantic_prompt parser supports A, B, C, D command markers.",
+      "hex": "1b5d3133333b410770726f6d707424201b5d3133333b42076563686f206f6b1b5d3133333b43076f6b0d0a1b5d3133333b443b3007"
+    },
+    {
+      "id": "osc66_text_sizing",
+      "tier": "should",
+      "protocol": "Kitty OSC 66",
+      "description": "Render URL-safe UTF-8 text at scale 2.",
+      "source": "Ghostty kitty_text_sizing parser test accepts 66;s=2;<payload>.",
+      "hex": "1b5d36363b733d323b626967207465787407"
+    },
+    {
+      "id": "kitty_keyboard_query",
+      "tier": "must",
+      "protocol": "Kitty keyboard",
+      "description": "Query current Kitty keyboard protocol mode.",
+      "source": "Rio handler dispatches CSI ? u to report_keyboard_mode.",
+      "hex": "1b5b3f75"
+    },
+    {
+      "id": "kitty_graphics_1x1_rgba",
+      "tier": "must",
+      "protocol": "Kitty graphics",
+      "description": "Transmit and place a 1x1 RGBA red pixel image.",
+      "source": "Kitty graphics APC G transmit/place shape; behavior must be verified against real terminals.",
+      "hex": "1b5f47613d742c663d33322c733d312c763d312c693d312c6d3d303b2f7741412f773d3d1b5c1b5f47613d702c693d312c633d312c723d311b5c0d0a"
+    },
+    {
+      "id": "sixel_minimal",
+      "tier": "must",
+      "protocol": "Sixel",
+      "description": "Minimal DCS sixel payload that exercises the sixel parser path.",
+      "source": "Sixel DCS q introducer with a tiny payload.",
+      "hex": "1b5071237e1b5c0d0a"
+    },
+    {
+      "id": "synchronized_output",
+      "tier": "must",
+      "protocol": "DECSET 2026",
+      "description": "Begin synchronized update, write two lines, then end synchronized update.",
+      "source": "Rio parser recognizes exact CSI ? 2026 h/l sequences.",
+      "hex": "1b5b3f32303236686672616d65206f6e650d0a6672616d652074776f1b5b3f323032366c0d0a"
+    },
+    {
+      "id": "xtversion_query",
+      "tier": "must",
+      "protocol": "XTVERSION",
+      "description": "Query terminal version using CSI > q.",
+      "source": "Rio handler dispatches CSI > q to report_version.",
+      "hex": "1b5b3e71"
+    },
+    {
+      "id": "xtgettcap_rgb",
+      "tier": "must",
+      "protocol": "XTGETTCAP",
+      "description": "Query the RGB terminfo capability using DCS + q RGB-in-hex.",
+      "source": "Rio tests use DCS + q 524742 as the RGB XTGETTCAP request.",
+      "hex": "1b502b713532343734321b5c"
+    }
+  ]
+}

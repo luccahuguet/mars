@@ -17,6 +17,7 @@ release
 .jekyll-metadata
 NOTES
 *.log
+__pycache__/
 
 # for nix users
 .direnv/
