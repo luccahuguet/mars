@@ -17,7 +17,7 @@ use crate::simd_utf8;
 
 use super::handler::{
     SemanticPrompt, SemanticPromptAction, SemanticPromptClick, SemanticPromptKind,
-    SemanticPromptRedraw,
+    SemanticPromptRedraw, TextSizing, TextSizingAlign,
 };
 
 /// Either a concrete color value or a query for the current value.
@@ -302,6 +302,87 @@ fn parse_semantic_prompt_redraw(input: &[u8]) -> Option<SemanticPromptRedraw> {
     }
 }
 
+/// OSC 66 — Kitty text sizing protocol.
+pub(super) fn parse_text_sizing(params: &[&[u8]]) -> Option<TextSizing> {
+    if params.len() < 3 {
+        return None;
+    }
+
+    let text = join_osc_text_params(&params[2..]);
+    if text.len() > 4096 {
+        return None;
+    }
+
+    let mut sizing = TextSizing::new(simd_utf8::from_utf8_lossy_fast(&text));
+    if params[1].is_empty() {
+        return Some(sizing);
+    }
+
+    for item in params[1].split(|b| *b == b':') {
+        let Some(eq_idx) = item.iter().position(|b| *b == b'=') else {
+            continue;
+        };
+        let key = &item[..eq_idx];
+        let value = &item[eq_idx + 1..];
+
+        match key {
+            b"s" => sizing.scale = parse_bounded_u8(value, 1, 7)?,
+            b"w" => {
+                let width = parse_bounded_u8(value, 0, 7)?;
+                sizing.width = (width != 0).then_some(width);
+            }
+            b"n" => {
+                let numerator = parse_bounded_u8(value, 0, 15)?;
+                let denominator = sizing.fractional_scale.map_or(0, |(_, d)| d);
+                sizing.fractional_scale = Some((numerator, denominator));
+            }
+            b"d" => {
+                let denominator = parse_bounded_u8(value, 0, 15)?;
+                let numerator = sizing.fractional_scale.map_or(0, |(n, _)| n);
+                sizing.fractional_scale = Some((numerator, denominator));
+            }
+            b"v" => sizing.vertical_align = parse_text_sizing_align(value)?,
+            b"h" => sizing.horizontal_align = parse_text_sizing_align(value)?,
+            _ => {}
+        }
+    }
+
+    if let Some((numerator, denominator)) = sizing.fractional_scale {
+        if denominator != 0 && denominator <= numerator {
+            return None;
+        }
+    }
+
+    Some(sizing)
+}
+
+fn join_osc_text_params(params: &[&[u8]]) -> Vec<u8> {
+    let len =
+        params.iter().map(|p| p.len()).sum::<usize>() + params.len().saturating_sub(1);
+    let mut out = Vec::with_capacity(len);
+    for (idx, param) in params.iter().enumerate() {
+        if idx != 0 {
+            out.push(b';');
+        }
+        out.extend_from_slice(param);
+    }
+    out
+}
+
+fn parse_bounded_u8(input: &[u8], min: u8, max: u8) -> Option<u8> {
+    let value = parse_number(input)?;
+    (min..=max).contains(&value).then_some(value)
+}
+
+fn parse_text_sizing_align(input: &[u8]) -> Option<TextSizingAlign> {
+    match input {
+        b"0" => Some(TextSizingAlign::Start),
+        b"1" => Some(TextSizingAlign::End),
+        b"2" => Some(TextSizingAlign::Center),
+        _ => None,
+    }
+}
+
 /// OSC 10/11/12: dynamic color set/query, applied to consecutive named
 /// colors starting at `dynamic_code - 10`.
 pub(super) fn parse_dynamic_colors(params: &[&[u8]]) -> Option<Vec<DynamicColorEntry>> {
@@ -425,5 +506,35 @@ mod tests {
     // Defends: malformed or unknown OSC 133 actions remain unsupported instead of creating bogus state.
     fn semantic_prompt_rejects_unknown_action() {
         assert!(parse_semantic_prompt(&[b"133".as_slice(), b"Z".as_slice()]).is_none());
+    }
+
+    #[test]
+    // Defends: OSC 66 metadata is colon-separated and preserves semicolons in text payloads.
+    fn text_sizing_parses_metadata_and_text() {
+        let sizing = parse_text_sizing(&[
+            b"66".as_slice(),
+            b"s=2:w=3:n=1:d=2:v=2:h=1".as_slice(),
+            b"a".as_slice(),
+            b"b".as_slice(),
+        ])
+        .unwrap();
+
+        assert_eq!(sizing.scale, 2);
+        assert_eq!(sizing.width, Some(3));
+        assert_eq!(sizing.fractional_scale, Some((1, 2)));
+        assert_eq!(sizing.vertical_align, TextSizingAlign::Center);
+        assert_eq!(sizing.horizontal_align, TextSizingAlign::End);
+        assert_eq!(sizing.text, "a;b");
+    }
+
+    #[test]
+    // Defends: invalid fractional scale metadata is rejected instead of creating undefined render state.
+    fn text_sizing_rejects_invalid_fractional_scale() {
+        assert!(parse_text_sizing(&[
+            b"66".as_slice(),
+            b"n=2:d=1".as_slice(),
+            b"x".as_slice(),
+        ])
+        .is_none());
     }
 }

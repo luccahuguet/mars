@@ -43,7 +43,7 @@ use crate::crosswords::square::{CellFlags, Wide};
 use crate::event::WindowId;
 use crate::event::{EventListener, RioEvent, TerminalDamage};
 use crate::performer::handler::{
-    Handler, SemanticPrompt, SemanticPromptAction, SemanticPromptKind,
+    Handler, SemanticPrompt, SemanticPromptAction, SemanticPromptKind, TextSizing,
 };
 use crate::performer::parser::Params;
 use crate::selection::{Selection, SelectionRange, SelectionType};
@@ -413,6 +413,13 @@ fn vs_is_valid_base(base: char, vs: char) -> bool {
     // `for_grapheme` returns `Some(explicit)` iff the sequence is in
     // VARIATION_MAP (forked from wezterm's emoji-variation-sequences.txt).
     Presentation::for_grapheme(s).1.is_some()
+}
+
+fn unicode_cell_width(text: &str) -> usize {
+    text.chars()
+        .filter_map(|c| crate::codepoint_width::codepoint_width(c as u32))
+        .map(usize::from)
+        .sum()
 }
 
 // Max size of the window title stack.
@@ -985,6 +992,70 @@ impl<U: EventListener> Crosswords<U> {
 
         self.carriage_return();
         self.linefeed();
+    }
+
+    fn text_sizing_width(&self, sizing: &TextSizing) -> Option<usize> {
+        let base_width = sizing
+            .width
+            .map(usize::from)
+            .unwrap_or_else(|| unicode_cell_width(&sizing.text));
+        let scaled_width = base_width.checked_mul(usize::from(sizing.scale))?;
+        (scaled_width > 0).then_some(scaled_width)
+    }
+
+    fn input_text_sized_to_width(&mut self, text: &str, width: usize) {
+        if width == 0 {
+            return;
+        }
+
+        let mut chars = text.chars();
+        for cell_idx in 0..width {
+            if self.grid.cursor.should_wrap {
+                self.wrapline();
+            }
+
+            let c = if cell_idx == 0 {
+                chars.next().unwrap_or(' ')
+            } else {
+                ' '
+            };
+            self.write_at_cursor(c);
+
+            if cell_idx == 0 {
+                for c in chars.by_ref() {
+                    self.push_zerowidth_to_cursor_cell(c);
+                }
+            }
+
+            let row = self.grid.cursor.pos.row;
+            self.damage.damage_line(row.0 as usize);
+            if self.grid.cursor.pos.col + 1 < self.grid.columns() {
+                self.grid.cursor.pos.col += 1;
+            } else {
+                self.grid.cursor.should_wrap = true;
+            }
+        }
+    }
+
+    fn push_zerowidth_to_cursor_cell(&mut self, c: char) {
+        let row = self.grid.cursor.pos.row;
+        let col = self.grid.cursor.pos.col;
+        let cell = &mut self.grid[row][col];
+
+        if let Some(id) = cell.extras_id() {
+            if let Some(extras) = self.grid.extras_table.get_mut(id) {
+                extras.zerowidth.push(c);
+            }
+        } else {
+            let mut extras = crate::crosswords::square::Extras::default();
+            extras.zerowidth.push(c);
+            let id = self.grid.extras_table.alloc(extras);
+            let cell = &mut self.grid[row][col];
+            cell.set_extras_id(Some(id));
+        }
+
+        self.grid[row][col].insert_cell_flag(CellFlags::GRAPHEME);
+        self.grid[row].has_extras = true;
     }
 
     #[inline]
@@ -2949,6 +3020,13 @@ impl<U: EventListener> Handler for Crosswords<U> {
         }
     }
 
+    fn input_sized_text(&mut self, sizing: TextSizing) {
+        let Some(width) = self.text_sizing_width(&sizing) else {
+            return;
+        };
+        self.input_text_sized_to_width(&sizing.text, width);
+    }
+
     #[inline]
     fn identify_terminal(&mut self, intermediate: Option<char>) {
         match intermediate {
@@ -4683,6 +4761,30 @@ mod tests {
             term.row_semantic_zone(Line(0)),
             SemanticZone::PromptContinuation
         );
+    }
+
+    #[test]
+    // Defends: OSC 66 width metadata advances the grid cursor by the client-declared cell width.
+    fn text_sizing_width_controls_cursor_advance() {
+        let mut term = make_crosswords();
+        let mut sizing = TextSizing::new(" ".to_string());
+        sizing.width = Some(2);
+
+        Handler::input_sized_text(&mut term, sizing);
+
+        assert_eq!(term.grid.cursor.pos, Pos::new(Line(0), Column(2)));
+    }
+
+    #[test]
+    // Defends: OSC 66 scale contributes to occupied cell width even without explicit w metadata.
+    fn text_sizing_scale_controls_cursor_advance() {
+        let mut term = make_crosswords();
+        let mut sizing = TextSizing::new("x".to_string());
+        sizing.scale = 2;
+
+        Handler::input_sized_text(&mut term, sizing);
+
+        assert_eq!(term.grid.cursor.pos, Pos::new(Line(0), Column(2)));
     }
 
     // Minimum-valid simple glyph: one contour, one on-curve point.

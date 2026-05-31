@@ -154,6 +154,36 @@ impl SemanticPrompt {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextSizingAlign {
+    Start,
+    End,
+    Center,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextSizing {
+    pub scale: u8,
+    pub width: Option<u8>,
+    pub fractional_scale: Option<(u8, u8)>,
+    pub vertical_align: TextSizingAlign,
+    pub horizontal_align: TextSizingAlign,
+    pub text: String,
+}
+
+impl TextSizing {
+    pub fn new(text: String) -> Self {
+        Self {
+            scale: 1,
+            width: None,
+            fractional_scale: None,
+            vertical_align: TextSizingAlign::Start,
+            horizontal_align: TextSizingAlign::Start,
+            text,
+        }
+    }
+}
+
 pub trait Handler {
     /// OSC to set window title.
     fn set_title(&mut self, _: Option<String>) {}
@@ -191,6 +221,11 @@ pub trait Handler {
             let c = char::from_u32(cp).unwrap_or('\u{FFFD}');
             self.input(c);
         }
+    }
+
+    /// Kitty OSC 66 text sizing.
+    fn input_sized_text(&mut self, sizing: TextSizing) {
+        self.input_str(&sizing.text);
     }
 
     /// Set cursor to position.
@@ -1180,6 +1215,12 @@ impl<U: Handler> Perform for Performer<'_, U> {
                 Some(osc::ClipboardOp::Store { kind, payload }) => {
                     self.handler.clipboard_store(kind, payload)
                 }
+                None => unhandled(params),
+            },
+
+            // Kitty OSC 66 text sizing.
+            b"66" => match osc::parse_text_sizing(params) {
+                Some(sizing) => self.handler.input_sized_text(sizing),
                 None => unhandled(params),
             },
 
@@ -2227,6 +2268,32 @@ mod tests {
         assert_eq!(prompt.action, SemanticPromptAction::FreshLineNewPrompt);
         assert_eq!(prompt.aid.as_deref(), Some("abc"));
         assert_eq!(prompt.click, Some(SemanticPromptClick::Line));
+    }
+
+    #[test]
+    // Defends: a real OSC 66 byte stream reaches Handler::input_sized_text through the production performer.
+    fn osc66_dispatches_to_sized_text_handler() {
+        #[derive(Default)]
+        struct TestHandler {
+            sizing: Option<TextSizing>,
+        }
+
+        impl Handler for TestHandler {
+            fn input_sized_text(&mut self, sizing: TextSizing) {
+                self.sizing = Some(sizing);
+            }
+        }
+
+        let mut state = ProcessorState::default();
+        let mut handler = TestHandler::default();
+        let mut performer = Performer::new(&mut state, &mut handler);
+        let mut parser = Parser::default();
+
+        parser.advance(&mut performer, b"\x1b]66;w=2; \x07");
+
+        let sizing = handler.sizing.expect("OSC 66 should dispatch");
+        assert_eq!(sizing.width, Some(2));
+        assert_eq!(sizing.text, " ");
     }
 
     #[test]
