@@ -105,7 +105,6 @@ impl Application<'_> {
                 | WindowEvent::AxisMotion { .. }
                 | WindowEvent::PanGesture { .. }
                 | WindowEvent::HoveredFileCancelled
-                | WindowEvent::Destroyed
                 | WindowEvent::HoveredFile(_)
                 | WindowEvent::Moved(_)
         )
@@ -1188,7 +1187,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         };
 
         match event {
-            WindowEvent::CloseRequested => {
+            close_event @ (WindowEvent::CloseRequested | WindowEvent::Destroyed) => {
+                let destroyed = matches!(close_event, WindowEvent::Destroyed);
+
                 // macOS: Cmd+Q quit confirmation is handled by
                 // `applicationShouldTerminate` in rio-window.
                 // Windows: per-window close confirmation is handled
@@ -1196,7 +1197,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 // (see `set_confirm_before_quit` plumbing).
                 // Either way, by the time we see `CloseRequested`
                 // the user has already confirmed — just close.
-                if cfg!(any(target_os = "macos", target_os = "windows")) {
+                if !destroyed && cfg!(any(target_os = "macos", target_os = "windows")) {
                     self.router.routes.remove(&window_id);
                     if self.router.routes.is_empty() {
                         event_loop.exit();
@@ -1204,7 +1205,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     return;
                 }
 
-                if self.config.confirm_before_quit {
+                if !destroyed && self.config.confirm_before_quit {
                     route.confirm_quit();
                     route.request_redraw();
                     return;
