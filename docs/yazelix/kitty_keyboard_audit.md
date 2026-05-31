@@ -79,13 +79,11 @@ is tested against overflow.
 
 ### Modifier Bits
 
-`SequenceModifiers` currently reports shift, alt, control, and super. Kitty also
-defines hyper, meta, caps_lock, and num_lock bits. Rio can identify Hyper and
-Meta as named keys, and it can identify CapsLock and NumLock key events, but it
-does not add those bits to the modifier field. Lock-state reporting may require
-platform support beyond the current `ModifiersState`, but Hyper/Meta key press
-and release can at least report their own active modifier bit when the event is
-for that key.
+`SequenceModifiers` reports shift, alt, control, super, hyper, and meta.
+CapsLock and NumLock bits are defined but intentionally not inferred from key
+presses, because Kitty wants enabled lock state and `rio-window::ModifiersState`
+does not expose lock state today. CapsLock and NumLock key events still have
+their private-use key codes; only the lock modifier bits remain platform-limited.
 
 ### Base-Layout Alternate Keys
 

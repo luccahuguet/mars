@@ -281,16 +281,25 @@ impl SequenceBuilder {
         // key press, however winit sends them after the key press, so for modifiers
         // itself apply the state based on keysyms and not the _actual_ modifiers
         // state, which is how kitty is doing so and what is suggested in such case.
-        let press = key.state.is_pressed();
-        match named {
-            NamedKey::Shift => mods.set(SequenceModifiers::SHIFT, press),
-            NamedKey::Control => mods.set(SequenceModifiers::CONTROL, press),
-            NamedKey::Alt => mods.set(SequenceModifiers::ALT, press),
-            NamedKey::Super => mods.set(SequenceModifiers::SUPER, press),
-            _ => (),
-        }
+        apply_modifier_key_state(mods, named, key.state.is_pressed());
 
         Some(SequenceBase::new(base.into(), SequenceTerminator::Kitty))
+    }
+}
+
+fn apply_modifier_key_state(
+    modifiers: &mut SequenceModifiers,
+    named: NamedKey,
+    pressed: bool,
+) {
+    match named {
+        NamedKey::Shift => modifiers.set(SequenceModifiers::SHIFT, pressed),
+        NamedKey::Control => modifiers.set(SequenceModifiers::CONTROL, pressed),
+        NamedKey::Alt => modifiers.set(SequenceModifiers::ALT, pressed),
+        NamedKey::Super => modifiers.set(SequenceModifiers::SUPER, pressed),
+        NamedKey::Hyper => modifiers.set(SequenceModifiers::HYPER, pressed),
+        NamedKey::Meta => modifiers.set(SequenceModifiers::META, pressed),
+        _ => (),
     }
 }
 
@@ -452,8 +461,11 @@ bitflags::bitflags! {
         const ALT     = 0b0000_0010;
         const CONTROL = 0b0000_0100;
         const SUPER   = 0b0000_1000;
-        // NOTE: Kitty protocol defines additional modifiers to what is present here, like
-        // Capslock, but it's not a modifier as per winit.
+        const HYPER   = 0b0001_0000;
+        const META    = 0b0010_0000;
+        // CapsLock and NumLock bits need lock state that rio-window does not expose yet.
+        const CAPS_LOCK = 0b0100_0000;
+        const NUM_LOCK  = 0b1000_0000;
     }
 }
 
@@ -532,5 +544,37 @@ mod tests {
             modifier_key_base(NamedKey::AltGraph, KeyLocation::Standard),
             Some("57453")
         );
+    }
+
+    // Defends: Kitty Hyper modifier contributes bit 16 to the encoded modifier field.
+    #[test]
+    fn kitty_hyper_modifier_bit_is_reported() {
+        let mut modifiers = SequenceModifiers::empty();
+        apply_modifier_key_state(&mut modifiers, NamedKey::Hyper, true);
+
+        assert!(modifiers.contains(SequenceModifiers::HYPER));
+        assert_eq!(modifiers.encode_esc_sequence(), 17);
+    }
+
+    // Defends: Kitty Meta modifier contributes bit 32 and clears on release events.
+    #[test]
+    fn kitty_meta_modifier_bit_tracks_press_and_release() {
+        let mut modifiers = SequenceModifiers::empty();
+        apply_modifier_key_state(&mut modifiers, NamedKey::Meta, true);
+        assert_eq!(modifiers.encode_esc_sequence(), 33);
+
+        apply_modifier_key_state(&mut modifiers, NamedKey::Meta, false);
+        assert!(modifiers.is_empty());
+    }
+
+    // Defends: lock modifier bits stay explicit but are not fabricated without platform lock state.
+    #[test]
+    fn kitty_lock_modifier_bits_are_not_inferred_from_keypress() {
+        let mut modifiers = SequenceModifiers::empty();
+        apply_modifier_key_state(&mut modifiers, NamedKey::CapsLock, true);
+        apply_modifier_key_state(&mut modifiers, NamedKey::NumLock, true);
+
+        assert!(!modifiers.contains(SequenceModifiers::CAPS_LOCK));
+        assert!(!modifiers.contains(SequenceModifiers::NUM_LOCK));
     }
 }
