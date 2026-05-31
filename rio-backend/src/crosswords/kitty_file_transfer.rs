@@ -73,8 +73,11 @@ struct SendSession {
 #[derive(Debug)]
 struct WriteFileState {
     kind: FileKind,
+    compression: KittyFileTransferCompression,
     expected_size: Option<u64>,
     written: u64,
+    compressed_written: u64,
+    compressed_data: Vec<u8>,
     file: Option<File>,
     errored: bool,
 }
@@ -196,8 +199,8 @@ impl KittyFileTransferManager {
         transfer: KittyFileTransfer,
         terminator: &str,
     ) -> KittyFileTransferResponse {
-        if unsupported_mode(&transfer) {
-            return unsupported_mode_response(&transfer, terminator);
+        if unsupported_transmission(&transfer) {
+            return unsupported_transmission_response(&transfer, terminator);
         }
         if let Some(response) = self.reject_duplicate_or_busy(&transfer.id, terminator) {
             return response;
@@ -255,8 +258,8 @@ impl KittyFileTransferManager {
         transfer: KittyFileTransfer,
         terminator: &str,
     ) -> KittyFileTransferResponse {
-        if unsupported_mode(&transfer) {
-            return unsupported_mode_response(&transfer, terminator);
+        if unsupported_transmission(&transfer) {
+            return unsupported_transmission_response(&transfer, terminator);
         }
         if let Some(response) = self.reject_duplicate_or_busy(&transfer.id, terminator) {
             return response;
@@ -470,8 +473,8 @@ impl KittyFileTransferManager {
     }
 
     fn try_handle_send_file(&mut self, transfer: &KittyFileTransfer) -> &'static str {
-        if unsupported_mode(transfer) {
-            return "ENOSYS:Compressed and rsync file transfers are not implemented";
+        if unsupported_transmission(transfer) {
+            return "ENOSYS:Rsync file transfers are not implemented";
         }
         let Some(file_id) = &transfer.file_id else {
             return "EINVAL:Missing file id";
@@ -521,6 +524,10 @@ impl KittyFileTransferManager {
 
         match transfer.file_type {
             KittyFileTransferFileType::Directory => {
+                if transfer.compression != KittyFileTransferCompression::None {
+                    session.errored = true;
+                    return "EINVAL:Compression is only supported for regular files";
+                }
                 if fs::create_dir_all(parent).is_err()
                     || fs::create_dir_all(&path).is_err()
                 {
@@ -531,8 +538,11 @@ impl KittyFileTransferManager {
                     file_id.clone(),
                     WriteFileState {
                         kind: FileKind::Directory,
+                        compression: KittyFileTransferCompression::None,
                         expected_size: transfer.size,
                         written: 0,
+                        compressed_written: 0,
+                        compressed_data: Vec::new(),
                         file: None,
                         errored: false,
                     },
@@ -556,8 +566,11 @@ impl KittyFileTransferManager {
                     file_id.clone(),
                     WriteFileState {
                         kind: FileKind::Regular,
+                        compression: transfer.compression,
                         expected_size: transfer.size,
                         written: 0,
+                        compressed_written: 0,
+                        compressed_data: Vec::new(),
                         file: Some(file),
                         errored: false,
                     },
@@ -602,8 +615,8 @@ impl KittyFileTransferManager {
         transfer: KittyFileTransfer,
         terminator: &str,
     ) -> KittyFileTransferResponse {
-        if unsupported_mode(&transfer) {
-            return unsupported_mode_response(&transfer, terminator);
+        if unsupported_transmission(&transfer) {
+            return unsupported_transmission_response(&transfer, terminator);
         }
         let Some(file_id) = &transfer.file_id else {
             return KittyFileTransferResponse::status(
@@ -693,8 +706,8 @@ impl KittyFileTransferManager {
         transfer: KittyFileTransfer,
         terminator: &str,
     ) -> KittyFileTransferResponse {
-        if unsupported_mode(&transfer) {
-            return unsupported_mode_response(&transfer, terminator);
+        if unsupported_transmission(&transfer) {
+            return unsupported_transmission_response(&transfer, terminator);
         }
         let Some(reply_file_id) = transfer.file_id.as_deref() else {
             return KittyFileTransferResponse::status(
@@ -760,6 +773,15 @@ impl KittyFileTransferManager {
             }
         }
 
+        if transfer.compression == KittyFileTransferCompression::Zlib {
+            return self.send_compressed_receive_file_data(
+                &transfer,
+                reply_file_id,
+                &entry,
+                terminator,
+            );
+        }
+
         let mut file = match File::open(&entry.path) {
             Ok(file) => file,
             Err(_) => {
@@ -812,6 +834,75 @@ impl KittyFileTransferManager {
                 ));
             }
         }
+    }
+
+    fn send_compressed_receive_file_data(
+        &mut self,
+        transfer: &KittyFileTransfer,
+        reply_file_id: &str,
+        entry: &ReceiveEntry,
+        terminator: &str,
+    ) -> KittyFileTransferResponse {
+        let mut file = match File::open(&entry.path) {
+            Ok(file) => file,
+            Err(_) => {
+                return KittyFileTransferResponse::status(
+                    &transfer.id,
+                    Some(reply_file_id),
+                    "EIO:Could not read",
+                    None,
+                    None,
+                    terminator,
+                );
+            }
+        };
+        let mut raw = Vec::new();
+        if Read::by_ref(&mut file)
+            .take(MAX_RECEIVE_FILE_BYTES.saturating_add(1))
+            .read_to_end(&mut raw)
+            .is_err()
+        {
+            return KittyFileTransferResponse::status(
+                &transfer.id,
+                Some(reply_file_id),
+                "EIO:Could not read",
+                None,
+                None,
+                terminator,
+            );
+        }
+        if raw.len() as u64 > MAX_RECEIVE_FILE_BYTES {
+            return KittyFileTransferResponse::status(
+                &transfer.id,
+                Some(reply_file_id),
+                "EFBIG:File is too large",
+                None,
+                None,
+                terminator,
+            );
+        }
+        let compressed = match zlib_compress(&raw) {
+            Ok(compressed) => compressed,
+            Err(status) => {
+                return KittyFileTransferResponse::status(
+                    &transfer.id,
+                    Some(reply_file_id),
+                    status,
+                    None,
+                    None,
+                    terminator,
+                );
+            }
+        };
+        let mut response = KittyFileTransferResponse::default();
+        push_data_replies(
+            &mut response,
+            &transfer.id,
+            reply_file_id,
+            &compressed,
+            terminator,
+        );
+        response
     }
 
     fn receive_entry_for_request(
@@ -878,6 +969,9 @@ impl KittyFileTransferManager {
         let Some(file_id) = &transfer.file_id else {
             return ("EINVAL:Missing file id", None);
         };
+        if unsupported_transmission(transfer) {
+            return ("ENOSYS:Rsync file transfers are not implemented", None);
+        }
         if self.drop_pending_send_session(&transfer.id) {
             return ("EPERM:File transfer command arrived before approval", None);
         }
@@ -891,12 +985,60 @@ impl KittyFileTransferManager {
         if file.errored {
             return ("EIO:File transfer already failed", Some(file.written));
         }
+        if transfer.compression != KittyFileTransferCompression::None
+            && transfer.compression != file.compression
+        {
+            file.errored = true;
+            session.errored = true;
+            return (
+                "EINVAL:Compression changed during file transfer",
+                Some(file.written),
+            );
+        }
         if file.kind != FileKind::Regular {
             file.errored = true;
             session.errored = true;
             return (
                 "EINVAL:Cannot write data to a directory",
                 Some(file.written),
+            );
+        }
+
+        if file.compression == KittyFileTransferCompression::Zlib {
+            if let Some(data) = &transfer.data {
+                let chunk_len = data.len() as u64;
+                let new_compressed_size =
+                    match file.compressed_written.checked_add(chunk_len) {
+                        Some(size) => size,
+                        None => {
+                            file.errored = true;
+                            session.errored = true;
+                            return (
+                                "EFBIG:Compressed file data is too large",
+                                Some(file.written),
+                            );
+                        }
+                    };
+                if new_compressed_size > MAX_WRITE_FILE_BYTES {
+                    file.errored = true;
+                    session.errored = true;
+                    return (
+                        "EFBIG:Compressed file data is too large",
+                        Some(file.written),
+                    );
+                }
+                file.compressed_data.extend_from_slice(data);
+                file.compressed_written = new_compressed_size;
+            }
+
+            if !finish_file {
+                return ("PROGRESS", Some(file.compressed_written));
+            }
+
+            return finish_compressed_send_file(
+                file,
+                &mut session.total_written,
+                &mut session.errored,
             );
         }
 
@@ -1101,19 +1243,18 @@ impl KittyFileTransferManager {
     }
 }
 
-fn unsupported_mode(transfer: &KittyFileTransfer) -> bool {
+fn unsupported_transmission(transfer: &KittyFileTransfer) -> bool {
     transfer.transmission != KittyFileTransferTransmission::Simple
-        || transfer.compression != KittyFileTransferCompression::None
 }
 
-fn unsupported_mode_response(
+fn unsupported_transmission_response(
     transfer: &KittyFileTransfer,
     terminator: &str,
 ) -> KittyFileTransferResponse {
     KittyFileTransferResponse::status(
         &transfer.id,
         transfer.file_id.as_deref(),
-        "ENOSYS:Compressed and rsync file transfers are not implemented",
+        "ENOSYS:Rsync file transfers are not implemented",
         None,
         None,
         terminator,
@@ -1186,6 +1327,113 @@ fn data_reply(
         general_purpose::STANDARD.encode(data),
         terminator
     )
+}
+
+fn push_data_replies(
+    response: &mut KittyFileTransferResponse,
+    session_id: &str,
+    file_id: &str,
+    data: &[u8],
+    terminator: &str,
+) {
+    if data.is_empty() {
+        response.replies.push(data_reply(
+            session_id,
+            file_id,
+            KittyFileTransferAction::EndData,
+            data,
+            terminator,
+        ));
+        return;
+    }
+
+    let mut chunks = data.chunks(READ_CHUNK_BYTES).peekable();
+    while let Some(chunk) = chunks.next() {
+        let action = if chunks.peek().is_none() {
+            KittyFileTransferAction::EndData
+        } else {
+            KittyFileTransferAction::Data
+        };
+        response
+            .replies
+            .push(data_reply(session_id, file_id, action, chunk, terminator));
+    }
+}
+
+fn finish_compressed_send_file(
+    file: &mut WriteFileState,
+    session_total_written: &mut u64,
+    session_errored: &mut bool,
+) -> (&'static str, Option<u64>) {
+    let decompressed = match zlib_decompress(&file.compressed_data, MAX_WRITE_FILE_BYTES)
+    {
+        Ok(decompressed) => decompressed,
+        Err(status) => {
+            file.errored = true;
+            *session_errored = true;
+            return (status, Some(file.written));
+        }
+    };
+    let decompressed_len = decompressed.len() as u64;
+    if file
+        .expected_size
+        .is_some_and(|expected| decompressed_len != expected)
+    {
+        file.errored = true;
+        *session_errored = true;
+        return ("EIO:File size mismatch", Some(decompressed_len));
+    }
+    let new_session_size = match session_total_written.checked_add(decompressed_len) {
+        Some(size) => size,
+        None => {
+            file.errored = true;
+            *session_errored = true;
+            return ("EFBIG:Transfer session is too large", Some(file.written));
+        }
+    };
+    if new_session_size > MAX_WRITE_SESSION_BYTES {
+        file.errored = true;
+        *session_errored = true;
+        return ("EFBIG:Transfer session is too large", Some(file.written));
+    }
+    let Some(handle) = file.file.as_mut() else {
+        file.errored = true;
+        *session_errored = true;
+        return ("EIO:File is not open", Some(file.written));
+    };
+    if handle.write_all(&decompressed).is_err() {
+        file.errored = true;
+        *session_errored = true;
+        file.file = None;
+        return ("EIO:Failed to write file data", Some(file.written));
+    }
+    file.file = None;
+    file.written = decompressed_len;
+    *session_total_written = new_session_size;
+    ("OK", Some(file.written))
+}
+
+fn zlib_decompress(data: &[u8], max_size: u64) -> Result<Vec<u8>, &'static str> {
+    let mut decompressed = Vec::new();
+    flate2::read::ZlibDecoder::new(data)
+        .take(max_size.saturating_add(1))
+        .read_to_end(&mut decompressed)
+        .map_err(|_| "EINVAL:Could not decompress file data")?;
+    if decompressed.len() as u64 > max_size {
+        return Err("EFBIG:File is too large");
+    }
+    Ok(decompressed)
+}
+
+fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, &'static str> {
+    let mut encoder =
+        flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(data)
+        .map_err(|_| "EIO:Could not compress file data")?;
+    encoder
+        .finish()
+        .map_err(|_| "EIO:Could not compress file data")
 }
 
 fn default_destination_root() -> Result<PathBuf, &'static str> {

@@ -1164,8 +1164,9 @@ mod tests {
             b"fid=file_1".as_slice(),
             b"q=2".as_slice(),
             b"ft=directory".as_slice(),
-            b"zip=none".as_slice(),
+            b"zip=zlib".as_slice(),
             b"tt=simple".as_slice(),
+            b"pw=sha256:ignored".as_slice(),
             b"sz=5".as_slice(),
             b"n=L3RtcC9leGFtcGxlLnR4dA==".as_slice(),
             b"d=aGVsbG8=".as_slice(),
@@ -1178,7 +1179,7 @@ mod tests {
         assert_eq!(transfer.file_id.as_deref(), Some("file_1"));
         assert_eq!(transfer.quiet, 2);
         assert_eq!(transfer.file_type, KittyFileTransferFileType::Directory);
-        assert_eq!(transfer.compression, KittyFileTransferCompression::None);
+        assert_eq!(transfer.compression, KittyFileTransferCompression::Zlib);
         assert_eq!(transfer.transmission, KittyFileTransferTransmission::Simple);
         assert_eq!(transfer.size, Some(5));
         assert_eq!(transfer.name.as_deref(), Some("/tmp/example.txt"));

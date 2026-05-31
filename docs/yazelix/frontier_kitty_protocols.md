@@ -287,13 +287,15 @@ Result:
 - Implemented approved receive/read sessions that collect requested paths before
   approval, show a path preview, list regular files/directories with bounded
   traversal, and stream regular file data one file at a time
+- Implemented zlib compression for regular-file send and receive data, matching
+  Kitty's RFC 1950 compression mode
 - Implemented deterministic rejection for out-of-order data, path escapes,
-  duplicate active sessions, links, compression, rsync mode, oversized
-  transfers, excessive receive path counts, and too-deep directory traversal
+  duplicate active sessions, links, rsync mode, oversized transfers, excessive
+  receive path counts, and too-deep directory traversal
 - Added parser/handler/grid tests and a conformance fixture
 - Remaining limitation: no destination chooser beyond the explicit default
-  transfer directory, no compression, no symlink/link handling, no rich metadata
-  preservation, and no trusted bypass support
+  transfer directory, no symlink/link handling, no rich metadata preservation,
+  and no trusted bypass support
 
 ### OSC 72 Drag And Drop
 

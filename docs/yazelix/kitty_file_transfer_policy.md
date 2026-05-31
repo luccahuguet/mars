@@ -81,6 +81,8 @@ This corresponds to the remote client starting `action=send`.
 Current safe implementation:
 
 - allow only regular files and directories
+- accept RFC 1950 zlib-compressed regular file payloads and write only the
+  decompressed bytes after enforcing the same file/session size limits
 - use the user-approved default transfer root shown in the approval prompt
 - create a per-session staging directory first
 - write into staging, then atomically move into the destination root on
@@ -122,6 +124,8 @@ Current safe implementation:
 
 - require explicit user approval for every receive request
 - show every requested path or a summarized tree preview before approval
+- support zlib compression when the approved client requests compressed file
+  data for an individual regular file
 - never follow symlinks while traversing directories
 - reject symlink/link and special-file requests
 - reject device files, sockets, FIFOs, and special files
@@ -148,6 +152,14 @@ Hard defaults should exist even if they become configurable later:
 
 If a request declares a size larger than the configured limit, reject it before
 opening files.
+
+Compression-specific limits:
+
+- compressed incoming write chunks are buffered per regular file only until the
+  `end_data` command, then decompressed with a hard output cap
+- uncompressed output size is the authoritative storage/session size
+- approved receive reads may read one already-size-checked regular file into
+  memory before zlib compression, capped by the receive file size limit
 
 ## Bypass Policy
 
@@ -201,10 +213,10 @@ The log must not store file contents or secret bypass material.
    - one-file-at-a-time streaming
 
 4. Optional advanced features
-   - zlib compression
-   - symlinks constrained to the approved root
-   - rsync/delta transfer
-   - scoped bypass config
+   - zlib compression: implemented for regular-file send and receive data
+   - symlinks constrained to the approved root: not implemented
+   - rsync/delta transfer: not implemented
+   - scoped bypass config: not implemented
 
 ## Non-Goals
 

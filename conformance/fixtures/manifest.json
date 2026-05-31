@@ -122,6 +122,14 @@
       "hex": "1b5d353131333b61633d73656e643b69643d73657373696f6e2d311b5c"
     },
     {
+      "id": "kitty_file_transfer_zlib_file",
+      "tier": "cool",
+      "protocol": "Kitty file transfer",
+      "description": "Declare a regular OSC 5113 file transfer entry using zlib compression metadata.",
+      "source": "Kitty file transfer supports RFC 1950 zlib compression on individual file commands with zip=zlib.",
+      "hex": "1b5d353131333b61633d66696c653b69643d73657373696f6e2d313b6669643d66696c655f313b7a69703d7a6c69623b737a3d31313b6e3d5932397463484a6c63334e6c5a4335306548513d1b5c"
+    },
+    {
       "id": "kitty_graphics_1x1_rgba",
       "tier": "must",
       "protocol": "Kitty graphics",

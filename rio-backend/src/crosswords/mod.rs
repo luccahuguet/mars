@@ -6300,6 +6300,44 @@ mod tests {
         general_purpose::STANDARD.encode(status.as_bytes())
     }
 
+    fn test_zlib_compress(data: &[u8]) -> Vec<u8> {
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        use std::io::Write;
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn test_zlib_decompress(data: &[u8]) -> Vec<u8> {
+        let mut decoder = flate2::read::ZlibDecoder::new(data);
+        let mut decoded = Vec::new();
+        use std::io::Read;
+        decoder.read_to_end(&mut decoded).unwrap();
+        decoded
+    }
+
+    fn captured_file_transfer_payload(
+        events: &Rc<RefCell<Vec<RioEvent>>>,
+        file_id: &str,
+    ) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for (_, reply) in captured_pty_writes(events) {
+            if !(reply.contains("]5113;ac=data;") || reply.contains("]5113;ac=end_data;"))
+                || !reply.contains(&format!("fid={file_id};"))
+            {
+                continue;
+            }
+            let Some(data_start) = reply.find(";d=") else {
+                continue;
+            };
+            let data = reply[data_start + 3..]
+                .trim_end_matches("\x1b\\")
+                .trim_end_matches('\x07');
+            payload.extend(general_purpose::STANDARD.decode(data.as_bytes()).unwrap());
+        }
+        payload
+    }
+
     fn cell_has_text_sizing<U: EventListener>(
         term: &Crosswords<U>,
         row: usize,
@@ -7504,6 +7542,54 @@ mod tests {
     }
 
     #[test]
+    // Defends: approved OSC 5113 send accepts zlib-compressed regular file data and stores the decompressed bytes.
+    fn osc5113_file_transfer_approved_send_commits_zlib_file() {
+        let (mut term, _events) = make_capturing_crosswords(7);
+        let temp_dir = unique_test_dir("file-transfer-zlib-send");
+        let destination_root = temp_dir.join("downloads");
+
+        Handler::kitty_file_transfer(
+            &mut term,
+            kitty_file_transfer(KittyFileTransferAction::Send, "session-1"),
+            "\x1b\\",
+        );
+        point_file_transfer_session_at(&mut term, "session-1", destination_root.clone());
+        term.handle_kitty_file_transfer_approval("session-1", true);
+
+        let mut file = kitty_file_transfer(KittyFileTransferAction::File, "session-1");
+        file.file_id = Some("file_1".to_owned());
+        file.name = Some("compressed.txt".to_owned());
+        file.compression = KittyFileTransferCompression::Zlib;
+        file.size = Some(11);
+        Handler::kitty_file_transfer(&mut term, file, "\x1b\\");
+
+        let compressed = test_zlib_compress(b"hello zlib!");
+        let midpoint = compressed.len() / 2;
+        let mut data = kitty_file_transfer(KittyFileTransferAction::Data, "session-1");
+        data.file_id = Some("file_1".to_owned());
+        data.data = Some(compressed[..midpoint].to_vec());
+        Handler::kitty_file_transfer(&mut term, data, "\x1b\\");
+
+        let mut end_data =
+            kitty_file_transfer(KittyFileTransferAction::EndData, "session-1");
+        end_data.file_id = Some("file_1".to_owned());
+        end_data.data = Some(compressed[midpoint..].to_vec());
+        Handler::kitty_file_transfer(&mut term, end_data, "\x1b\\");
+
+        Handler::kitty_file_transfer(
+            &mut term,
+            kitty_file_transfer(KittyFileTransferAction::Finish, "session-1"),
+            "\x1b\\",
+        );
+
+        let committed_file = destination_root
+            .join("session-session-1")
+            .join("compressed.txt");
+        assert_eq!(fs::read(&committed_file).unwrap(), b"hello zlib!");
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
     // Defends: approved OSC 5113 writes still reject path traversal before opening files.
     fn osc5113_file_transfer_rejects_path_escape() {
         let (mut term, events) = make_capturing_crosswords(7);
@@ -7619,6 +7705,39 @@ mod tests {
         assert!(captured_pty_writes(&events).iter().any(|(_, reply)| {
             reply == "\x1b]5113;ac=end_data;id=session-1;fid=request_1;d=aGVsbG8=\x1b\\"
         }));
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    // Defends: approved OSC 5113 receive can zlib-compress local file data before streaming it to the client.
+    fn osc5113_receive_approved_regular_file_streams_zlib_data() {
+        let (mut term, events) = make_capturing_crosswords(7);
+        let temp_dir = unique_test_dir("file-transfer-receive-zlib");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("document.txt");
+        fs::write(&path, b"hello compressed receive").unwrap();
+
+        let mut receive =
+            kitty_file_transfer(KittyFileTransferAction::Receive, "session-1");
+        receive.size = Some(1);
+        Handler::kitty_file_transfer(&mut term, receive, "\x1b\\");
+        let mut file = kitty_file_transfer(KittyFileTransferAction::File, "session-1");
+        file.file_id = Some("request_1".to_owned());
+        file.name = Some(path.to_string_lossy().to_string());
+        Handler::kitty_file_transfer(&mut term, file, "\x1b\\");
+        term.handle_kitty_file_transfer_approval("session-1", true);
+
+        let mut read = kitty_file_transfer(KittyFileTransferAction::File, "session-1");
+        read.file_id = Some("request_1".to_owned());
+        read.name = Some(path.to_string_lossy().to_string());
+        read.compression = KittyFileTransferCompression::Zlib;
+        Handler::kitty_file_transfer(&mut term, read, "\x1b\\");
+
+        let compressed = captured_file_transfer_payload(&events, "request_1");
+        assert_eq!(
+            test_zlib_decompress(&compressed),
+            b"hello compressed receive"
+        );
         let _ = fs::remove_dir_all(temp_dir);
     }
 
