@@ -85,24 +85,25 @@ fn ghostty_cursor_style(
 #[cfg(feature = "wgpu")]
 fn ghostty_cursor_rect(
     style: crate::grid_emit::CursorRenderStyle,
-    col: u16,
-    row: u16,
+    extent: crate::grid_emit::CursorVisualExtent,
     panel_left: f32,
     panel_top: f32,
     cell_w: f32,
     cell_h: f32,
 ) -> [f32; 4] {
-    let x = panel_left + col as f32 * cell_w;
-    let y = panel_top + row as f32 * cell_h;
+    let x = panel_left + extent.col as f32 * cell_w;
+    let y = panel_top + extent.row as f32 * cell_h;
+    let width = cell_w * extent.width.max(1) as f32;
+    let height = cell_h * extent.height.max(1) as f32;
     let thickness =
         crate::grid_emit::cursor_thickness(cell_h.round().max(1.0) as u32) as f32;
 
     match style {
         crate::grid_emit::CursorRenderStyle::Block
-        | crate::grid_emit::CursorRenderStyle::BlockHollow => [x, y, cell_w, cell_h],
-        crate::grid_emit::CursorRenderStyle::Bar => [x, y, thickness, cell_h],
+        | crate::grid_emit::CursorRenderStyle::BlockHollow => [x, y, width, height],
+        crate::grid_emit::CursorRenderStyle::Bar => [x, y, thickness, height],
         crate::grid_emit::CursorRenderStyle::Underline => {
-            [x, y + (cell_h - thickness).max(0.0), cell_w, thickness]
+            [x, y + (height - thickness).max(0.0), cell_w, thickness]
         }
     }
 }
@@ -114,6 +115,27 @@ fn cursor_color_u8(color: rio_backend::config::colors::ColorArray) -> [u8; 4] {
         (color[2].clamp(0.0, 1.0) * 255.0) as u8,
         (color[3].clamp(0.0, 1.0) * 255.0) as u8,
     ]
+}
+
+fn push_cursor_reverse_cell(
+    col: u32,
+    row: u32,
+    text_color: rio_backend::config::colors::ColorArray,
+    bg_color: rio_backend::config::colors::ColorArray,
+    count: &mut u32,
+    positions: &mut [[u32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS],
+    text_colors: &mut [[f32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS],
+    bg_colors: &mut [[f32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS],
+) {
+    let idx = *count as usize;
+    if idx >= rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS {
+        return;
+    }
+
+    positions[idx] = [col, row, 0, 0];
+    text_colors[idx] = text_color;
+    bg_colors[idx] = bg_color;
+    *count += 1;
 }
 
 fn extra_cursor_color_array(
@@ -3705,6 +3727,7 @@ impl Screen<'_> {
                 term_colors: rio_backend::config::colors::term::TermColors,
                 cursor_col: u16,
                 cursor_row: u16,
+                cursor_extent: crate::grid_emit::CursorVisualExtent,
                 cursor_visible: bool,
                 /// Terminal-side cursor shape (block / underline /
                 /// beam / hidden). Driven by DECSCUSR + the
@@ -3828,6 +3851,13 @@ impl Screen<'_> {
                 let extra_cursor_follow_shape =
                     ctx.renderable_content.extra_cursor_follow_shape;
                 let cursor = &ctx.renderable_content.cursor;
+                let cursor_extent = crate::grid_emit::text_sizing_cursor_visual_extent(
+                    &visible_rows,
+                    &extras,
+                    cursor.state.pos,
+                    ctx.renderable_content.columns,
+                    ctx.renderable_content.screen_lines,
+                );
                 // Take + reset so next frame sees fresh damage only
                 // from this frame's `Renderer::run`.
                 let damage = std::mem::replace(
@@ -3899,6 +3929,7 @@ impl Screen<'_> {
                     term_colors,
                     cursor_col: cursor.state.pos.col.0 as u16,
                     cursor_row: cursor.state.pos.row.0 as u16,
+                    cursor_extent,
                     cursor_visible: cursor.state.is_visible(),
                     cursor_shape,
                     cursor_blinking,
@@ -4127,14 +4158,22 @@ impl Screen<'_> {
                 let cell_w = p.cell_w.round().clamp(1.0, u32::MAX as f32) as u32;
                 let cell_h = p.cell_h.round().clamp(1.0, u32::MAX as f32) as u32;
                 if let Some(style) = render_style {
+                    let cursor_color = cursor_color_u8(p.cursor_color);
+                    let (cursor_cell_w, cursor_cell_h) =
+                        crate::grid_emit::cursor_sprite_cell_size(
+                            style,
+                            p.cursor_extent,
+                            cell_w,
+                            cell_h,
+                        );
                     if let Some(cursor_cell) = crate::grid_emit::cursor_sprite_cell(
                         grid,
                         style,
-                        p.cursor_col,
-                        p.cursor_row,
-                        cursor_color_u8(p.cursor_color),
-                        cell_w,
-                        cell_h,
+                        p.cursor_extent.col,
+                        p.cursor_extent.row,
+                        cursor_color,
+                        cursor_cell_w,
+                        cursor_cell_h,
                     ) {
                         if cursor_cell.block_slot {
                             block_cursor_cells.push(cursor_cell.cell);
@@ -4163,6 +4202,32 @@ impl Screen<'_> {
                     [[0.0f32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS];
                 let mut extra_cursor_bg_color_uniform =
                     [[0.0f32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS];
+                if matches!(
+                    render_style,
+                    Some(crate::grid_emit::CursorRenderStyle::Block)
+                ) {
+                    for row in p.cursor_extent.row
+                        ..p.cursor_extent.row.saturating_add(p.cursor_extent.height)
+                    {
+                        for col in p.cursor_extent.col
+                            ..p.cursor_extent.col.saturating_add(p.cursor_extent.width)
+                        {
+                            if col == p.cursor_extent.col && row == p.cursor_extent.row {
+                                continue;
+                            }
+                            push_cursor_reverse_cell(
+                                col as u32,
+                                row as u32,
+                                p.cursor_text_color,
+                                p.cursor_color,
+                                &mut extra_cursor_count,
+                                &mut extra_cursor_pos,
+                                &mut extra_cursor_color_uniform,
+                                &mut extra_cursor_bg_color_uniform,
+                            );
+                        }
+                    }
+                }
                 for extra_cursor in &p.extra_cursors {
                     if extra_cursor.row.0 < 0
                         || extra_cursor.row.0 as u32 >= p.rows
@@ -4199,18 +4264,16 @@ impl Screen<'_> {
                     };
                     if cursor_cell.block_slot {
                         block_cursor_cells.push(cursor_cell.cell);
-                        let idx = extra_cursor_count as usize;
-                        if idx < rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS {
-                            extra_cursor_pos[idx] = [
-                                extra_cursor.col.0 as u32,
-                                extra_cursor.row.0 as u32,
-                                0,
-                                0,
-                            ];
-                            extra_cursor_color_uniform[idx] = extra_cursor_text_color;
-                            extra_cursor_bg_color_uniform[idx] = extra_cursor_bg_color;
-                            extra_cursor_count += 1;
-                        }
+                        push_cursor_reverse_cell(
+                            extra_cursor.col.0 as u32,
+                            extra_cursor.row.0 as u32,
+                            extra_cursor_text_color,
+                            extra_cursor_bg_color,
+                            &mut extra_cursor_count,
+                            &mut extra_cursor_pos,
+                            &mut extra_cursor_color_uniform,
+                            &mut extra_cursor_bg_color_uniform,
+                        );
                     } else {
                         non_block_cursor_cells.push(cursor_cell.cell);
                     }
@@ -4245,8 +4308,7 @@ impl Screen<'_> {
                         rio_backend::sugarloaf::GhosttyShaderCursor {
                             rect: ghostty_cursor_rect(
                                 style,
-                                p.cursor_col,
-                                p.cursor_row,
+                                p.cursor_extent,
                                 panel_left,
                                 panel_top,
                                 p.cell_w,
@@ -4283,8 +4345,10 @@ impl Screen<'_> {
                             Some(rio_backend::sugarloaf::GhosttyShaderCursor {
                                 rect: ghostty_cursor_rect(
                                     style,
-                                    extra_cursor.col.0 as u16,
-                                    extra_cursor.row.0 as u16,
+                                    crate::grid_emit::CursorVisualExtent::cell(
+                                        extra_cursor.col.0 as u16,
+                                        extra_cursor.row.0 as u16,
+                                    ),
                                     panel_left,
                                     panel_top,
                                     p.cell_w,
@@ -4319,10 +4383,12 @@ impl Screen<'_> {
                 }
 
                 // Bg-tint uniforms fire ONLY for the active block
-                // style — the bg shader paints the cursor cell in
+                // style — the bg shader paints the cursor anchor in
                 // `cursor_bg_color` and the text shader swaps glyph
-                // fg to `cursor_color` (so the character inverts on
-                // top of the block). All other styles (bar /
+                // fg to `cursor_color` (so the glyph inverts on
+                // top of the block). Extra OSC 66 block cells are
+                // mirrored through the extra-cursor reverse arrays
+                // above. All other styles (bar /
                 // underline / hollow) draw via the sprite emitted
                 // above; their bg/text stays untouched. Same gate as
                 // .
@@ -4331,7 +4397,7 @@ impl Screen<'_> {
                     Some(crate::grid_emit::CursorRenderStyle::Block)
                 ) {
                     (
-                        [p.cursor_col as u32, p.cursor_row as u32],
+                        [p.cursor_extent.col as u32, p.cursor_extent.row as u32],
                         [bg_col[0], bg_col[1], bg_col[2], bg_col[3]],
                         [
                             p.cursor_text_color[0],

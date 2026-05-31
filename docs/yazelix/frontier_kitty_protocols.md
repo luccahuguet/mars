@@ -33,6 +33,8 @@ Already implemented or partially validated in Yazelix-terminal:
 - OSC 66 parser, cell-width behavior, scaled/fractional rendering, multicell
   overwrite behavior, lower-row skip behavior, and block erasure for
   ECH/EL/ED/ICH/DCH/IL/DL intersections
+- OSC 66 block, hollow-block, bar, and underline cursor geometry expands over
+  the sized text visual block, including Ghostty shader cursor rectangles
 - OSC 99 notification parsing/display, support query replies, alive query
   replies, and untracked close replies
 - OSC 133 semantic prompt regions, prompt navigation, and output selection
@@ -59,9 +61,6 @@ Important gaps found during this audit:
   behavior beyond the bounded renderer uniform capacity. The checked Ghostty
   source does not appear to implement the protocol, so this remains modern
   Kitty-frontier work rather than strict Ghostty parity.
-- OSC 66 still needs deeper visual cursor work so block/bar/beam cursors cover
-  the full multicell character shape when the cursor is inside a sized text
-  block.
 - Kitty file transfer and OSC 72 drag/drop are absent. Both cross a security and
   OS-integration boundary and should not be treated as parser-only work.
 

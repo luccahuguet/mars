@@ -149,7 +149,8 @@ block the first cursor-shader proof:
 
 - Kitty OSC 66 text sizing is implemented for scaled/fractional rendering,
   multicell overwrite behavior, lower-row skip behavior, and the core editing
-  controls that intersect or split blocks
+  controls that intersect or split blocks; cursor sprites and Ghostty shader
+  cursor rectangles use the full sized-text visual extent
 - parser fixtures copied from observed Ghostty/WezTerm/Kitty behavior where
   licensing allows
 - fuzzing or property coverage for escape sequence parsers

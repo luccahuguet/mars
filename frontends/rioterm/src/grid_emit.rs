@@ -626,6 +626,91 @@ pub struct CursorSpriteCell {
     pub cell: CellText,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CursorVisualExtent {
+    pub col: u16,
+    pub row: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
+impl CursorVisualExtent {
+    #[inline]
+    pub fn cell(col: u16, row: u16) -> Self {
+        Self {
+            col,
+            row,
+            width: 1,
+            height: 1,
+        }
+    }
+}
+
+pub fn text_sizing_cursor_visual_extent(
+    rows: &[Row<Square>],
+    extras_table: &ExtrasMap,
+    cursor: Pos,
+    cols: usize,
+    screen_lines: usize,
+) -> CursorVisualExtent {
+    let fallback = CursorVisualExtent::cell(cursor.col.0 as u16, cursor.row.0 as u16);
+    if cursor.row.0 < 0 || cursor.row.0 as usize >= screen_lines || cursor.col.0 >= cols {
+        return fallback;
+    }
+
+    let cursor_row = cursor.row.0 as usize;
+    let cursor_col = cursor.col.0;
+    for (row_idx, row) in rows.iter().take(screen_lines).enumerate() {
+        if !row.has_extras {
+            continue;
+        }
+
+        for col_idx in 0..cols.min(row.len()) {
+            let Some(sizing) = text_sizing_payload(extras_table, row[Column(col_idx)])
+            else {
+                continue;
+            };
+            let width = usize::from(sizing.occupied_width.max(1))
+                .min(cols.saturating_sub(col_idx));
+            let height = usize::from(sizing.scale.max(1))
+                .min(screen_lines.saturating_sub(row_idx));
+            if cursor_row >= row_idx
+                && cursor_row < row_idx + height
+                && cursor_col >= col_idx
+                && cursor_col < col_idx + width
+            {
+                return CursorVisualExtent {
+                    col: col_idx as u16,
+                    row: row_idx as u16,
+                    width: width.max(1).min(u16::MAX as usize) as u16,
+                    height: height.max(1).min(u16::MAX as usize) as u16,
+                };
+            }
+        }
+    }
+
+    fallback
+}
+
+pub fn cursor_sprite_cell_size(
+    style: CursorRenderStyle,
+    extent: CursorVisualExtent,
+    cell_w: u32,
+    cell_h: u32,
+) -> (u32, u32) {
+    let width_cells = match style {
+        CursorRenderStyle::Block | CursorRenderStyle::BlockHollow => {
+            extent.width.max(1) as u32
+        }
+        CursorRenderStyle::Bar | CursorRenderStyle::Underline => 1,
+    };
+    let height_cells = extent.height.max(1) as u32;
+    (
+        cell_w.saturating_mul(width_cells).max(1),
+        cell_h.saturating_mul(height_cells).max(1),
+    )
+}
+
 /// Look up or rasterize a built-in drawable sprite (box-drawing, …) into
 /// the grid atlas. Keyed by codepoint + cell height, so a font-size / DPI
 /// change re-rasterizes; rasterized once then served from the atlas like
@@ -2737,4 +2822,100 @@ fn font_library_hinting(_r: &GridGlyphRasterizer) -> bool {
     // For now the lock on swash rasterize is a small fraction of
     // render time; optimise if profiling flags it.
     true
+}
+
+#[cfg(test)]
+mod tests {
+    // Test lane: default
+    use super::*;
+    use rio_backend::crosswords::square::CellFlags;
+    use std::sync::Arc;
+
+    fn text_sizing_rows() -> (Vec<Row<Square>>, ExtrasMap) {
+        let mut rows = vec![Row::new(4), Row::new(4), Row::new(4)];
+        let mut anchor = Square::default();
+        anchor.set_c('x');
+        anchor.set_extras_id(Some(1));
+        anchor.insert_cell_flag(CellFlags::TEXT_SIZING);
+        rows[0][Column(1)] = anchor;
+        rows[0].has_extras = true;
+
+        let mut extras = ExtrasMap::default();
+        extras.insert(
+            1,
+            Extras {
+                text_sizing: Some(TextSizingExtra {
+                    text: Arc::<str>::from("x"),
+                    occupied_width: 2,
+                    scale: 2,
+                    fractional_scale: None,
+                    vertical_align: TextSizingAlignment::Start,
+                    horizontal_align: TextSizingAlignment::Start,
+                }),
+                ..Default::default()
+            },
+        );
+
+        (rows, extras)
+    }
+
+    #[test]
+    // Defends: cursor rendering can recover the full OSC 66 visual block from the row/extras snapshot.
+    fn text_sizing_cursor_visual_extent_covers_block() {
+        let (rows, extras) = text_sizing_rows();
+
+        let extent = text_sizing_cursor_visual_extent(
+            &rows,
+            &extras,
+            Pos::new(Line(1), Column(2)),
+            4,
+            3,
+        );
+
+        assert_eq!(
+            extent,
+            CursorVisualExtent {
+                col: 1,
+                row: 0,
+                width: 2,
+                height: 2,
+            }
+        );
+    }
+
+    #[test]
+    // Defends: normal cursor rendering keeps single-cell geometry when no OSC 66 block contains it.
+    fn text_sizing_cursor_visual_extent_falls_back_to_cell() {
+        let (rows, extras) = text_sizing_rows();
+
+        let extent = text_sizing_cursor_visual_extent(
+            &rows,
+            &extras,
+            Pos::new(Line(2), Column(3)),
+            4,
+            3,
+        );
+
+        assert_eq!(extent, CursorVisualExtent::cell(3, 2));
+    }
+
+    #[test]
+    // Defends: OSC 66 cursor sprites expand over the block while bar cursors keep first-column width.
+    fn text_sizing_cursor_sprite_size_matches_extent() {
+        let extent = CursorVisualExtent {
+            col: 1,
+            row: 0,
+            width: 2,
+            height: 3,
+        };
+
+        assert_eq!(
+            cursor_sprite_cell_size(CursorRenderStyle::Block, extent, 8, 18),
+            (16, 54)
+        );
+        assert_eq!(
+            cursor_sprite_cell_size(CursorRenderStyle::Bar, extent, 8, 18),
+            (8, 54)
+        );
+    }
 }
