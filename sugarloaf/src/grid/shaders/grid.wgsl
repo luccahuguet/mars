@@ -14,7 +14,7 @@
 // come in already sRGB-encoded from the CPU).
 //
 // Bindings:
-// @group(0) @binding(0) Uniforms (140+4 = 144 bytes)
+// @group(0) @binding(0) Uniforms (with bounded extra-cursor arrays)
 // @group(0) @binding(1) CellBg[] (cols * rows entries)
 //
 // Must match `WgpuGridRenderer`'s bind group layout in
@@ -33,7 +33,13 @@ struct Uniforms {
     flags:            u32,           //       148
     padding_extend:   u32,           //       152
     input_colorspace: u32,           //       156
+    extra_cursor_count_pad: vec4<u32>, //     160; .x = count
+    extra_cursor_pos: array<vec4<u32>, 256>,
+    extra_cursor_color: array<vec4<f32>, 256>,
+    extra_cursor_bg_color: array<vec4<f32>, 256>,
 };
+
+const MAX_CURSOR_REVERSE_CELLS: u32 = 256u;
 
 // Color space / transfer curve helpers. Matrices match the Metal
 // peer (`grid.metal`) and `sugarloaf/src/renderer/renderer.metal`,
@@ -76,6 +82,22 @@ fn grid_prepare_output_rgb(srgb: vec3<f32>, input_colorspace: u32) -> vec3<f32> 
         lin = grid_rec2020_to_p3(lin);
     }
     return grid_linear_to_srgb(lin);
+}
+
+fn extra_cursor_index(pos: vec2<u32>) -> i32 {
+    let count = min(uniforms.extra_cursor_count_pad.x, MAX_CURSOR_REVERSE_CELLS);
+    var idx = 0u;
+    loop {
+        if (idx >= count) {
+            break;
+        }
+        let cursor_pos = uniforms.extra_cursor_pos[idx].xy;
+        if (cursor_pos.x == pos.x && cursor_pos.y == pos.y) {
+            return i32(idx);
+        }
+        idx = idx + 1u;
+    }
+    return -1;
 }
 
 const PAD_EXTEND_LEFT:  u32 = 1u;
@@ -175,6 +197,20 @@ fn grid_bg_fragment(in: VsOut) -> @location(0) vec4<f32> {
         );
         let a = uniforms.cursor_bg_color.a;
         return vec4<f32>(rgb * a, a);
+    }
+
+    if (orig_grid_pos.x >= 0 && orig_grid_pos.y >= 0) {
+        let extra_idx = extra_cursor_index(
+            vec2<u32>(u32(orig_grid_pos.x), u32(orig_grid_pos.y))
+        );
+        if (extra_idx >= 0) {
+            let c = uniforms.extra_cursor_bg_color[u32(extra_idx)];
+            if (c.a > 0.0) {
+                let rgb = grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace);
+                let a = c.a;
+                return vec4<f32>(rgb * a, a);
+            }
+        }
     }
 
  // Load cell, convert to output color space, then premultiply.
@@ -291,6 +327,17 @@ fn grid_text_vertex(
             grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace) * c.a,
             c.a,
         );
+    } else if ((in.bools & BOOL_IS_CURSOR_GLYPH) == 0u) {
+        let extra_idx = extra_cursor_index(in.grid_pos);
+        if (extra_idx >= 0) {
+            let c = uniforms.extra_cursor_color[u32(extra_idx)];
+            if (c.a > 0.0) {
+                color = vec4<f32>(
+                    grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace) * c.a,
+                    c.a,
+                );
+            }
+        }
     }
 
     out.color = color;
@@ -309,4 +356,3 @@ fn grid_text_fragment(in: TextVsOut) -> @location(0) vec4<f32> {
         return textureLoad(atlas_color, ic, 0);
     }
 }
-

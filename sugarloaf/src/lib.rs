@@ -53,6 +53,7 @@ pub use components::filters::Filter;
 #[cfg(feature = "wgpu")]
 pub use components::ghostty_shaders::{
     GhosttyCursorStyle, GhosttyShaderCursor, GhosttyShaderFrameState,
+    MAX_GHOSTTY_SHADER_EXTRA_CURSORS,
 };
 pub use layout::{
     SpanStyle, SpanStyleDecoration, TextDimensions, UnderlineInfo, UnderlineShape,

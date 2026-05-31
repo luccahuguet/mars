@@ -16,6 +16,8 @@
 
 use bytemuck::{Pod, Zeroable};
 
+pub const MAX_CURSOR_REVERSE_CELLS: usize = 256;
+
 /// Flat per-cell background cell. Indexed by `row * cols + col` in the
 /// GPU buffer; the shader reads `bg_cells[instance_id]` where the
 /// instance corresponds to a fullscreen grid cell.
@@ -164,6 +166,18 @@ pub struct GridUniforms {
     /// `Uniforms.use_display_p3` + `load_color` pair at
     /// `ghostty/src/renderer/shaders/shaders.metal:224`.
     pub input_colorspace: u32,
+    // --- 16-byte block at offset 160 ---
+    /// Number of populated entries in the extra cursor arrays below.
+    pub extra_cursor_count: u32,
+    pub _pad_extra_cursor_count: [u32; 3],
+    // --- 16-byte array blocks ---
+    /// Extra block cursor cell positions. Each entry uses x/y in `.xy`;
+    /// `.zw` are padding so every element is one std140-friendly vec4.
+    pub extra_cursor_pos: [[u32; 4]; MAX_CURSOR_REVERSE_CELLS],
+    /// Foreground swap colors for text under extra block cursors.
+    pub extra_cursor_color: [[f32; 4]; MAX_CURSOR_REVERSE_CELLS],
+    /// Background fill colors for extra block cursors.
+    pub extra_cursor_bg_color: [[f32; 4]; MAX_CURSOR_REVERSE_CELLS],
 }
 
 impl GridUniforms {

@@ -11,9 +11,8 @@
 // Metal `Uniforms` struct in grid.metal — std140 layout naturally
 // matches the hand-packed byte layout used over there.
 
-// `Uniforms` mirrors `GridUniforms` (144B + pad to 160B = 10 × vec4
-// blocks under std140). See cell.rs for offsets / sizes; the fields
-// here are listed in the same order.
+// `Uniforms` mirrors `GridUniforms`. See cell.rs for offsets / sizes;
+// the fields here are listed in the same order.
 layout(set = 0, binding = 0, std140) uniform Uniforms {
     mat4 projection;        // offset   0
     vec4 grid_padding;      // offset  64  (top, right, bottom, left)
@@ -27,6 +26,10 @@ layout(set = 0, binding = 0, std140) uniform Uniforms {
     uint flags;             // offset 148
     uint padding_extend;    // offset 152
     uint input_colorspace;  // offset 156
+    uvec4 extra_cursor_count_pad; // .x = count
+    uvec4 extra_cursor_pos[256];
+    vec4 extra_cursor_color[256];
+    vec4 extra_cursor_bg_color[256];
 } uniforms;
 
 // `CellBg` is 4 bytes (uchar4 rgba) in cell.rs. We expose the storage
@@ -43,6 +46,7 @@ const uint PAD_EXTEND_LEFT  = 1u << 0;
 const uint PAD_EXTEND_RIGHT = 1u << 1;
 const uint PAD_EXTEND_UP    = 1u << 2;
 const uint PAD_EXTEND_DOWN  = 1u << 3;
+const uint MAX_CURSOR_REVERSE_CELLS = 256u;
 
 // ----- colorspace helpers (mirror `grid.metal` 1:1) -----
 
@@ -82,6 +86,17 @@ vec3 grid_prepare_output_rgb(vec3 srgb, uint input_colorspace) {
         lin = grid_rec2020_to_p3(lin);
     }
     return grid_linear_to_srgb(lin);
+}
+
+int extra_cursor_index(uvec2 pos) {
+    uint count = min(uniforms.extra_cursor_count_pad.x, MAX_CURSOR_REVERSE_CELLS);
+    for (uint idx = 0; idx < count; idx++) {
+        uvec2 cursor_pos = uniforms.extra_cursor_pos[idx].xy;
+        if (cursor_pos.x == pos.x && cursor_pos.y == pos.y) {
+            return int(idx);
+        }
+    }
+    return -1;
 }
 
 void main() {
@@ -139,6 +154,21 @@ void main() {
         c.rgb *= c.a;
         out_color = c;
         return;
+    }
+
+    if (orig_grid_pos.x >= 0 && orig_grid_pos.y >= 0) {
+        int extra_idx = extra_cursor_index(
+            uvec2(uint(orig_grid_pos.x), uint(orig_grid_pos.y))
+        );
+        if (extra_idx >= 0) {
+            vec4 c = uniforms.extra_cursor_bg_color[extra_idx];
+            if (c.a > 0.0) {
+                c.rgb = grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace);
+                c.rgb *= c.a;
+                out_color = c;
+                return;
+            }
+        }
     }
 
     // Load + decode the CellBg.

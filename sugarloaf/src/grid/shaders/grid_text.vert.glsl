@@ -37,6 +37,10 @@ layout(set = 0, binding = 0, std140) uniform Uniforms {
     uint flags;
     uint padding_extend;
     uint input_colorspace;
+    uvec4 extra_cursor_count_pad; // .x = count
+    uvec4 extra_cursor_pos[256];
+    vec4 extra_cursor_color[256];
+    vec4 extra_cursor_bg_color[256];
 } uniforms;
 
 layout(location = 0) in uvec2 in_glyph_pos;
@@ -50,6 +54,7 @@ layout(location = 0) flat out vec4 out_color;
 layout(location = 1)      out vec2 out_tex_coord;
 
 const uint BOOL_IS_CURSOR_GLYPH = 2u;
+const uint MAX_CURSOR_REVERSE_CELLS = 256u;
 
 // Colorspace helpers — same as grid_bg.frag.glsl. We need them in the
 // vertex stage too so the foreground color goes through the same
@@ -86,6 +91,17 @@ vec3 grid_prepare_output_rgb(vec3 srgb, uint cs) {
         lin = grid_rec2020_to_p3(lin);
     }
     return grid_linear_to_srgb(lin);
+}
+
+int extra_cursor_index(uvec2 pos) {
+    uint count = min(uniforms.extra_cursor_count_pad.x, MAX_CURSOR_REVERSE_CELLS);
+    for (uint idx = 0; idx < count; idx++) {
+        uvec2 cursor_pos = uniforms.extra_cursor_pos[idx].xy;
+        if (cursor_pos.x == pos.x && cursor_pos.y == pos.y) {
+            return int(idx);
+        }
+    }
+    return -1;
 }
 
 void main() {
@@ -133,6 +149,16 @@ void main() {
         c.rgb = grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace);
         c.rgb *= c.a;
         color = c;
+    } else if ((in_bools & BOOL_IS_CURSOR_GLYPH) == 0u) {
+        int extra_idx = extra_cursor_index(in_grid_pos);
+        if (extra_idx >= 0) {
+            vec4 c = uniforms.extra_cursor_color[extra_idx];
+            if (c.a > 0.0) {
+                c.rgb = grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace);
+                c.rgb *= c.a;
+                color = c;
+            }
+        }
     }
 
     out_color = color;

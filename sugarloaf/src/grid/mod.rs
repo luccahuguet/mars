@@ -32,7 +32,7 @@ pub mod webgpu;
 use crate::context::{Context, ContextType};
 
 pub use atlas::{AtlasSlot, GlyphKey, RasterizedGlyph};
-pub use cell::{CellBg, CellText, GridUniforms};
+pub use cell::{CellBg, CellText, GridUniforms, MAX_CURSOR_REVERSE_CELLS};
 
 /// Backend-dispatching grid renderer. One of these lives per terminal
 /// panel; it owns the per-panel cell buffers and submits grid draw

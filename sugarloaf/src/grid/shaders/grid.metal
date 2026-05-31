@@ -36,8 +36,14 @@ struct Uniforms {
     float    min_contrast;     //       144
     uint     flags;            //       148
     uint     padding_extend;   //       152
-    uint     input_colorspace; //       156 → total 160
+    uint     input_colorspace; //       156
+    uint4    extra_cursor_count_pad; // .x = count
+    uint4    extra_cursor_pos[256];
+    float4   extra_cursor_color[256];
+    float4   extra_cursor_bg_color[256];
 };
+
+constant uint MAX_CURSOR_REVERSE_CELLS = 256;
 
 //-------------------------------------------------------------------
 // Color space / transfer curve helpers. Matrices match
@@ -89,6 +95,17 @@ float3 grid_prepare_output_rgb(float3 srgb, uint input_colorspace) {
         lin = grid_rec2020_to_p3(lin);
     }
     return grid_linear_to_srgb(lin);
+}
+
+int extra_cursor_index(uint2 pos, constant Uniforms& uniforms) {
+    uint count = min(uniforms.extra_cursor_count_pad.x, MAX_CURSOR_REVERSE_CELLS);
+    for (uint idx = 0; idx < count; idx++) {
+        uint2 cursor_pos = uniforms.extra_cursor_pos[idx].xy;
+        if (cursor_pos.x == pos.x && cursor_pos.y == pos.y) {
+            return int(idx);
+        }
+    }
+    return -1;
 }
 
 constant uint FLAG_DISPLAY_P3      = 1u << 0;
@@ -191,6 +208,21 @@ fragment float4 grid_bg_fragment(
         c.rgb = grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace);
         c.rgb *= c.a;
         return c;
+    }
+
+    if (orig_grid_pos.x >= 0 && orig_grid_pos.y >= 0) {
+        int extra_idx = extra_cursor_index(
+            uint2(uint(orig_grid_pos.x), uint(orig_grid_pos.y)),
+            uniforms
+        );
+        if (extra_idx >= 0) {
+            float4 c = uniforms.extra_cursor_bg_color[uint(extra_idx)];
+            if (c.a > 0.0) {
+                c.rgb = grid_prepare_output_rgb(c.rgb, uniforms.input_colorspace);
+                c.rgb *= c.a;
+                return c;
+            }
+        }
     }
 
  // Load the cell and convert to normalized premultiplied color.
@@ -305,6 +337,19 @@ vertex CellTextVertexOut grid_text_vertex(
         color = uniforms.cursor_color;
         color.rgb = grid_prepare_output_rgb(color.rgb, uniforms.input_colorspace);
         color.rgb *= color.a;
+    } else if ((in.bools & BOOL_IS_CURSOR_GLYPH) == 0u) {
+        int extra_idx = extra_cursor_index(
+            uint2(uint(in.grid_pos.x), uint(in.grid_pos.y)),
+            uniforms
+        );
+        if (extra_idx >= 0) {
+            float4 c = uniforms.extra_cursor_color[uint(extra_idx)];
+            if (c.a > 0.0) {
+                color = c;
+                color.rgb = grid_prepare_output_rgb(color.rgb, uniforms.input_colorspace);
+                color.rgb *= color.a;
+            }
+        }
     }
 
     out.color = color;

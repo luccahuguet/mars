@@ -55,9 +55,9 @@ Important gaps found during this audit:
   clipboard integration, password trust prompts, and chunk/session hardening
   beyond the current text/plain first slice.
 - Kitty multiple cursors still need deeper visual parity work for exact
-  reverse-video text color handling and multi-cursor Ghostty shader uniforms.
-  The checked Ghostty source does not appear to implement the protocol, so this
-  remains modern Kitty-frontier work rather than strict Ghostty parity.
+  behavior beyond the bounded renderer uniform capacity. The checked Ghostty
+  source does not appear to implement the protocol, so this remains modern
+  Kitty-frontier work rather than strict Ghostty parity.
 - OSC 66 still needs the full Kitty multicell overwrite/editing semantics
   around ICH/DCH/ECH/EL/IL/DL and multi-row block erasure. The current renderer
   draws the anchored sized text visually without growing the packed cell.
@@ -170,10 +170,14 @@ Result:
   color spaces
 - Implemented ED 2/3/22, reset, and alternate-screen clearing
 - Rendered extra cursors through the existing block/non-block cursor atlas slots
-- Remaining limitation: the grid shader still has a single block-cursor
-  reverse-video position and Ghostty shader frame state still has one cursor, so
-  extra cursor text-color inversion and multi-cursor shader effects need a
-  follow-up renderer/shader expansion
+- Added bounded multi-cursor grid uniforms so extra block cursors paint their
+  own background and swap underlying glyph color instead of sprite-only overlay
+- Added a Yazelix shader ABI extension:
+  `iYazelixExtraCursorCount`, `iYazelixExtraCursors`,
+  `iYazelixExtraCursorColors`, and `iYazelixExtraCursorStyles`
+- Remaining limitation: the renderer exports up to 256 visible extra cursor
+  cells to the shader/uniform path; applications that request more still keep
+  parser/state behavior, but exact shader/reverse-video parity is bounded
 
 ### Kitty Keyboard Completeness Audit
 

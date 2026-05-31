@@ -168,6 +168,18 @@ None of those pivot criteria were proven by source inspection. The current block
 The implementation is source-compatible with the checked-in
 `conformance/shaders/ghostty_cursor_probe.glsl` probe.
 
+`yzt-7p3.26.1` added a Yazelix-specific multi-cursor extension on top of the
+Ghostty-compatible surface for Kitty's multiple-cursor protocol:
+
+- `iYazelixExtraCursorCount`
+- `iYazelixExtraCursors[256]`, as cursor rectangles in drawable pixels
+- `iYazelixExtraCursorColors[256]`
+- `iYazelixExtraCursorStyles[256]`, with `.x` using the same cursor-style enum
+
+The standard Ghostty `iCurrentCursor`/`iPreviousCursor` fields remain unchanged
+for source compatibility. The extension is intentionally additive because
+Ghostty does not currently expose a multi-cursor shader ABI.
+
 ## Visual Validation Update
 
 `yzt-7p3.17` fixed the WGPU surface path enough for local screenshot validation:

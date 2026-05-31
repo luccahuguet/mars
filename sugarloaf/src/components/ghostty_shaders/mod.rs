@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::Instant;
 
 pub type GhosttyShaderPath = String;
+pub const MAX_GHOSTTY_SHADER_EXTRA_CURSORS: usize = crate::grid::MAX_CURSOR_REVERSE_CELLS;
 
 const TEXTURE_BINDING: u32 = 0;
 const SAMPLER_BINDING: u32 = 1;
@@ -52,6 +53,10 @@ layout(set = 0, binding = 2, std140) uniform Globals {
     vec3  iCursorText;
     vec3  iSelectionForegroundColor;
     vec3  iSelectionBackgroundColor;
+    int   iYazelixExtraCursorCount;
+    vec4  iYazelixExtraCursors[256];
+    vec4  iYazelixExtraCursorColors[256];
+    ivec4 iYazelixExtraCursorStyles[256];
 };
 
 #define CURSORSTYLE_BLOCK        0
@@ -106,6 +111,7 @@ pub struct GhosttyShaderCursor {
 #[derive(Clone, Debug, PartialEq)]
 pub struct GhosttyShaderFrameState {
     pub cursor: Option<GhosttyShaderCursor>,
+    pub extra_cursors: Vec<GhosttyShaderCursor>,
     pub cursor_visible: bool,
     pub focus: bool,
     pub palette: [[f32; 4]; 256],
@@ -121,6 +127,7 @@ impl Default for GhosttyShaderFrameState {
     fn default() -> Self {
         Self {
             cursor: None,
+            extra_cursors: Vec::new(),
             cursor_visible: false,
             focus: false,
             palette: [[0.0; 4]; 256],
@@ -167,6 +174,11 @@ struct GhosttyShaderUniforms {
     cursor_text: [f32; 4],
     selection_foreground_color: [f32; 4],
     selection_background_color: [f32; 4],
+    yazelix_extra_cursor_count: i32,
+    _pad_yazelix_extra_cursor_count: [i32; 3],
+    yazelix_extra_cursors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
+    yazelix_extra_cursor_colors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
+    yazelix_extra_cursor_styles: [[i32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
 }
 
 impl Default for GhosttyShaderUniforms {
@@ -350,6 +362,29 @@ impl GhosttyShaderBrush {
         self.uniforms.selection_foreground_color =
             self.frame_state.selection_foreground_color;
         self.uniforms.cursor_visible = i32::from(self.frame_state.cursor_visible);
+        self.uniforms.yazelix_extra_cursor_count =
+            self.frame_state
+                .extra_cursors
+                .len()
+                .min(MAX_GHOSTTY_SHADER_EXTRA_CURSORS) as i32;
+        self.uniforms.yazelix_extra_cursors =
+            [[0.0; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS];
+        self.uniforms.yazelix_extra_cursor_colors =
+            [[0.0; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS];
+        self.uniforms.yazelix_extra_cursor_styles =
+            [[0; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS];
+        for (idx, cursor) in self
+            .frame_state
+            .extra_cursors
+            .iter()
+            .take(MAX_GHOSTTY_SHADER_EXTRA_CURSORS)
+            .enumerate()
+        {
+            self.uniforms.yazelix_extra_cursors[idx] = cursor.rect;
+            self.uniforms.yazelix_extra_cursor_colors[idx] = cursor.color;
+            self.uniforms.yazelix_extra_cursor_styles[idx][0] =
+                cursor.style.as_uniform_value();
+        }
 
         if let Some(cursor) = self.frame_state.cursor {
             let cursor_changed = self.uniforms.current_cursor != cursor.rect
@@ -619,7 +654,7 @@ mod tests {
     #[test]
     fn ghostty_uniform_layout_matches_std140_offsets() {
         // Defends: Ghostty cursor shader files depend on these std140 offsets.
-        assert_eq!(std::mem::size_of::<GhosttyShaderUniforms>(), 4496);
+        assert_eq!(std::mem::size_of::<GhosttyShaderUniforms>(), 16800);
         assert_eq!(bytemuck::offset_of!(GhosttyShaderUniforms, resolution), 0);
         assert_eq!(bytemuck::offset_of!(GhosttyShaderUniforms, time), 12);
         assert_eq!(
@@ -639,6 +674,10 @@ mod tests {
             bytemuck::offset_of!(GhosttyShaderUniforms, background_color),
             4400
         );
+        assert_eq!(
+            bytemuck::offset_of!(GhosttyShaderUniforms, yazelix_extra_cursor_count),
+            4496
+        );
     }
 
     #[test]
@@ -657,6 +696,8 @@ mod tests {
             "iTimeCursorChange",
             "iPalette",
             "CURSORSTYLE_BLOCK",
+            "iYazelixExtraCursorCount",
+            "iYazelixExtraCursors",
             "void main()",
         ] {
             assert!(source.contains(required), "missing {required}");

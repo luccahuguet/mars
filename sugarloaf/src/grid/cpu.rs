@@ -25,7 +25,7 @@
 use rustc_hash::FxHashMap;
 
 use super::atlas::{AtlasSlot, GlyphKey, RasterizedGlyph};
-use super::cell::{CellBg, CellText, GridUniforms};
+use super::cell::{CellBg, CellText, GridUniforms, MAX_CURSOR_REVERSE_CELLS};
 use crate::renderer::image_cache::atlas::AtlasAllocator;
 
 /// Initial atlas side. 1024² bytes_per_pixel = 1 MiB grayscale,
@@ -380,6 +380,10 @@ impl CpuGridRenderer {
                 let mut rgba = self.bg_cells[row_off + col].rgba;
                 if cursor_bg_active && cursor_x == col as u32 && cursor_y == row as u32 {
                     rgba = cursor_bg;
+                } else if let Some(idx) =
+                    extra_cursor_index(uniforms, col as u32, row as u32)
+                {
+                    rgba = normalize_color(uniforms.extra_cursor_bg_color[idx]);
                 }
                 if rgba[3] == 0 {
                     continue;
@@ -449,6 +453,14 @@ impl CpuGridRenderer {
                     && cursor_y == glyph.grid_pos[1] as u32
                 {
                     color = cursor_fg;
+                } else if (glyph.bools & CellText::BOOL_IS_CURSOR_GLYPH) == 0 {
+                    if let Some(idx) = extra_cursor_index(
+                        uniforms,
+                        glyph.grid_pos[0] as u32,
+                        glyph.grid_pos[1] as u32,
+                    ) {
+                        color = normalize_color(uniforms.extra_cursor_color[idx]);
+                    }
                 }
 
                 let ax = glyph.glyph_pos[0] as usize;
@@ -489,6 +501,15 @@ fn init_fg_rows(rows: u32) -> Vec<Vec<CellText>> {
     (0..(rows as usize + CURSOR_ROW_SLOTS))
         .map(|_| Vec::new())
         .collect()
+}
+
+#[inline]
+fn extra_cursor_index(uniforms: &GridUniforms, col: u32, row: u32) -> Option<usize> {
+    let count = (uniforms.extra_cursor_count as usize).min(MAX_CURSOR_REVERSE_CELLS);
+    (0..count).find(|&idx| {
+        let pos = uniforms.extra_cursor_pos[idx];
+        pos[0] == col && pos[1] == row
+    })
 }
 
 #[inline]

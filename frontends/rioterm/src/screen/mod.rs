@@ -4143,12 +4143,26 @@ impl Screen<'_> {
                         }
                     }
                 }
-                let extra_cursor_color = cursor_color_u8(extra_cursor_color_array(
+                let extra_cursor_bg_color = extra_cursor_color_array(
                     p.extra_cursor_colors.cursor,
                     renderer_ref,
                     &p.term_colors,
                     p.cursor_color,
-                ));
+                );
+                let extra_cursor_text_color = extra_cursor_color_array(
+                    p.extra_cursor_colors.text,
+                    renderer_ref,
+                    &p.term_colors,
+                    p.cursor_text_color,
+                );
+                let extra_cursor_color = cursor_color_u8(extra_cursor_bg_color);
+                let mut extra_cursor_count = 0u32;
+                let mut extra_cursor_pos =
+                    [[0u32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS];
+                let mut extra_cursor_color_uniform =
+                    [[0.0f32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS];
+                let mut extra_cursor_bg_color_uniform =
+                    [[0.0f32; 4]; rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS];
                 for extra_cursor in &p.extra_cursors {
                     if extra_cursor.row.0 < 0
                         || extra_cursor.row.0 as u32 >= p.rows
@@ -4185,6 +4199,18 @@ impl Screen<'_> {
                     };
                     if cursor_cell.block_slot {
                         block_cursor_cells.push(cursor_cell.cell);
+                        let idx = extra_cursor_count as usize;
+                        if idx < rio_backend::sugarloaf::grid::MAX_CURSOR_REVERSE_CELLS {
+                            extra_cursor_pos[idx] = [
+                                extra_cursor.col.0 as u32,
+                                extra_cursor.row.0 as u32,
+                                0,
+                                0,
+                            ];
+                            extra_cursor_color_uniform[idx] = extra_cursor_text_color;
+                            extra_cursor_bg_color_uniform[idx] = extra_cursor_bg_color;
+                            extra_cursor_count += 1;
+                        }
                     } else {
                         non_block_cursor_cells.push(cursor_cell.cell);
                     }
@@ -4230,9 +4256,50 @@ impl Screen<'_> {
                             style: ghostty_cursor_style(style),
                         }
                     });
+                    let extra_cursors = p
+                        .extra_cursors
+                        .iter()
+                        .filter_map(|extra_cursor| {
+                            if extra_cursor.row.0 < 0
+                                || extra_cursor.row.0 as u32 >= p.rows
+                                || extra_cursor.col.0 as u32 >= p.cols
+                            {
+                                return None;
+                            }
+                            let shape = extra_cursor_render_shape(
+                                extra_cursor.shape,
+                                p.extra_cursor_follow_shape,
+                            );
+                            let style = crate::grid_emit::cursor_render_style(
+                                crate::grid_emit::CursorRenderInputs {
+                                    visible: true,
+                                    focused: true,
+                                    blink_visible: p.cursor_blink_visible,
+                                    blinking: p.cursor_blinking,
+                                    preedit: false,
+                                    shape,
+                                },
+                            )?;
+                            Some(rio_backend::sugarloaf::GhosttyShaderCursor {
+                                rect: ghostty_cursor_rect(
+                                    style,
+                                    extra_cursor.col.0 as u16,
+                                    extra_cursor.row.0 as u16,
+                                    panel_left,
+                                    panel_top,
+                                    p.cell_w,
+                                    p.cell_h,
+                                ),
+                                color: extra_cursor_bg_color,
+                                style: ghostty_cursor_style(style),
+                            })
+                        })
+                        .take(rio_backend::sugarloaf::MAX_GHOSTTY_SHADER_EXTRA_CURSORS)
+                        .collect::<Vec<_>>();
                     ghostty_shader_frame_state =
                         Some(rio_backend::sugarloaf::GhosttyShaderFrameState {
                             cursor,
+                            extra_cursors,
                             cursor_visible: cursor.is_some(),
                             focus: self.is_focused,
                             palette,
@@ -4303,6 +4370,11 @@ impl Screen<'_> {
                     flags: 0,
                     padding_extend: 0,
                     input_colorspace,
+                    extra_cursor_count,
+                    _pad_extra_cursor_count: [0; 3],
+                    extra_cursor_pos,
+                    extra_cursor_color: extra_cursor_color_uniform,
+                    extra_cursor_bg_color: extra_cursor_bg_color_uniform,
                 };
 
                 frame_grids.push((grid, uniforms));
