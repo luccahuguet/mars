@@ -2881,6 +2881,96 @@ impl<U: EventListener> Crosswords<U> {
 }
 
 impl<U: EventListener> Crosswords<U> {
+    fn apply_attr_to_style(style: &mut crate::crosswords::style::Style, attr: &Attr) {
+        use crate::crosswords::style::StyleFlags;
+        match attr {
+            Attr::Foreground(color) => style.fg = *color,
+            Attr::Background(color) => style.bg = *color,
+            Attr::UnderlineColor(color) => style.underline_color = *color,
+            Attr::Reset => *style = crate::crosswords::style::Style::default(),
+            Attr::Reverse => style.flags.insert(StyleFlags::INVERSE),
+            Attr::CancelReverse => style.flags.remove(StyleFlags::INVERSE),
+            Attr::Bold => style.flags.insert(StyleFlags::BOLD),
+            Attr::CancelBold => style.flags.remove(StyleFlags::BOLD),
+            Attr::Dim => style.flags.insert(StyleFlags::DIM),
+            Attr::CancelBoldDim => style.flags.remove(StyleFlags::BOLD | StyleFlags::DIM),
+            Attr::Italic => style.flags.insert(StyleFlags::ITALIC),
+            Attr::CancelItalic => style.flags.remove(StyleFlags::ITALIC),
+            Attr::Underline => {
+                style.flags.remove(StyleFlags::ALL_UNDERLINES);
+                style.flags.insert(StyleFlags::UNDERLINE);
+            }
+            Attr::DoubleUnderline => {
+                style.flags.remove(StyleFlags::ALL_UNDERLINES);
+                style.flags.insert(StyleFlags::DOUBLE_UNDERLINE);
+            }
+            Attr::Undercurl => {
+                style.flags.remove(StyleFlags::ALL_UNDERLINES);
+                style.flags.insert(StyleFlags::UNDERCURL);
+            }
+            Attr::DottedUnderline => {
+                style.flags.remove(StyleFlags::ALL_UNDERLINES);
+                style.flags.insert(StyleFlags::DOTTED_UNDERLINE);
+            }
+            Attr::DashedUnderline => {
+                style.flags.remove(StyleFlags::ALL_UNDERLINES);
+                style.flags.insert(StyleFlags::DASHED_UNDERLINE);
+            }
+            Attr::BlinkSlow | Attr::BlinkFast | Attr::CancelBlink => {
+                info!("Term got unhandled attr: {:?}", attr);
+            }
+            Attr::CancelUnderline => style.flags.remove(StyleFlags::ALL_UNDERLINES),
+            Attr::Hidden => style.flags.insert(StyleFlags::HIDDEN),
+            Attr::CancelHidden => style.flags.remove(StyleFlags::HIDDEN),
+            Attr::Strike => style.flags.insert(StyleFlags::STRIKEOUT),
+            Attr::CancelStrike => style.flags.remove(StyleFlags::STRIKEOUT),
+        }
+    }
+
+    fn rectangular_area_bounds(
+        &self,
+        top: usize,
+        left: usize,
+        bottom: Option<usize>,
+        right: Option<usize>,
+    ) -> Option<(Range<Line>, Range<Column>)> {
+        let (row_base, row_limit) = if self.mode.contains(Mode::ORIGIN) {
+            (
+                self.scroll_region.start.0.max(0) as usize,
+                self.scroll_region.end.0.max(0) as usize,
+            )
+        } else {
+            (0, self.grid.screen_lines())
+        };
+        let row_limit = row_limit.min(self.grid.screen_lines());
+        let col_limit = self.grid.columns();
+        if row_base >= row_limit || col_limit == 0 {
+            return None;
+        }
+
+        let bottom = bottom.unwrap_or(row_limit - row_base);
+        let right = right.unwrap_or(col_limit);
+        if top == 0 || left == 0 || bottom == 0 || right == 0 {
+            return None;
+        }
+        if top > bottom || left > right {
+            return None;
+        }
+
+        let row_start = (row_base + top.saturating_sub(1)).clamp(row_base, row_limit);
+        let row_end = (row_base + bottom).clamp(row_base, row_limit);
+        let col_start = left.saturating_sub(1).min(col_limit);
+        let col_end = right.min(col_limit);
+        if row_start >= row_end || col_start >= col_end {
+            return None;
+        }
+
+        Some((
+            Line(row_start as i32)..Line(row_end as i32),
+            Column(col_start)..Column(col_end),
+        ))
+    }
+
     /// Clear the graphic data from a cell's extras slot.
     /// If the extras slot becomes empty after removing the graphic,
     /// free the slot entirely.
@@ -3753,81 +3843,49 @@ impl<U: EventListener> Handler for Crosswords<U> {
     #[inline]
     fn terminal_attribute(&mut self, attr: Attr) {
         trace!("Setting attribute: {:?}", attr);
-        use crate::crosswords::style::StyleFlags;
-        match attr {
-            Attr::Foreground(color) => self.grid.update_template_style(|s| s.fg = color),
-            Attr::Background(color) => self.grid.update_template_style(|s| s.bg = color),
-            Attr::UnderlineColor(color) => self
-                .grid
-                .update_template_style(|s| s.underline_color = color),
-            Attr::Reset => self
-                .grid
-                .set_template_style(crate::crosswords::style::Style::default()),
-            Attr::Reverse => self
-                .grid
-                .update_template_style(|s| s.flags.insert(StyleFlags::INVERSE)),
-            Attr::CancelReverse => self
-                .grid
-                .update_template_style(|s| s.flags.remove(StyleFlags::INVERSE)),
-            Attr::Bold => self
-                .grid
-                .update_template_style(|s| s.flags.insert(StyleFlags::BOLD)),
-            Attr::CancelBold => self
-                .grid
-                .update_template_style(|s| s.flags.remove(StyleFlags::BOLD)),
-            Attr::Dim => self
-                .grid
-                .update_template_style(|s| s.flags.insert(StyleFlags::DIM)),
-            Attr::CancelBoldDim => self.grid.update_template_style(|s| {
-                s.flags.remove(StyleFlags::BOLD | StyleFlags::DIM)
-            }),
-            Attr::Italic => self
-                .grid
-                .update_template_style(|s| s.flags.insert(StyleFlags::ITALIC)),
-            Attr::CancelItalic => self
-                .grid
-                .update_template_style(|s| s.flags.remove(StyleFlags::ITALIC)),
-            Attr::Underline => self.grid.update_template_style(|s| {
-                s.flags.remove(StyleFlags::ALL_UNDERLINES);
-                s.flags.insert(StyleFlags::UNDERLINE);
-            }),
-            Attr::DoubleUnderline => self.grid.update_template_style(|s| {
-                s.flags.remove(StyleFlags::ALL_UNDERLINES);
-                s.flags.insert(StyleFlags::DOUBLE_UNDERLINE);
-            }),
-            Attr::Undercurl => self.grid.update_template_style(|s| {
-                s.flags.remove(StyleFlags::ALL_UNDERLINES);
-                s.flags.insert(StyleFlags::UNDERCURL);
-            }),
-            Attr::DottedUnderline => self.grid.update_template_style(|s| {
-                s.flags.remove(StyleFlags::ALL_UNDERLINES);
-                s.flags.insert(StyleFlags::DOTTED_UNDERLINE);
-            }),
-            Attr::DashedUnderline => self.grid.update_template_style(|s| {
-                s.flags.remove(StyleFlags::ALL_UNDERLINES);
-                s.flags.insert(StyleFlags::DASHED_UNDERLINE);
-            }),
-            Attr::BlinkSlow | Attr::BlinkFast | Attr::CancelBlink => {
-                info!("Term got unhandled attr: {:?}", attr);
+        self.grid
+            .update_template_style(|style| Self::apply_attr_to_style(style, &attr));
+    }
+
+    fn change_rectangular_area_attributes(
+        &mut self,
+        top: usize,
+        left: usize,
+        bottom: Option<usize>,
+        right: Option<usize>,
+        attrs: Vec<Attr>,
+    ) {
+        let Some((rows, cols)) = self.rectangular_area_bounds(top, left, bottom, right)
+        else {
+            return;
+        };
+        if attrs.is_empty() {
+            return;
+        }
+
+        for row in rows.start.0..rows.end.0 {
+            let line = Line(row);
+            self.damage.damage_line(row as usize);
+            for col in cols.start.0..cols.end.0 {
+                let column = Column(col);
+                let cell = self.grid[line][column];
+                let mut style = self.grid.style_of(&cell);
+                for attr in &attrs {
+                    Self::apply_attr_to_style(&mut style, attr);
+                }
+
+                let style_id = self.grid.style_set.intern(style);
+                let target = &mut self.grid[line][column];
+                if target.is_bg_only() {
+                    let flags = target.cell_flags();
+                    let mut replacement = Square::default();
+                    replacement.set_style_id(style_id);
+                    replacement.set_cell_flags(flags);
+                    *target = replacement;
+                } else {
+                    target.set_style_id(style_id);
+                }
             }
-            Attr::CancelUnderline => self
-                .grid
-                .update_template_style(|s| s.flags.remove(StyleFlags::ALL_UNDERLINES)),
-            Attr::Hidden => self
-                .grid
-                .update_template_style(|s| s.flags.insert(StyleFlags::HIDDEN)),
-            Attr::CancelHidden => self
-                .grid
-                .update_template_style(|s| s.flags.remove(StyleFlags::HIDDEN)),
-            Attr::Strike => self
-                .grid
-                .update_template_style(|s| s.flags.insert(StyleFlags::STRIKEOUT)),
-            Attr::CancelStrike => self
-                .grid
-                .update_template_style(|s| s.flags.remove(StyleFlags::STRIKEOUT)),
-            // _ => {
-            // warn!("Term got unhandled attr: {:?}", attr);
-            // }
         }
     }
 
@@ -6633,6 +6691,76 @@ mod tests {
         term.delete_lines(1);
 
         assert_no_text_sizing_blocks(&term);
+    }
+
+    #[test]
+    // Defends: Kitty DECCARA applies full SGR attributes to a clipped rectangular screen region without moving the cursor.
+    fn deccara_applies_sgr_to_rectangular_region() {
+        let mut term = make_crosswords();
+        let cursor_before = term.grid.cursor.pos;
+
+        term.change_rectangular_area_attributes(
+            1,
+            2,
+            Some(99),
+            Some(3),
+            vec![
+                Attr::Foreground(crate::config::colors::AnsiColor::Named(
+                    NamedColor::Red,
+                )),
+                Attr::Background(crate::config::colors::AnsiColor::Named(
+                    NamedColor::Blue,
+                )),
+                Attr::Bold,
+            ],
+        );
+
+        let styled = term.grid.style_of(&term.grid[Line(0)][Column(1)]);
+        assert_eq!(
+            styled.fg,
+            crate::config::colors::AnsiColor::Named(NamedColor::Red)
+        );
+        assert_eq!(
+            styled.bg,
+            crate::config::colors::AnsiColor::Named(NamedColor::Blue)
+        );
+        assert!(styled.flags.contains(style::StyleFlags::BOLD));
+        assert_eq!(
+            term.grid.style_of(&term.grid[Line(0)][Column(0)]),
+            style::Style::default()
+        );
+        assert_eq!(term.grid.cursor.pos, cursor_before);
+    }
+
+    #[test]
+    // Defends: DECCARA coordinates honor origin mode's scroll-region-relative vertical bounds.
+    fn deccara_origin_mode_uses_scroll_region_rows() {
+        let mut term = make_crosswords();
+        term.set_scrolling_region(2, Some(3));
+        term.mode.insert(Mode::ORIGIN);
+
+        term.change_rectangular_area_attributes(
+            1,
+            1,
+            Some(1),
+            Some(1),
+            vec![Attr::Background(crate::config::colors::AnsiColor::Named(
+                NamedColor::Green,
+            ))],
+        );
+
+        assert_eq!(
+            term.grid.style_of(&term.grid[Line(0)][Column(0)]),
+            style::Style::default()
+        );
+        assert_eq!(
+            term.grid.style_of(&term.grid[Line(1)][Column(0)]).bg,
+            crate::config::colors::AnsiColor::Named(NamedColor::Green)
+        );
+        assert_eq!(
+            term.grid.style_of(&term.grid[Line(2)][Column(0)]),
+            style::Style::default()
+        );
     }
 
     #[test]

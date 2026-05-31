@@ -408,6 +408,17 @@ pub trait Handler {
     /// Set a terminal attribute.
     fn terminal_attribute(&mut self, _attr: Attr) {}
 
+    /// DECCARA / Kitty all-SGR rectangular attribute change.
+    fn change_rectangular_area_attributes(
+        &mut self,
+        _top: usize,
+        _left: usize,
+        _bottom: Option<usize>,
+        _right: Option<usize>,
+        _attrs: Vec<Attr>,
+    ) {
+    }
+
     /// Set mode.
     fn set_mode(&mut self, _mode: Mode) {}
 
@@ -1587,6 +1598,38 @@ impl<U: Handler> Perform for Performer<'_, U> {
 
                 handler.set_cursor_style(shape, cursor_style_id % 2 == 1);
             }
+            ('r', [b'$']) => {
+                let top = next_param_or(1) as usize;
+                let left = next_param_or(1) as usize;
+                let bottom = params_iter
+                    .next()
+                    .and_then(|param| param.first().copied())
+                    .filter(|&param| param != 0)
+                    .map(usize::from);
+                let right = params_iter
+                    .next()
+                    .and_then(|param| param.first().copied())
+                    .filter(|&param| param != 0)
+                    .map(usize::from);
+                let attrs = attrs_from_sgr_parameters(&mut params_iter);
+                let mut valid_attrs = Vec::with_capacity(attrs.len());
+                for attr in attrs {
+                    match attr {
+                        Some(attr) => valid_attrs.push(attr),
+                        None => {
+                            csi_unhandled!();
+                            return;
+                        }
+                    }
+                }
+                handler.change_rectangular_area_attributes(
+                    top,
+                    left,
+                    bottom,
+                    right,
+                    valid_attrs,
+                );
+            }
             ('r', []) => {
                 let top = next_param_or(1) as usize;
                 let bottom = params_iter
@@ -1632,6 +1675,12 @@ impl<U: Handler> Perform for Performer<'_, U> {
             }
             ('u', []) => handler.restore_cursor_position(),
             ('X', []) => handler.erase_chars(Column(next_param_or(1) as usize)),
+            ('x', [b'*']) => {
+                // DECSACE. Kitty's DECCARA docs wrap all-SGR rectangular
+                // styling in CSI 2 * x / CSI * x. Rio's DECCARA path is
+                // already rectangular, so no persistent mode is needed.
+                let _ = next_param_or(0);
+            }
             ('Z', []) => handler.move_backward_tabs(next_param_or(1)),
             _ => csi_unhandled!(),
         };
@@ -2540,6 +2589,53 @@ mod tests {
         let sizing = handler.sizing.expect("OSC 66 should dispatch");
         assert_eq!(sizing.width, Some(2));
         assert_eq!(sizing.text, " ");
+    }
+
+    #[test]
+    // Defends: Kitty DECCARA all-SGR rectangular styling reaches the handler with parsed coordinates and attributes.
+    fn deccara_dispatches_to_rectangular_attribute_handler() {
+        #[derive(Default)]
+        struct TestHandler {
+            calls: Vec<(usize, usize, Option<usize>, Option<usize>, Vec<Attr>)>,
+        }
+
+        impl Handler for TestHandler {
+            fn change_rectangular_area_attributes(
+                &mut self,
+                top: usize,
+                left: usize,
+                bottom: Option<usize>,
+                right: Option<usize>,
+                attrs: Vec<Attr>,
+            ) {
+                self.calls.push((top, left, bottom, right, attrs));
+            }
+        }
+
+        let mut state = ProcessorState::default();
+        let mut handler = TestHandler::default();
+        let mut performer = Performer::new(&mut state, &mut handler);
+        let mut parser = Parser::default();
+
+        parser.advance(
+            &mut performer,
+            b"\x1b[2*x\x1b[1;2;3;4;38:2:1:2:3;48;5;4;1$r\x1b[*x",
+        );
+
+        assert_eq!(
+            handler.calls,
+            vec![(
+                1,
+                2,
+                Some(3),
+                Some(4),
+                vec![
+                    Attr::Foreground(AnsiColor::Spec(ColorRgb { r: 1, g: 2, b: 3 })),
+                    Attr::Background(AnsiColor::Indexed(4)),
+                    Attr::Bold,
+                ],
+            )]
+        );
     }
 
     #[test]

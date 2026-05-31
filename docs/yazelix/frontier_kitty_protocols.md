@@ -48,6 +48,8 @@ Already implemented or partially validated in Yazelix-terminal:
 - Kitty multiple cursors support/state/color queries, coordinate mutation,
   ED/reset/alternate-screen clearing, conformance fixture stream, and sprite
   rendering through the normal cursor atlas slots
+- Kitty DECCARA all-SGR rectangular styling, including the common DECSACE
+  wrapper and RGB/indexed color SGR tails
 
 Important gaps found during this audit:
 

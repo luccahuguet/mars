@@ -151,6 +151,8 @@ block the first cursor-shader proof:
   multicell overwrite behavior, lower-row skip behavior, and the core editing
   controls that intersect or split blocks; cursor sprites and Ghostty shader
   cursor rectangles use the full sized-text visual extent
+- Kitty DECCARA all-SGR rectangular styling is implemented for clipped screen
+  regions without cursor movement
 - parser fixtures copied from observed Ghostty/WezTerm/Kitty behavior where
   licensing allows
 - fuzzing or property coverage for escape sequence parsers

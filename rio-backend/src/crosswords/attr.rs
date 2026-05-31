@@ -1,6 +1,6 @@
 use crate::config::colors::AnsiColor;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Attr {
     /// Clear all special abilities.
     Reset,

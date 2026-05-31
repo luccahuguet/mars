@@ -106,6 +106,14 @@
       "hex": "1b5b3e20711b5b3e32393b323a343a3520711b5b3e31303020711b5b3e33303b323a313a323a3320711b5b3e34303b353a343220711b5b3e31303120711b5b3e303b342071"
     },
     {
+      "id": "kitty_deccara_all_sgr",
+      "tier": "should",
+      "protocol": "Kitty DECCARA",
+      "description": "Write two short rows, enable rectangular attribute changes, then apply RGB foreground, indexed background, and bold SGR to a 2x3 rectangle.",
+      "source": "Kitty DECCARA extension uses CSI top;left;bottom;right;SGR... $ r and commonly brackets the operation with DECSACE CSI 2 * x / CSI * x.",
+      "hex": "1b5b322a786162630d0a6465661b5b313b313b323b333b33383a323a313a323a333b34383b353b343b3124721b5b2a78"
+    },
+    {
       "id": "kitty_graphics_1x1_rgba",
       "tier": "must",
       "protocol": "Kitty graphics",
