@@ -23,19 +23,6 @@
         lib,
         ...
       }: let
-        # Defines a devshell using the `rust-toolchain`, allowing for
-        # different versions of rust to be used.
-        mkDevShell = rust-toolchain: let
-          runtimeDeps = self'.packages."yazelix-terminal".runtimeDependencies;
-          tools =
-            self'.packages."yazelix-terminal".nativeBuildInputs
-            ++ self'.packages."yazelix-terminal".buildInputs
-            ++ [rust-toolchain];
-        in
-          pkgs.mkShell {
-            packages = [self'.formatter] ++ tools;
-            LD_LIBRARY_PATH = "${lib.makeLibraryPath runtimeDeps}";
-          };
         toolchains = rec {
           msrv = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           stable = pkgs.rust-bin.stable.latest.minimal;
@@ -43,16 +30,36 @@
           rio = msrv;
           default = rio;
         };
-        packageFor = rust-toolchain:
-          pkgs.callPackage ./pkgRio.nix {inherit rust-toolchain;};
-        defaultPackage = packageFor toolchains.default;
-        msrvPackage = packageFor toolchains.msrv;
-        stablePackage = packageFor toolchains.stable;
-        nightlyPackage = packageFor toolchains.nightly;
+        unwrappedPackageFor = rust-toolchain:
+          pkgs.callPackage ./pkgRioUnwrapped.nix {inherit rust-toolchain;};
+        packageFor = unwrapped:
+          pkgs.callPackage ./pkgRio.nix {inherit unwrapped;};
+        defaultUnwrappedPackage = unwrappedPackageFor toolchains.default;
+        msrvUnwrappedPackage = unwrappedPackageFor toolchains.msrv;
+        stableUnwrappedPackage = unwrappedPackageFor toolchains.stable;
+        nightlyUnwrappedPackage = unwrappedPackageFor toolchains.nightly;
+        defaultPackage = packageFor defaultUnwrappedPackage;
+        msrvPackage = packageFor msrvUnwrappedPackage;
+        stablePackage = packageFor stableUnwrappedPackage;
+        nightlyPackage = packageFor nightlyUnwrappedPackage;
         appFor = package: {
           type = "app";
           program = "${package}/bin/yazelix-terminal";
         };
+        # Defines a devshell using the `rust-toolchain`, allowing for
+        # different versions of rust to be used.
+        mkDevShell = rust-toolchain: let
+          unwrapped = unwrappedPackageFor rust-toolchain;
+          runtimeDeps = unwrapped.runtimeDependencies;
+          tools =
+            unwrapped.nativeBuildInputs
+            ++ unwrapped.buildInputs
+            ++ [rust-toolchain];
+        in
+          pkgs.mkShell {
+            packages = [self'.formatter] ++ tools;
+            LD_LIBRARY_PATH = "${lib.makeLibraryPath runtimeDeps}";
+          };
       in {
         formatter = pkgs.alejandra;
         _module.args.pkgs = import inputs.nixpkgs {
@@ -62,18 +69,28 @@
 
         overlayAttrs = {
           yazelix-terminal = self'.packages."yazelix-terminal";
+          yazelix-terminal-unwrapped = self'.packages."yazelix-terminal-unwrapped";
           rio = self'.packages."yazelix-terminal";
+          rio-unwrapped = self'.packages."yazelix-terminal-unwrapped";
         };
         packages = {
           default = defaultPackage;
           yazelix-terminal = defaultPackage;
+          yazelix-terminal-unwrapped = defaultUnwrappedPackage;
           rio = defaultPackage;
+          rio-unwrapped = defaultUnwrappedPackage;
           yazelix-terminal-msrv = msrvPackage;
+          yazelix-terminal-msrv-unwrapped = msrvUnwrappedPackage;
           yazelix-terminal-stable = stablePackage;
+          yazelix-terminal-stable-unwrapped = stableUnwrappedPackage;
           yazelix-terminal-nightly = nightlyPackage;
+          yazelix-terminal-nightly-unwrapped = nightlyUnwrappedPackage;
           rio-msrv = msrvPackage;
+          rio-msrv-unwrapped = msrvUnwrappedPackage;
           rio-stable = stablePackage;
+          rio-stable-unwrapped = stableUnwrappedPackage;
           rio-nightly = nightlyPackage;
+          rio-nightly-unwrapped = nightlyUnwrappedPackage;
         };
         apps = {
           default = appFor self'.packages."yazelix-terminal";
