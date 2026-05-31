@@ -7,6 +7,86 @@ evidence live in
 Build-speed guidance lives in
 [`docs/yazelix/build_speed_workflow.md`](docs/yazelix/build_speed_workflow.md).
 
+## Yazelix Package Surface
+
+The flake exposes the Yazelix-owned package and app names while keeping `rio`
+aliases for compatibility:
+
+```sh
+nix build .#yazelix-terminal -o result_yazelix_terminal_package
+nix run .#yazelix-terminal -- --version
+```
+
+Useful package outputs:
+
+- `.#yazelix-terminal`: checked package with the desktop wrapper and full checks
+- `.#yazelix-terminal-fast`: same wrapper shape with unchecked Rust build for local iteration
+- `.#yazelix-terminal-unwrapped`: unwrapped Rio-derived binary
+- `.#rio`: compatibility alias to `.#yazelix-terminal`
+
+The package installs:
+
+- `bin/yazelix-terminal`
+- `bin/yazelix-terminal-desktop`
+- `share/applications/yazelix-terminal.desktop`
+- `share/yazelix-terminal/config.toml`
+
+The desktop wrapper sets `--app-id yazelix-terminal`, searches for available
+Nix graphics wrappers, and uses Rio's supported `RIO_CONFIG_HOME` config
+directory contract. Its packaged config disables confirm-before-quit and uses
+`[renderer] strategy = "game"` by default, which keeps Wayland/COSMIC desktop
+launches responsive for idle shells, input, and resize events.
+
+Wrapper override knobs:
+
+| Variable | Behavior |
+| --- | --- |
+| `RIO_CONFIG_HOME` | Uses an existing Rio config directory unchanged |
+| `YAZELIX_TERMINAL_CONFIG` | Uses a custom Rio config directory; must contain readable `config.toml` |
+| `YAZELIX_TERMINAL_RENDER_STRATEGY=default` | Skips the packaged `strategy = "game"` config when no other config is set |
+| `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=none` | Skips automatic nixGL/nixVulkan wrapper discovery |
+| `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=/path/to/wrapper` | Runs the terminal through the selected wrapper |
+
+## Yazelix Stack Behavior
+
+`--yazelix` host mode keeps Zellij, Yazi, and Helix as the workspace stack while
+the terminal owns modern rendering and terminal protocols. In host mode:
+
+- child applications still see Rio-compatible terminal identity for capability detection
+- `YAZELIX_TERMINAL_HOST=yazelix-terminal` marks the fork-specific host
+- inherited terminal identity markers are scrubbed before spawning the child
+- Rio native split/config-editor ownership is disabled for Yazelix sessions
+
+Kitty graphics, Sixel, iTerm2 images, OSC 133, OSC 66, OSC 99, OSC 52, Kitty
+keyboard, Kitty multiple cursors, Kitty file transfer, OSC 5522 text clipboard,
+unscrolling, and DECCARA coverage are tracked in the verification ledger.
+
+Yazi image and PDF previews use Kitty graphics through the terminal image
+overlay path. The renderer image-overlay ABI is `[u0, v0, width, height]`
+across WGPU, native Vulkan, Metal, atlas graphics, and Kitty virtual
+placements. Stack validation notes live in
+[`docs/yazelix/stack_validation.md`](docs/yazelix/stack_validation.md).
+
+## Validation
+
+Release-oriented checks:
+
+```sh
+nix build .#yazelix-terminal -o result_yazelix_terminal_package
+desktop-file-validate result_yazelix_terminal_package/share/applications/yazelix-terminal.desktop
+result_yazelix_terminal_package/bin/yazelix-terminal --version
+python3 tools/yazelix_conformance.py verify
+```
+
+Focused graphics checks:
+
+```sh
+nix develop -c cargo test -p rio-backend --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' kitty_virtual -- --nocapture
+nix develop -c cargo test -p sugarloaf --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' image_shaders_use_origin_size_source_rect -- --nocapture
+```
+
+The upstream Rio README follows below.
+
 <!-- LOGO -->
 <h1>
 <p align="center">
