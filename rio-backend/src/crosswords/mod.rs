@@ -89,6 +89,8 @@ const OSC5522_MAX_DECODED_BYTES: usize = 1024 * 1024;
 const OSC5522_MAX_CHUNK_DECODED_BYTES: usize = 4096;
 const KITTY_CLIPBOARD_TEXT_PLAIN: &[u8] = b"text/plain";
 const KITTY_CLIPBOARD_TEXT_PLAIN_BASE64: &str = "dGV4dC9wbGFpbg==";
+const KITTY_CLIPBOARD_TEXT_PLAIN_UTF8: &[u8] = b"text/plain;charset=utf-8";
+const KITTY_CLIPBOARD_MIME_LIST: &[u8] = b"text/plain text/plain;charset=utf-8";
 
 // Max. number of graphics stored in a single cell.
 // const MAX_GRAPHICS_PER_CELL: usize = 20;
@@ -2313,18 +2315,22 @@ impl<U: EventListener> Crosswords<U> {
         format!("\x1b]5522;type={operation}:status={status}{terminator}")
     }
 
-    fn kitty_clipboard_read_text_reply(text: &str, terminator: &str) -> String {
+    fn kitty_clipboard_read_text_reply(
+        text: &str,
+        mime_base64: &str,
+        terminator: &str,
+    ) -> String {
         let mut reply = Self::kitty_clipboard_reply("read", "OK", terminator);
         let chunks = text.as_bytes().chunks(OSC5522_MAX_CHUNK_DECODED_BYTES);
         for chunk in chunks {
             let payload = general_purpose::STANDARD.encode(chunk);
             reply.push_str(&format!(
-                "\x1b]5522;type=read:status=DATA:mime={KITTY_CLIPBOARD_TEXT_PLAIN_BASE64};{payload}{terminator}"
+                "\x1b]5522;type=read:status=DATA:mime={mime_base64};{payload}{terminator}"
             ));
         }
         if text.is_empty() {
             reply.push_str(&format!(
-                "\x1b]5522;type=read:status=DATA:mime={KITTY_CLIPBOARD_TEXT_PLAIN_BASE64};{terminator}"
+                "\x1b]5522;type=read:status=DATA:mime={mime_base64};{terminator}"
             ));
         }
         reply.push_str(&Self::kitty_clipboard_reply("read", "DONE", terminator));
@@ -2333,8 +2339,9 @@ impl<U: EventListener> Crosswords<U> {
 
     fn kitty_clipboard_mime_list_reply(terminator: &str) -> String {
         let mut reply = Self::kitty_clipboard_reply("read", "OK", terminator);
+        let mime_list = general_purpose::STANDARD.encode(KITTY_CLIPBOARD_MIME_LIST);
         reply.push_str(&format!(
-            "\x1b]5522;type=read:status=DATA:mime={KITTY_CLIPBOARD_TEXT_PLAIN_BASE64};{KITTY_CLIPBOARD_TEXT_PLAIN_BASE64}{terminator}"
+            "\x1b]5522;type=read:status=DATA:mime={KITTY_CLIPBOARD_TEXT_PLAIN_BASE64};{mime_list}{terminator}"
         ));
         reply.push_str(&Self::kitty_clipboard_reply("read", "DONE", terminator));
         reply
@@ -2362,6 +2369,60 @@ impl<U: EventListener> Crosswords<U> {
     fn decode_kitty_clipboard_mime(&self, encoded: &[u8]) -> Option<Vec<u8>> {
         let mime = self.decode_kitty_clipboard_base64(encoded)?;
         (!mime.is_empty()).then_some(mime)
+    }
+
+    fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+        let start = bytes
+            .iter()
+            .position(|byte| !byte.is_ascii_whitespace())
+            .unwrap_or(bytes.len());
+        let end = bytes
+            .iter()
+            .rposition(|byte| !byte.is_ascii_whitespace())
+            .map_or(start, |index| index + 1);
+        &bytes[start..end]
+    }
+
+    fn split_ascii_once(bytes: &[u8], needle: u8) -> Option<(&[u8], &[u8])> {
+        let index = bytes.iter().position(|byte| *byte == needle)?;
+        Some((&bytes[..index], &bytes[index + 1..]))
+    }
+
+    fn ascii_eq_ignore_case(left: &[u8], right: &[u8]) -> bool {
+        left.eq_ignore_ascii_case(right)
+    }
+
+    fn supported_kitty_text_mime(mime: &[u8]) -> Option<Vec<u8>> {
+        let mime = Self::trim_ascii_whitespace(mime);
+        let mut parts = mime.split(|byte| *byte == b';');
+        let base = Self::trim_ascii_whitespace(parts.next()?);
+        if !Self::ascii_eq_ignore_case(base, KITTY_CLIPBOARD_TEXT_PLAIN) {
+            return None;
+        }
+
+        let mut saw_utf8_charset = false;
+        for parameter in parts {
+            let parameter = Self::trim_ascii_whitespace(parameter);
+            if parameter.is_empty() {
+                continue;
+            }
+            let (name, value) = Self::split_ascii_once(parameter, b'=')?;
+            let name = Self::trim_ascii_whitespace(name);
+            let value = Self::trim_ascii_whitespace(value);
+            if !Self::ascii_eq_ignore_case(name, b"charset")
+                || (!Self::ascii_eq_ignore_case(value, b"utf-8")
+                    && !Self::ascii_eq_ignore_case(value, b"utf8"))
+            {
+                return None;
+            }
+            saw_utf8_charset = true;
+        }
+
+        if saw_utf8_charset {
+            Some(KITTY_CLIPBOARD_TEXT_PLAIN_UTF8.to_vec())
+        } else {
+            Some(KITTY_CLIPBOARD_TEXT_PLAIN.to_vec())
+        }
     }
 
     fn handle_kitty_clipboard_read(
@@ -2393,22 +2454,27 @@ impl<U: EventListener> Crosswords<U> {
             self.send_kitty_clipboard_status("read", "EINVAL", terminator);
             return;
         };
-        if !requested
+        let Some(selected_mime) = requested
             .split_ascii_whitespace()
-            .any(|mime| mime.as_bytes() == KITTY_CLIPBOARD_TEXT_PLAIN)
-        {
+            .find_map(|mime| Self::supported_kitty_text_mime(mime.as_bytes()))
+        else {
             self.send_kitty_clipboard_status("read", "ENOSYS", terminator);
             return;
-        }
+        };
 
         let terminator = terminator.to_owned();
+        let selected_mime_base64 = general_purpose::STANDARD.encode(selected_mime);
         let denied_reply = Self::kitty_clipboard_reply("read", "EPERM", &terminator);
         self.event_proxy.send_event(
             RioEvent::ClipboardLoadWithReply(
                 self.route_id,
                 clipboard_type,
                 Arc::new(move |text| {
-                    Crosswords::<U>::kitty_clipboard_read_text_reply(text, &terminator)
+                    Crosswords::<U>::kitty_clipboard_read_text_reply(
+                        text,
+                        &selected_mime_base64,
+                        &terminator,
+                    )
                 }),
                 denied_reply,
             ),
@@ -2496,7 +2562,7 @@ impl<U: EventListener> Crosswords<U> {
             self.fail_kitty_clipboard_write("EINVAL", terminator);
             return;
         };
-        if mime != KITTY_CLIPBOARD_TEXT_PLAIN {
+        if Self::supported_kitty_text_mime(&mime).is_none() {
             self.fail_kitty_clipboard_write("ENOSYS", terminator);
             return;
         }
@@ -2549,7 +2615,7 @@ impl<U: EventListener> Crosswords<U> {
             self.fail_kitty_clipboard_write("EINVAL", terminator);
             return;
         };
-        if mime != KITTY_CLIPBOARD_TEXT_PLAIN {
+        if Self::supported_kitty_text_mime(&mime).is_none() {
             self.fail_kitty_clipboard_write("ENOSYS", terminator);
             return;
         }
@@ -2561,7 +2627,19 @@ impl<U: EventListener> Crosswords<U> {
             self.fail_kitty_clipboard_write("EINVAL", terminator);
             return;
         };
-        if simd_utf8::from_utf8_fast(&aliases).is_err() {
+        let Ok(aliases) = simd_utf8::from_utf8_fast(&aliases) else {
+            self.fail_kitty_clipboard_write("EINVAL", terminator);
+            return;
+        };
+        let mut alias_count = 0;
+        for alias in aliases.split_ascii_whitespace() {
+            alias_count += 1;
+            if Self::supported_kitty_text_mime(alias.as_bytes()).is_none() {
+                self.fail_kitty_clipboard_write("ENOSYS", terminator);
+                return;
+            }
+        }
+        if alias_count == 0 {
             self.fail_kitty_clipboard_write("EINVAL", terminator);
         }
     }
@@ -7278,10 +7356,39 @@ mod tests {
             vec![(
                 7,
                 "\x1b]5522;type=read:status=OK\x1b\\\
-\x1b]5522;type=read:status=DATA:mime=dGV4dC9wbGFpbg==;dGV4dC9wbGFpbg==\x1b\\\
+\x1b]5522;type=read:status=DATA:mime=dGV4dC9wbGFpbg==;dGV4dC9wbGFpbiB0ZXh0L3BsYWluO2NoYXJzZXQ9dXRmLTg=\x1b\\\
 \x1b]5522;type=read:status=DONE\x1b\\"
                     .to_owned()
             )]
+        );
+    }
+
+    #[test]
+    // Defends: common UTF-8 text MIME requests are handled as text without requiring arbitrary-MIME clipboard support.
+    fn osc5522_text_plain_utf8_read_routes_through_clipboard_load() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Read,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: Some(b"dGV4dC9wbGFpbjtjaGFyc2V0PXV0Zi04"),
+            },
+            "\x1b\\",
+        );
+
+        let captured = events.borrow();
+        assert_eq!(captured.len(), 1);
+        let RioEvent::ClipboardLoadWithReply(_, _, format, _) = &captured[0] else {
+            panic!("expected rich clipboard load event");
+        };
+        assert_eq!(
+            format("hello"),
+            "\x1b]5522;type=read:status=OK\x1b\\\
+\x1b]5522;type=read:status=DATA:mime=dGV4dC9wbGFpbjtjaGFyc2V0PXV0Zi04;aGVsbG8=\x1b\\\
+\x1b]5522;type=read:status=DONE\x1b\\"
         );
     }
 
@@ -7349,6 +7456,92 @@ mod tests {
         );
         assert_eq!(success_reply, "\x1b]5522;type=write:status=DONE\x1b\\");
         assert_eq!(denied_reply, "\x1b]5522;type=write:status=EPERM\x1b\\");
+    }
+
+    #[test]
+    // Defends: UTF-8 text MIME chunks are stored as plain text without weakening non-text MIME rejection.
+    fn osc5522_text_plain_utf8_write_stores_on_done() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Write,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: Some(b"dGV4dC9wbGFpbjtjaGFyc2V0PXV0Zi04"),
+                payload: Some(b"aGVsbG8="),
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+
+        let captured = events.borrow();
+        assert_eq!(captured.len(), 1);
+        assert!(matches!(
+            &captured[0],
+            RioEvent::ClipboardStoreWithReply { content, .. } if content == "hello"
+        ));
+    }
+
+    #[test]
+    // Defends: walias only accepts aliases that the text-only clipboard provider can actually expose.
+    fn osc5522_walias_rejects_non_text_aliases() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Write,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Walias,
+                location: KittyClipboardLocation::Clipboard,
+                mime: Some(b"dGV4dC9wbGFpbg=="),
+                payload: Some(b"dGV4dC9odG1s"),
+            },
+            "\x1b\\",
+        );
+        Handler::kitty_clipboard(
+            &mut term,
+            KittyClipboard {
+                operation: KittyClipboardOperation::Wdata,
+                location: KittyClipboardLocation::Clipboard,
+                mime: None,
+                payload: None,
+            },
+            "\x1b\\",
+        );
+
+        assert_eq!(
+            captured_pty_writes(&events),
+            vec![(7, "\x1b]5522;type=write:status=ENOSYS\x1b\\".to_owned())]
+        );
     }
 
     #[test]

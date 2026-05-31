@@ -194,9 +194,9 @@ required for the first usable Yazelix terminal:
 The remaining open Beads are the current source of truth for why this epic is
 not yet complete:
 
-- `yzt-7p3.40`: OSC 5522 rich clipboard is still text/plain-first and needs
-  arbitrary MIME/platform clipboard work before it matches the full modern
-  protocol surface
+- `yzt-7p3.40`: OSC 5522 rich clipboard handles text/plain-compatible payloads,
+  but still needs arbitrary MIME/platform clipboard work before it matches the
+  full modern protocol surface
 - `yzt-7p3.41`: frame-time instrumentation exists, but comparable Ghostty
   frame runs, release-package runs, and optional GPU utilization evidence still
   need to be collected

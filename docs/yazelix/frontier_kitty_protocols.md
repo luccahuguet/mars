@@ -65,8 +65,8 @@ Already implemented or partially validated in Yazelix-terminal:
 Important gaps found during this audit:
 
 - OSC 5522 Kitty rich clipboard still needs arbitrary MIME, OS-backed rich
-  clipboard integration, password trust prompts, and chunk/session hardening
-  beyond the current text/plain first slice.
+  clipboard integration, password trust prompts, paste-event mode, and
+  multiplexer id echoing beyond the current text/plain-compatible slice.
 - Kitty multiple cursors still need deeper visual parity work for exact
   behavior beyond the bounded renderer uniform capacity. The checked Ghostty
   source does not appear to implement the protocol, so this remains modern
@@ -134,12 +134,18 @@ Result:
   without touching the system clipboard
 - Implemented `text/plain` writes with transaction state, chunk append, no-op
   text/plain alias handling, and DONE/EPERM frontend replies
+- Treats `text/plain;charset=utf-8` as the same supported text payload for
+  reads, writes, and aliases while continuing to reject non-text aliases
+- Advertises both supported text spellings in MIME-list reads
 - Rejected unsupported MIME types, malformed base64, oversized chunks, missing
   sessions, and invalid locations with protocol error replies
 - Routed actual clipboard access through frontend clipboard events so focus
   policy remains outside the parser
 - Remaining limitation: non-text MIME data, platform rich clipboard APIs, and
-  password-based trust prompts are intentionally deferred
+  password-based trust prompts are intentionally deferred. The current
+  `copypasta` boundary only stores and loads `String`, so real arbitrary-MIME
+  parity requires a new platform clipboard provider that can carry MIME-tagged
+  byte payloads on macOS, Windows, X11, and Wayland.
 
 ### OSC 22 Pointer Shape End-To-End
 
