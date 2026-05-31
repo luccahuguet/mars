@@ -59,6 +59,7 @@ The first manifest covers:
 - OSC 52 clipboard query
 - OSC 133 semantic prompt regions
 - Kitty OSC 66 text sizing
+- Kitty OSC 99 desktop notification
 - Kitty keyboard mode query
 - Kitty graphics 1x1 RGBA transmit/place
 - minimal Sixel DCS path

@@ -184,6 +184,25 @@ impl TextSizing {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KittyNotificationKind {
+    Title,
+    Body,
+    Close,
+    Alive,
+    Query,
+    Buttons,
+    Icon,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KittyNotification {
+    pub id: Option<String>,
+    pub kind: KittyNotificationKind,
+    pub done: bool,
+    pub payload: String,
+}
+
 pub trait Handler {
     /// OSC to set window title.
     fn set_title(&mut self, _: Option<String>) {}
@@ -283,6 +302,9 @@ pub trait Handler {
 
     /// Desktop notification (OSC 9 / OSC 777).
     fn desktop_notification(&mut self, _title: String, _body: String) {}
+
+    /// Kitty OSC 99 desktop notification chunk/update.
+    fn kitty_notification(&mut self, _notification: KittyNotification) {}
 
     /// Shell semantic prompt/command zones (OSC 133).
     fn semantic_prompt(&mut self, _prompt: SemanticPrompt) {}
@@ -1221,6 +1243,12 @@ impl<U: Handler> Perform for Performer<'_, U> {
             // Kitty OSC 66 text sizing.
             b"66" => match osc::parse_text_sizing(params) {
                 Some(sizing) => self.handler.input_sized_text(sizing),
+                None => unhandled(params),
+            },
+
+            // Kitty OSC 99 desktop notification.
+            b"99" => match osc::parse_kitty_notification(params) {
+                Some(notification) => self.handler.kitty_notification(notification),
                 None => unhandled(params),
             },
 
@@ -2294,6 +2322,32 @@ mod tests {
         let sizing = handler.sizing.expect("OSC 66 should dispatch");
         assert_eq!(sizing.width, Some(2));
         assert_eq!(sizing.text, " ");
+    }
+
+    #[test]
+    // Defends: a real OSC 99 byte stream reaches Handler::kitty_notification through the production performer.
+    fn osc99_dispatches_to_kitty_notification_handler() {
+        #[derive(Default)]
+        struct TestHandler {
+            notification: Option<KittyNotification>,
+        }
+
+        impl Handler for TestHandler {
+            fn kitty_notification(&mut self, notification: KittyNotification) {
+                self.notification = Some(notification);
+            }
+        }
+
+        let mut state = ProcessorState::default();
+        let mut handler = TestHandler::default();
+        let mut performer = Performer::new(&mut state, &mut handler);
+        let mut parser = Parser::default();
+
+        parser.advance(&mut performer, b"\x1b]99;p=body;done\x1b\\");
+
+        let notification = handler.notification.expect("OSC 99 should dispatch");
+        assert_eq!(notification.kind, KittyNotificationKind::Body);
+        assert_eq!(notification.payload, "done");
     }
 
     #[test]

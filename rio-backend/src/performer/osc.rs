@@ -16,8 +16,9 @@ use crate::event::{ProgressReport, ProgressState};
 use crate::simd_utf8;
 
 use super::handler::{
-    SemanticPrompt, SemanticPromptAction, SemanticPromptClick, SemanticPromptKind,
-    SemanticPromptRedraw, TextSizing, TextSizingAlign,
+    KittyNotification, KittyNotificationKind, SemanticPrompt, SemanticPromptAction,
+    SemanticPromptClick, SemanticPromptKind, SemanticPromptRedraw, TextSizing,
+    TextSizingAlign,
 };
 
 /// Either a concrete color value or a query for the current value.
@@ -383,6 +384,74 @@ fn parse_text_sizing_align(input: &[u8]) -> Option<TextSizingAlign> {
     }
 }
 
+/// OSC 99 — Kitty desktop notifications.
+pub(super) fn parse_kitty_notification(params: &[&[u8]]) -> Option<KittyNotification> {
+    if params.len() < 3 {
+        return None;
+    }
+
+    let mut id = None;
+    let mut kind = KittyNotificationKind::Title;
+    let mut done = true;
+    let mut encoded = false;
+
+    for item in params[1].split(|b| *b == b':') {
+        if item.is_empty() {
+            continue;
+        }
+        let Some(eq_idx) = item.iter().position(|b| *b == b'=') else {
+            continue;
+        };
+        let key = &item[..eq_idx];
+        let value = &item[eq_idx + 1..];
+
+        match key {
+            b"i" => id = Some(simd_utf8::from_utf8_lossy_fast(value)),
+            b"p" => kind = parse_kitty_notification_kind(value)?,
+            b"d" => done = parse_bool(value)?,
+            b"e" => encoded = parse_bool(value)?,
+            _ => {}
+        }
+    }
+
+    let payload = join_osc_text_params(&params[2..]);
+    if encoded {
+        if payload.len() > 4096 {
+            return None;
+        }
+        let bytes = crate::simd_base64::decode(&payload)?;
+        Some(KittyNotification {
+            id,
+            kind,
+            done,
+            payload: simd_utf8::from_utf8_lossy_fast(&bytes),
+        })
+    } else {
+        if payload.len() > 2048 {
+            return None;
+        }
+        Some(KittyNotification {
+            id,
+            kind,
+            done,
+            payload: simd_utf8::from_utf8_lossy_fast(&payload),
+        })
+    }
+}
+
+fn parse_kitty_notification_kind(input: &[u8]) -> Option<KittyNotificationKind> {
+    match input {
+        b"title" => Some(KittyNotificationKind::Title),
+        b"body" => Some(KittyNotificationKind::Body),
+        b"close" => Some(KittyNotificationKind::Close),
+        b"alive" => Some(KittyNotificationKind::Alive),
+        b"?" => Some(KittyNotificationKind::Query),
+        b"buttons" => Some(KittyNotificationKind::Buttons),
+        b"icon" => Some(KittyNotificationKind::Icon),
+        _ => None,
+    }
+}
+
 /// OSC 10/11/12: dynamic color set/query, applied to consecutive named
 /// colors starting at `dynamic_code - 10`.
 pub(super) fn parse_dynamic_colors(params: &[&[u8]]) -> Option<Vec<DynamicColorEntry>> {
@@ -536,5 +605,35 @@ mod tests {
             b"x".as_slice(),
         ])
         .is_none());
+    }
+
+    #[test]
+    // Defends: Kitty OSC 99 notification metadata is parsed without relying on legacy OSC 9/777 forms.
+    fn kitty_notification_parses_title_chunk() {
+        let notification = parse_kitty_notification(&[
+            b"99".as_slice(),
+            b"i=build:d=0:p=title".as_slice(),
+            b"Build".as_slice(),
+        ])
+        .unwrap();
+
+        assert_eq!(notification.id.as_deref(), Some("build"));
+        assert_eq!(notification.kind, KittyNotificationKind::Title);
+        assert!(!notification.done);
+        assert_eq!(notification.payload, "Build");
+    }
+
+    #[test]
+    // Defends: OSC 99 base64 payloads decode to plain UTF-8 before notification display.
+    fn kitty_notification_decodes_base64_payload() {
+        let notification = parse_kitty_notification(&[
+            b"99".as_slice(),
+            b"p=body:e=1".as_slice(),
+            b"aGVsbG8=".as_slice(),
+        ])
+        .unwrap();
+
+        assert_eq!(notification.kind, KittyNotificationKind::Body);
+        assert_eq!(notification.payload, "hello");
     }
 }

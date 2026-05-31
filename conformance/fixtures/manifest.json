@@ -34,6 +34,14 @@
       "hex": "1b5d36363b733d323b626967207465787407"
     },
     {
+      "id": "osc99_notification",
+      "tier": "should",
+      "protocol": "Kitty OSC 99",
+      "description": "Display a simple Kitty desktop notification with no metadata.",
+      "source": "Kitty desktop notification protocol uses OSC 99 metadata and payload.",
+      "hex": "1b5d39393b3b48656c6c6f20776f726c641b5c"
+    },
+    {
       "id": "kitty_keyboard_query",
       "tier": "must",
       "protocol": "Kitty keyboard",

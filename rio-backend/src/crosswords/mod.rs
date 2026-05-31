@@ -43,7 +43,8 @@ use crate::crosswords::square::{CellFlags, Wide};
 use crate::event::WindowId;
 use crate::event::{EventListener, RioEvent, TerminalDamage};
 use crate::performer::handler::{
-    Handler, SemanticPrompt, SemanticPromptAction, SemanticPromptKind, TextSizing,
+    Handler, KittyNotification, KittyNotificationKind, SemanticPrompt,
+    SemanticPromptAction, SemanticPromptKind, TextSizing,
 };
 use crate::performer::parser::Params;
 use crate::selection::{Selection, SelectionRange, SelectionType};
@@ -56,6 +57,7 @@ use pos::{
     Boundary, CharsetIndex, Column, Cursor, CursorState, Direction, Line, Pos, Side,
 };
 use square::{Hyperlink, LineLength, Square};
+use std::collections::HashMap;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
 use std::option::Option;
@@ -72,6 +74,22 @@ pub const MIN_LINES: usize = 1;
 
 // Max. number of graphics stored in a single cell.
 // const MAX_GRAPHICS_PER_CELL: usize = 20;
+
+#[derive(Debug, Default)]
+struct PendingKittyNotification {
+    title: String,
+    body: String,
+}
+
+impl PendingKittyNotification {
+    fn push(&mut self, kind: KittyNotificationKind, payload: &str) {
+        match kind {
+            KittyNotificationKind::Title => self.title.push_str(payload),
+            KittyNotificationKind::Body => self.body.push_str(payload),
+            _ => {}
+        }
+    }
+}
 
 bitflags! {
      #[derive(Debug, Copy, Clone)]
@@ -464,6 +482,7 @@ where
     pub route_id: usize,
     title_stack: Vec<String>,
     pub current_directory: Option<std::path::PathBuf>,
+    kitty_notifications: HashMap<String, PendingKittyNotification>,
 
     /// Whether a `TerminalDamaged` event is already in flight to the renderer.
     /// Set by PTY thread before sending; cleared by renderer after extracting damage.
@@ -524,6 +543,7 @@ impl<U: EventListener> Crosswords<U> {
             route_id,
             title_stack: Default::default(),
             current_directory: None,
+            kitty_notifications: HashMap::new(),
             damage_event_in_flight: false,
             keyboard_mode_stack: Default::default(),
             keyboard_mode_idx: 0,
@@ -1056,6 +1076,25 @@ impl<U: EventListener> Crosswords<U> {
 
         self.grid[row][col].insert_cell_flag(CellFlags::GRAPHEME);
         self.grid[row].has_extras = true;
+    }
+
+    fn emit_kitty_notification(&mut self, pending: PendingKittyNotification) {
+        let title = if pending.title.is_empty() {
+            pending.body.clone()
+        } else {
+            pending.title
+        };
+        if title.is_empty() && pending.body.is_empty() {
+            return;
+        }
+
+        self.event_proxy.send_event(
+            RioEvent::DesktopNotification {
+                title,
+                body: pending.body,
+            },
+            self.window_id,
+        );
     }
 
     #[inline]
@@ -3359,6 +3398,40 @@ impl<U: EventListener> Handler for Crosswords<U> {
         );
     }
 
+    fn kitty_notification(&mut self, notification: KittyNotification) {
+        match notification.kind {
+            KittyNotificationKind::Close => {
+                if let Some(id) = notification.id {
+                    self.kitty_notifications.remove(&id);
+                }
+            }
+            KittyNotificationKind::Title | KittyNotificationKind::Body => {
+                if let Some(id) = notification.id {
+                    let display = {
+                        let pending =
+                            self.kitty_notifications.entry(id.clone()).or_default();
+                        pending.push(notification.kind, &notification.payload);
+                        notification
+                            .done
+                            .then(|| self.kitty_notifications.remove(&id))
+                            .flatten()
+                    };
+                    if let Some(pending) = display {
+                        self.emit_kitty_notification(pending);
+                    }
+                } else if notification.done {
+                    let mut pending = PendingKittyNotification::default();
+                    pending.push(notification.kind, &notification.payload);
+                    self.emit_kitty_notification(pending);
+                }
+            }
+            KittyNotificationKind::Alive
+            | KittyNotificationKind::Query
+            | KittyNotificationKind::Buttons
+            | KittyNotificationKind::Icon => {}
+        }
+    }
+
     #[inline]
     fn substitute(&mut self) {
         warn!("[unimplemented] Substitute");
@@ -4785,6 +4858,63 @@ mod tests {
         Handler::input_sized_text(&mut term, sizing);
 
         assert_eq!(term.grid.cursor.pos, Pos::new(Line(0), Column(2)));
+    }
+
+    #[test]
+    // Defends: chunked Kitty OSC 99 title/body payloads are emitted through Rio's desktop notification event.
+    fn kitty_notification_chunks_emit_desktop_notification() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        #[derive(Clone)]
+        struct TestListener {
+            events: Rc<RefCell<Vec<RioEvent>>>,
+        }
+
+        impl EventListener for TestListener {
+            fn event(&self) -> (Option<RioEvent>, bool) {
+                (None, false)
+            }
+
+            fn send_event(&self, event: RioEvent, _id: WindowId) {
+                self.events.borrow_mut().push(event);
+            }
+        }
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let listener = TestListener {
+            events: events.clone(),
+        };
+        let size = CrosswordsSize::new(4, 4);
+        let mut term =
+            Crosswords::new(size, CursorShape::Block, listener, WindowId::from(0), 0, 10);
+
+        Handler::kitty_notification(
+            &mut term,
+            KittyNotification {
+                id: Some("build".to_string()),
+                kind: KittyNotificationKind::Title,
+                done: false,
+                payload: "Build".to_string(),
+            },
+        );
+        Handler::kitty_notification(
+            &mut term,
+            KittyNotification {
+                id: Some("build".to_string()),
+                kind: KittyNotificationKind::Body,
+                done: true,
+                payload: "Done".to_string(),
+            },
+        );
+
+        let captured = events.borrow();
+        assert_eq!(captured.len(), 1);
+        assert!(matches!(
+            &captured[0],
+            RioEvent::DesktopNotification { title, body }
+                if title == "Build" && body == "Done"
+        ));
     }
 
     // Minimum-valid simple glyph: one contour, one on-curve point.
