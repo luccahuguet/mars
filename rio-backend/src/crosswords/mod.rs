@@ -52,6 +52,7 @@ use crate::simd_utf8;
 use attr::*;
 use base64::{engine::general_purpose, Engine as _};
 use bitflags::bitflags;
+use cursor_icon::CursorIcon;
 use grid::row::{Row, SemanticZone};
 use pos::{
     Boundary, CharsetIndex, Column, Cursor, CursorState, Direction, Line, Pos, Side,
@@ -448,6 +449,9 @@ const TITLE_STACK_MAX_DEPTH: usize = 4096;
 // Max size of the keyboard modes.
 const KEYBOARD_MODE_STACK_MAX_DEPTH: usize = 8;
 
+// Minimum stack depth required by the Kitty pointer-shapes protocol.
+const MOUSE_CURSOR_STACK_MAX_DEPTH: usize = 16;
+
 #[derive(Debug)]
 pub struct Crosswords<U>
 where
@@ -495,6 +499,8 @@ where
     keyboard_mode_idx: usize,
     inactive_keyboard_mode_stack: [u8; KEYBOARD_MODE_STACK_MAX_DEPTH],
     inactive_keyboard_mode_idx: usize,
+    mouse_cursor_stack: Vec<CursorIcon>,
+    inactive_mouse_cursor_stack: Vec<CursorIcon>,
 }
 
 impl<U: EventListener> Crosswords<U> {
@@ -551,6 +557,8 @@ impl<U: EventListener> Crosswords<U> {
             keyboard_mode_idx: 0,
             inactive_keyboard_mode_stack: Default::default(),
             inactive_keyboard_mode_idx: 0,
+            mouse_cursor_stack: Vec::new(),
+            inactive_mouse_cursor_stack: Vec::new(),
         }
     }
 
@@ -1642,6 +1650,10 @@ impl<U: EventListener> Crosswords<U> {
         self.mode
     }
 
+    pub fn mouse_cursor_icon(&self) -> Option<CursorIcon> {
+        self.mouse_cursor_stack.last().copied()
+    }
+
     #[inline]
     pub fn cursor(&self) -> CursorState {
         let mut content = self.cursor_shape;
@@ -1690,6 +1702,10 @@ impl<U: EventListener> Crosswords<U> {
         mem::swap(
             &mut self.keyboard_mode_idx,
             &mut self.inactive_keyboard_mode_idx,
+        );
+        mem::swap(
+            &mut self.mouse_cursor_stack,
+            &mut self.inactive_mouse_cursor_stack,
         );
 
         mem::swap(&mut self.grid, &mut self.inactive_grid);
@@ -2380,6 +2396,66 @@ impl<U: EventListener> Handler for Crosswords<U> {
     }
 
     #[inline]
+    fn set_mouse_cursor_icon(&mut self, icon: Option<CursorIcon>) {
+        self.mouse_cursor_stack.clear();
+        if let Some(icon) = icon {
+            self.mouse_cursor_stack.push(icon);
+        }
+        self.event_proxy
+            .send_event(RioEvent::MouseCursorDirty, self.window_id);
+    }
+
+    #[inline]
+    fn push_mouse_cursor_icons(&mut self, icons: Vec<CursorIcon>) {
+        for icon in icons {
+            if self.mouse_cursor_stack.len() == MOUSE_CURSOR_STACK_MAX_DEPTH {
+                self.mouse_cursor_stack.remove(0);
+            }
+            self.mouse_cursor_stack.push(icon);
+        }
+        self.event_proxy
+            .send_event(RioEvent::MouseCursorDirty, self.window_id);
+    }
+
+    #[inline]
+    fn pop_mouse_cursor_icon(&mut self) {
+        self.mouse_cursor_stack.pop();
+        self.event_proxy
+            .send_event(RioEvent::MouseCursorDirty, self.window_id);
+    }
+
+    #[inline]
+    fn query_mouse_cursor_icons(&mut self, queries: Vec<String>, terminator: &str) {
+        let response = match queries.as_slice() {
+            [query] if query == "__current__" => self
+                .mouse_cursor_icon()
+                .map(|icon| icon.name().to_owned())
+                .unwrap_or_else(|| "0".to_owned()),
+            [query] if query == "__default__" => CursorIcon::Text.name().to_owned(),
+            [query] if query == "__grabbed__" => CursorIcon::Grabbing.name().to_owned(),
+            queries => queries
+                .iter()
+                .map(|query| {
+                    if query.parse::<CursorIcon>().is_ok() {
+                        "1"
+                    } else {
+                        "0"
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+        };
+
+        self.event_proxy.send_event(
+            RioEvent::PtyWrite(
+                self.route_id,
+                format!("\x1b]22;{}{}", response, terminator),
+            ),
+            self.window_id,
+        );
+    }
+
+    #[inline]
     fn goto(&mut self, line: Line, col: Column) {
         trace!("Going to: line={}, col={}", line, col);
         let (y_offset, max_y) = if self.mode.contains(Mode::ORIGIN) {
@@ -2657,6 +2733,8 @@ impl<U: EventListener> Handler for Crosswords<U> {
         self.vi_mode_cursor = Default::default();
         self.keyboard_mode_stack = Default::default();
         self.inactive_keyboard_mode_stack = Default::default();
+        self.mouse_cursor_stack.clear();
+        self.inactive_mouse_cursor_stack.clear();
 
         // Clear kitty graphics on full reset (both active and inactive
         // screens, so a reset doesn't leave stale images on the other
@@ -2669,6 +2747,8 @@ impl<U: EventListener> Handler for Crosswords<U> {
 
         self.event_proxy
             .send_event(RioEvent::CursorBlinkingChange, self.window_id);
+        self.event_proxy
+            .send_event(RioEvent::MouseCursorDirty, self.window_id);
         self.mark_fully_damaged();
     }
 
@@ -4888,6 +4968,7 @@ impl<U: EventListener> Crosswords<U> {
 
 #[cfg(test)]
 mod tests {
+    // Test lane: default
     use super::*;
     use crate::crosswords::pos::{Column, Line, Pos, Side};
     use crate::crosswords::CrosswordsSize;
@@ -4897,6 +4978,97 @@ mod tests {
         let size = CrosswordsSize::new(4, 4);
         let window_id = crate::event::WindowId::from(0);
         Crosswords::new(size, CursorShape::Block, VoidListener {}, window_id, 0, 10)
+    }
+
+    #[test]
+    // Defends: OSC 22 pointer shape stacks are independent across main and alternate screens.
+    fn mouse_cursor_stack_swaps_with_alternate_screen() {
+        let mut term = make_crosswords();
+
+        Handler::set_mouse_cursor_icon(&mut term, Some(CursorIcon::Pointer));
+        assert_eq!(term.mouse_cursor_icon(), Some(CursorIcon::Pointer));
+
+        term.swap_alt();
+        assert_eq!(term.mouse_cursor_icon(), None);
+
+        Handler::push_mouse_cursor_icons(
+            &mut term,
+            vec![CursorIcon::Wait, CursorIcon::Crosshair],
+        );
+        assert_eq!(term.mouse_cursor_icon(), Some(CursorIcon::Crosshair));
+
+        term.swap_alt();
+        assert_eq!(term.mouse_cursor_icon(), Some(CursorIcon::Pointer));
+
+        Handler::pop_mouse_cursor_icon(&mut term);
+        assert_eq!(term.mouse_cursor_icon(), None);
+
+        term.swap_alt();
+        assert_eq!(term.mouse_cursor_icon(), Some(CursorIcon::Crosshair));
+
+        term.reset_state();
+        assert_eq!(term.mouse_cursor_icon(), None);
+        term.swap_alt();
+        assert_eq!(term.mouse_cursor_icon(), None);
+    }
+
+    #[test]
+    // Defends: OSC 22 current/support queries reply to the originating PTY with Kitty response syntax.
+    fn mouse_cursor_queries_emit_pty_replies() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        #[derive(Clone)]
+        struct TestListener {
+            events: Rc<RefCell<Vec<RioEvent>>>,
+        }
+
+        impl EventListener for TestListener {
+            fn event(&self) -> (Option<RioEvent>, bool) {
+                (None, false)
+            }
+
+            fn send_event(&self, event: RioEvent, _id: WindowId) {
+                self.events.borrow_mut().push(event);
+            }
+        }
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let listener = TestListener {
+            events: events.clone(),
+        };
+        let size = CrosswordsSize::new(4, 4);
+        let window_id = crate::event::WindowId::from(0);
+        let mut term =
+            Crosswords::new(size, CursorShape::Block, listener, window_id, 7, 10);
+
+        Handler::set_mouse_cursor_icon(&mut term, Some(CursorIcon::Crosshair));
+        Handler::query_mouse_cursor_icons(
+            &mut term,
+            vec!["__current__".to_owned()],
+            "\x07",
+        );
+        Handler::query_mouse_cursor_icons(
+            &mut term,
+            vec!["pointer".to_owned(), "no-such-name".to_owned()],
+            "\x1b\\",
+        );
+
+        let replies = events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                RioEvent::PtyWrite(route_id, reply) => Some((*route_id, reply.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            replies,
+            vec![
+                (7, "\x1b]22;crosshair\x07".to_owned()),
+                (7, "\x1b]22;1,0\x1b\\".to_owned()),
+            ]
+        );
     }
 
     #[test]

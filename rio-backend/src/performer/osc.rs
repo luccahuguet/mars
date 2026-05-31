@@ -50,6 +50,13 @@ pub(super) struct KittyColorEntry {
     pub spec: KittyColorSpec,
 }
 
+pub(super) enum MouseCursorOp {
+    Set(Option<CursorIcon>),
+    Push(Vec<CursorIcon>),
+    Pop,
+    Query(Vec<String>),
+}
+
 pub(super) enum ClipboardOp<'a> {
     Load { kind: u8 },
     Store { kind: u8, payload: &'a [u8] },
@@ -602,10 +609,47 @@ pub(super) fn parse_dynamic_colors(params: &[&[u8]]) -> Option<Vec<DynamicColorE
     Some(out)
 }
 
-/// OSC 22: mouse cursor icon name.
-pub(super) fn parse_mouse_cursor_icon(param: &[u8]) -> Option<CursorIcon> {
-    let shape = simd_utf8::from_utf8_lossy_fast(param);
-    CursorIcon::from_str(&shape).ok()
+/// OSC 22: Kitty mouse pointer shape operation.
+pub(super) fn parse_mouse_cursor_operation(param: &[u8]) -> Option<MouseCursorOp> {
+    let value = simd_utf8::from_utf8_fast(param).ok()?.trim();
+    if value.is_empty() {
+        return Some(MouseCursorOp::Set(None));
+    }
+
+    let mut chars = value.chars();
+    let first = chars.next()?;
+    let rest = chars.as_str().trim();
+
+    match first {
+        '=' => Some(MouseCursorOp::Set(Some(parse_mouse_cursor_icon(rest)?))),
+        '>' => {
+            let icons = parse_mouse_cursor_icon_list(rest);
+            (!icons.is_empty()).then_some(MouseCursorOp::Push(icons))
+        }
+        '<' => Some(MouseCursorOp::Pop),
+        '?' => Some(MouseCursorOp::Query(parse_mouse_cursor_query_list(rest))),
+        _ => Some(MouseCursorOp::Set(Some(parse_mouse_cursor_icon(value)?))),
+    }
+}
+
+fn parse_mouse_cursor_icon(shape: &str) -> Option<CursorIcon> {
+    CursorIcon::from_str(shape.trim()).ok()
+}
+
+fn parse_mouse_cursor_icon_list(value: &str) -> Vec<CursorIcon> {
+    value
+        .split(',')
+        .filter_map(parse_mouse_cursor_icon)
+        .collect()
+}
+
+fn parse_mouse_cursor_query_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|shape| !shape.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// OSC 50: `CursorShape=N` text cursor selector.
@@ -730,6 +774,37 @@ mod tests {
             })
         ));
         assert_eq!(entries[7].index, Some(3));
+    }
+
+    #[test]
+    // Defends: Kitty OSC 22 set/reset/push/pop/query prefixes are parsed as distinct operations.
+    fn mouse_cursor_operations_parse_kitty_pointer_shapes() {
+        assert!(matches!(
+            parse_mouse_cursor_operation(b"pointer"),
+            Some(MouseCursorOp::Set(Some(CursorIcon::Pointer)))
+        ));
+        assert!(matches!(
+            parse_mouse_cursor_operation(b"=crosshair"),
+            Some(MouseCursorOp::Set(Some(CursorIcon::Crosshair)))
+        ));
+        assert!(matches!(
+            parse_mouse_cursor_operation(b""),
+            Some(MouseCursorOp::Set(None))
+        ));
+        assert!(matches!(
+            parse_mouse_cursor_operation(b">wait,pointer"),
+            Some(MouseCursorOp::Push(icons))
+                if icons == vec![CursorIcon::Wait, CursorIcon::Pointer]
+        ));
+        assert!(matches!(
+            parse_mouse_cursor_operation(b"<ignored"),
+            Some(MouseCursorOp::Pop)
+        ));
+        assert!(matches!(
+            parse_mouse_cursor_operation(b"?pointer,crosshair,no-such-name"),
+            Some(MouseCursorOp::Query(queries))
+                if queries == vec!["pointer", "crosshair", "no-such-name"]
+        ));
     }
 
     #[test]

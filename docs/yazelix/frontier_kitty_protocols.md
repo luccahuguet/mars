@@ -34,12 +34,11 @@ Already implemented or partially validated in Yazelix-terminal:
 - OSC 52 hardened clipboard policy
 - OSC 21 first slice for foreground, background, cursor, and ANSI palette
   set/query/reset
+- OSC 22 pointer shape set/reset, push/pop, current/support query, and
+  frontend cursor selection
 
 Important gaps found during this audit:
 
-- OSC 22 mouse pointer shape is parsed, but the terminal state/front-end path is
-  effectively not wired. The backend handler method has no live crosswords
-  implementation, and the frontend falls back to URL/text/resize cursor logic.
 - OSC 21 unsupported special color keys such as cursor text, selection colors,
   visual bell, and transparent background slots still need representable terminal
   storage before they can be more than query-visible.

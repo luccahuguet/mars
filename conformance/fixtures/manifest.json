@@ -26,6 +26,14 @@
       "hex": "1b5d32313b666f726567726f756e643d3f3b6261636b67726f756e643d233031303230333b637572736f723b73656c656374696f6e5f6261636b67726f756e643d3f07"
     },
     {
+      "id": "osc22_pointer_shapes",
+      "tier": "should",
+      "protocol": "Kitty OSC 22",
+      "description": "Set a pointer shape, push two shapes, then query support for one valid and one invalid shape.",
+      "source": "Kitty pointer shapes protocol.",
+      "hex": "1b5d32323b706f696e746572071b5d32323b3e776169742c63726f7373686169721b5c1b5d32323b3f706f696e7465722c6e6f2d737563682d6e616d651b5c"
+    },
+    {
       "id": "osc133_semantic_prompt",
       "tier": "must",
       "protocol": "OSC 133",

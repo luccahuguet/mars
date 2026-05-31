@@ -51,6 +51,7 @@ use rio_window::event::MouseButton;
 use rio_window::keyboard::ModifiersKeyState;
 use rio_window::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use rio_window::platform::modifier_supplement::KeyEventExtModifierSupplement;
+use rio_window::window::CursorIcon;
 use std::error::Error;
 use std::ffi::OsStr;
 use touch::TouchPurpose;
@@ -722,6 +723,20 @@ impl Screen<'_> {
     pub fn mouse_mode(&self) -> bool {
         let mode = self.get_mode();
         mode.intersects(Mode::MOUSE_MODE) && !mode.contains(Mode::VI)
+    }
+
+    pub fn preferred_mouse_cursor_icon(&self) -> CursorIcon {
+        let terminal = self.context_manager.current().terminal.lock();
+        if let Some(icon) = terminal.mouse_cursor_icon() {
+            return icon;
+        }
+        drop(terminal);
+
+        if !self.modifiers.state().shift_key() && self.mouse_mode() {
+            CursorIcon::Default
+        } else {
+            CursorIcon::Text
+        }
     }
 
     #[inline]

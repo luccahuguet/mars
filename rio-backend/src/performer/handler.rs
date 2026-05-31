@@ -501,8 +501,17 @@ pub trait Handler {
     /// Set hyperlink.
     fn set_hyperlink(&mut self, _: Option<Hyperlink>) {}
 
-    /// Set mouse cursor icon.
-    fn set_mouse_cursor_icon(&mut self, _: CursorIcon) {}
+    /// Set or reset the mouse cursor icon stack.
+    fn set_mouse_cursor_icon(&mut self, _: Option<CursorIcon>) {}
+
+    /// Push mouse cursor icons onto the stack.
+    fn push_mouse_cursor_icons(&mut self, _: Vec<CursorIcon>) {}
+
+    /// Pop the current mouse cursor icon from the stack.
+    fn pop_mouse_cursor_icon(&mut self) {}
+
+    /// Respond to a Kitty mouse cursor shape query.
+    fn query_mouse_cursor_icons(&mut self, _: Vec<String>, _: &str) {}
 
     /// Set progress bar report (OSC 9;4).
     fn set_progress_report(&mut self, _: crate::event::ProgressReport) {}
@@ -1244,11 +1253,22 @@ impl<U: Handler> Perform for Performer<'_, U> {
                 None => unhandled(params),
             },
 
-            // Set mouse cursor shape.
-            b"22" if params.len() == 2 => match osc::parse_mouse_cursor_icon(params[1]) {
-                Some(icon) => self.handler.set_mouse_cursor_icon(icon),
-                None => debug!("[osc 22] unrecognized cursor icon shape"),
-            },
+            // Kitty mouse pointer shape protocol.
+            b"22" if params.len() == 2 => {
+                match osc::parse_mouse_cursor_operation(params[1]) {
+                    Some(osc::MouseCursorOp::Set(icon)) => {
+                        self.handler.set_mouse_cursor_icon(icon)
+                    }
+                    Some(osc::MouseCursorOp::Push(icons)) => {
+                        self.handler.push_mouse_cursor_icons(icons)
+                    }
+                    Some(osc::MouseCursorOp::Pop) => self.handler.pop_mouse_cursor_icon(),
+                    Some(osc::MouseCursorOp::Query(queries)) => {
+                        self.handler.query_mouse_cursor_icons(queries, terminator)
+                    }
+                    None => debug!("[osc 22] unrecognized cursor icon operation"),
+                }
+            }
 
             // Set text cursor style.
             b"50" => match osc::parse_cursor_shape(params) {
@@ -2356,6 +2376,65 @@ mod tests {
                 ),
                 ("selection_background".to_owned(), None, "\x07".to_owned())
             ]
+        );
+    }
+
+    #[test]
+    // Defends: OSC 22 reaches the pointer-shape stack/query handler methods instead of only parsing names.
+    fn osc22_dispatches_to_mouse_cursor_handlers() {
+        #[derive(Default)]
+        struct TestHandler {
+            sets: Vec<Option<CursorIcon>>,
+            pushes: Vec<Vec<CursorIcon>>,
+            pops: usize,
+            queries: Vec<(Vec<String>, String)>,
+        }
+
+        impl Handler for TestHandler {
+            fn set_mouse_cursor_icon(&mut self, icon: Option<CursorIcon>) {
+                self.sets.push(icon);
+            }
+
+            fn push_mouse_cursor_icons(&mut self, icons: Vec<CursorIcon>) {
+                self.pushes.push(icons);
+            }
+
+            fn pop_mouse_cursor_icon(&mut self) {
+                self.pops += 1;
+            }
+
+            fn query_mouse_cursor_icons(
+                &mut self,
+                queries: Vec<String>,
+                terminator: &str,
+            ) {
+                self.queries.push((queries, terminator.to_owned()));
+            }
+        }
+
+        let mut state = ProcessorState::default();
+        let mut handler = TestHandler::default();
+        let mut performer = Performer::new(&mut state, &mut handler);
+        let mut parser = Parser::default();
+
+        parser.advance(&mut performer, b"\x1b]22;pointer\x07");
+        parser.advance(&mut performer, b"\x1b]22;>wait,crosshair\x07");
+        parser.advance(&mut performer, b"\x1b]22;<\x07");
+        parser.advance(&mut performer, b"\x1b]22;?pointer,no-such-name\x1b\\");
+        parser.advance(&mut performer, b"\x1b]22;\x07");
+
+        assert_eq!(handler.sets, vec![Some(CursorIcon::Pointer), None]);
+        assert_eq!(
+            handler.pushes,
+            vec![vec![CursorIcon::Wait, CursorIcon::Crosshair]]
+        );
+        assert_eq!(handler.pops, 1);
+        assert_eq!(
+            handler.queries,
+            vec![(
+                vec!["pointer".to_owned(), "no-such-name".to_owned()],
+                "\x1b\\".to_owned()
+            )]
         );
     }
 

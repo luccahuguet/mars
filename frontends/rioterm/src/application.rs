@@ -637,6 +637,8 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             RioEventType::Rio(RioEvent::MouseCursorDirty) => {
                 if let Some(route) = self.router.routes.get_mut(&window_id) {
                     route.window.screen.reset_mouse();
+                    let cursor_icon = route.window.screen.preferred_mouse_cursor_icon();
+                    route.window.winit_window.set_cursor(cursor_icon);
                 }
             }
             RioEventType::Rio(RioEvent::Scroll(scroll)) => {
@@ -1203,7 +1205,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                         if route.window.screen.resize_state.is_some() {
                             route.window.screen.resize_state = None;
-                            route.window.winit_window.set_cursor(CursorIcon::Default);
+                            let cursor_icon =
+                                route.window.screen.preferred_mouse_cursor_icon();
+                            route.window.winit_window.set_cursor(cursor_icon);
                             return;
                         }
 
@@ -1506,15 +1510,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.window.winit_window.set_cursor(CursorIcon::Pointer);
                     route.window.screen.context_manager.request_render();
                 } else if !is_selecting {
-                    let cursor_icon =
-                        if !route.window.screen.modifiers.state().shift_key()
-                            && route.window.screen.mouse_mode()
-                        {
-                            CursorIcon::Default
-                        } else {
-                            CursorIcon::Text
-                        };
-
+                    let cursor_icon = route.window.screen.preferred_mouse_cursor_icon();
                     route.window.winit_window.set_cursor(cursor_icon);
 
                     // In case hyperlink range has cleaned trigger one more render
@@ -1539,6 +1535,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 route.window.screen.mouse.square_side = square_side;
 
                 if is_selecting {
+                    route.window.winit_window.set_cursor(CursorIcon::Text);
                     route.window.screen.update_selection(point, square_side);
                     route.window.screen.context_manager.request_render();
                 } else if cell_changed && route.window.screen.has_mouse_motion_and_drag()
