@@ -160,3 +160,5 @@ The next useful benchmark work should add:
 - comparable Ghostty runs that use the same workload definitions where possible
 - GPU utilization sampling through optional host tools when available
 - release-package benchmarks instead of only local `target/release/rio`
+
+Tracked as Bead `yzt-7p3.41`.

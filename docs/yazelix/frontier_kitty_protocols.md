@@ -60,6 +60,7 @@ Already implemented or partially validated in Yazelix-terminal:
 - Kitty file transfer user-approved local-to-remote `receive` reads with path
   preview, bounded directory traversal, regular file/directory metadata
   listing, and one-file-at-a-time regular file streaming
+- Kitty file transfer zlib compression for regular-file send and receive data
 
 Important gaps found during this audit:
 
@@ -72,9 +73,9 @@ Important gaps found during this audit:
   Kitty-frontier work rather than strict Ghostty parity.
 - OSC 72 drag/drop is absent and crosses a security and OS-integration boundary
   that should not be treated as parser-only work.
-- Kitty file transfer still needs compression, symlink/link policy, richer
-  metadata preservation, destination chooser UX, and any trusted bypass
-  mechanism before it matches Kitty's full spec.
+- Kitty file transfer still needs symlink/link policy, richer metadata
+  preservation, destination chooser UX, rsync/delta behavior, and any trusted
+  bypass mechanism before it matches Kitty's full spec.
 
 ## Must
 

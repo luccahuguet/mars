@@ -126,8 +126,10 @@ cases:
 
 ## Follow-Up Work
 
-- Fix keyboard mode stack underflow/overflow semantics and replace the wraparound
-  underflow test with a spec test
+- Keep tracking CapsLock/NumLock modifier-bit reporting until the platform
+  window/input layer exposes reliable lock state
+- Decide whether niche private-use keys outside the exposed `rio-window` key set
+  are implementable, or document them as platform-impossible instead of guessing
 - Add full modifier-bit support where platform events expose the needed state
 - Implement base-layout alternate keys from `physical_key`
 - Fill the remaining Kitty functional/keypad private-use mappings
