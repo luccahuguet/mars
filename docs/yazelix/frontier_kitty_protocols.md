@@ -35,8 +35,9 @@ Already implemented or partially validated in Yazelix-terminal:
   ECH/EL/ED/ICH/DCH/IL/DL intersections
 - OSC 66 block, hollow-block, bar, and underline cursor geometry expands over
   the sized text visual block, including Ghostty shader cursor rectangles
-- OSC 99 notification parsing/display, support query replies, alive query
-  replies, and untracked close replies
+- OSC 99 notification parsing/display, Linux D-Bus replace/close handles,
+  activation/button/close callback routing to the originating PTY, support
+  query replies, and alive query replies
 - OSC 133 semantic prompt regions, prompt navigation, and output selection
 - OSC 52 hardened clipboard policy
 - OSC 5522 Kitty rich clipboard text/plain read/write/wdata/walias first slice

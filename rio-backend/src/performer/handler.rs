@@ -244,6 +244,7 @@ pub struct KittyNotification {
     pub kind: KittyNotificationKind,
     pub done: bool,
     pub close_report: bool,
+    pub action_report: bool,
     pub payload: String,
 }
 

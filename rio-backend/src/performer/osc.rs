@@ -523,6 +523,7 @@ pub(super) fn parse_kitty_notification(params: &[&[u8]]) -> Option<KittyNotifica
     let mut done = true;
     let mut encoded = false;
     let mut close_report = false;
+    let mut action_report = false;
 
     for item in params[1].split(|b| *b == b':') {
         if item.is_empty() {
@@ -538,6 +539,7 @@ pub(super) fn parse_kitty_notification(params: &[&[u8]]) -> Option<KittyNotifica
             b"i" => id = parse_notification_id(value),
             b"p" => kind = parse_kitty_notification_kind(value)?,
             b"c" => close_report = parse_bool(value)?,
+            b"a" => action_report = value == b"report",
             b"d" => done = parse_bool(value)?,
             b"e" => encoded = parse_bool(value)?,
             _ => {}
@@ -555,6 +557,7 @@ pub(super) fn parse_kitty_notification(params: &[&[u8]]) -> Option<KittyNotifica
             kind,
             done,
             close_report,
+            action_report,
             payload: simd_utf8::from_utf8_lossy_fast(&bytes),
         })
     } else {
@@ -566,6 +569,7 @@ pub(super) fn parse_kitty_notification(params: &[&[u8]]) -> Option<KittyNotifica
             kind,
             done,
             close_report,
+            action_report,
             payload: simd_utf8::from_utf8_lossy_fast(&payload),
         })
     }
@@ -1093,6 +1097,7 @@ mod tests {
         assert_eq!(notification.kind, KittyNotificationKind::Title);
         assert!(!notification.done);
         assert!(!notification.close_report);
+        assert!(!notification.action_report);
         assert_eq!(notification.payload, "Build");
     }
 
@@ -1108,7 +1113,22 @@ mod tests {
 
         assert_eq!(notification.id, None);
         assert!(notification.close_report);
+        assert!(!notification.action_report);
         assert_eq!(notification.kind, KittyNotificationKind::Alive);
+    }
+
+    #[test]
+    // Defends: OSC 99 a=report is parsed so activation and button callbacks can be routed.
+    fn kitty_notification_parses_action_report() {
+        let notification = parse_kitty_notification(&[
+            b"99".as_slice(),
+            b"i=job:a=report:p=title".as_slice(),
+            b"Done".as_slice(),
+        ])
+        .unwrap();
+
+        assert_eq!(notification.id.as_deref(), Some("job"));
+        assert!(notification.action_report);
     }
 
     #[test]
@@ -1122,6 +1142,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(notification.kind, KittyNotificationKind::Body);
+        assert!(!notification.action_report);
         assert_eq!(notification.payload, "hello");
     }
 }

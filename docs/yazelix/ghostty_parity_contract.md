@@ -126,6 +126,8 @@ Required:
   composition without overriding configured background images
 - OSC 9/777 notifications and OSC 9;4 progress reporting, gated by sane user
   policy
+- OSC 99 desktop notifications route Linux D-Bus replace/close handles and
+  activation/button/close callbacks back to the originating PTY when requested
 - OSC 22 mouse pointer shape where supported by the platform
 
 ### Yazelix Mode

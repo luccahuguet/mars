@@ -216,6 +216,22 @@ pub enum RioEvent {
         body: String,
     },
 
+    /// Kitty OSC 99 notification that needs OS notification lifecycle routing.
+    KittyNotification {
+        route_id: usize,
+        id: Option<String>,
+        title: String,
+        body: String,
+        report_activation: bool,
+        report_close: bool,
+        buttons: Vec<String>,
+    },
+
+    /// Close a previously emitted Kitty OSC 99 OS notification by id.
+    CloseKittyNotification {
+        id: String,
+    },
+
     /// Shutdown request.
     Exit,
 
@@ -310,6 +326,12 @@ impl Debug for RioEvent {
             RioEvent::Bell => write!(f, "Bell"),
             RioEvent::DesktopNotification { title, body } => {
                 write!(f, "DesktopNotification({title}, {body})")
+            }
+            RioEvent::KittyNotification { id, title, .. } => {
+                write!(f, "KittyNotification({id:?}, {title})")
+            }
+            RioEvent::CloseKittyNotification { id } => {
+                write!(f, "CloseKittyNotification({id})")
             }
             RioEvent::Exit => write!(f, "Exit"),
             RioEvent::Quit => write!(f, "Quit"),

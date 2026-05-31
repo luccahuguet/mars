@@ -95,16 +95,31 @@ struct PendingKittyNotification {
     title: String,
     body: String,
     close_report: bool,
+    action_report: bool,
+    buttons_payload: String,
 }
 
 impl PendingKittyNotification {
     fn push(&mut self, notification: &KittyNotification) {
         self.close_report |= notification.close_report;
+        self.action_report |= notification.action_report;
         match notification.kind {
             KittyNotificationKind::Title => self.title.push_str(&notification.payload),
             KittyNotificationKind::Body => self.body.push_str(&notification.payload),
+            KittyNotificationKind::Buttons => {
+                self.buttons_payload.push_str(&notification.payload)
+            }
             _ => {}
         }
+    }
+
+    fn buttons(&self) -> Vec<String> {
+        self.buttons_payload
+            .split('\u{2028}')
+            .map(str::trim)
+            .filter(|button| !button.is_empty())
+            .map(str::to_owned)
+            .collect()
     }
 }
 
@@ -1505,12 +1520,16 @@ impl<U: EventListener> Crosswords<U> {
     }
 
     fn kitty_notification_support_reply(&mut self, id: &str) {
+        #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+        let payload =
+            "a=report:c=1:o=always:p=title,body,close,alive,?,buttons:s=system,silent";
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        let payload = "o=always:p=title,body,close,alive,?:s=system,silent";
+
         self.event_proxy.send_event(
             RioEvent::PtyWrite(
                 self.route_id,
-                format!(
-                    "\x1b]99;i={id}:p=?;o=always:p=title,body,close,alive,?:s=system,silent\x1b\\"
-                ),
+                format!("\x1b]99;i={id}:p=?;{payload}\x1b\\"),
             ),
             self.window_id,
         );
@@ -1522,6 +1541,7 @@ impl<U: EventListener> Crosswords<U> {
         pending: PendingKittyNotification,
         close_report: bool,
     ) {
+        let buttons = pending.buttons();
         let title = if pending.title.is_empty() {
             pending.body.clone()
         } else {
@@ -1536,16 +1556,17 @@ impl<U: EventListener> Crosswords<U> {
         }
 
         self.event_proxy.send_event(
-            RioEvent::DesktopNotification {
+            RioEvent::KittyNotification {
+                route_id: self.route_id,
+                id: id.map(str::to_owned),
                 title,
                 body: pending.body,
+                report_activation: pending.action_report,
+                report_close: close_report,
+                buttons,
             },
             self.window_id,
         );
-
-        if close_report {
-            self.kitty_notification_response(id.unwrap_or("0"), "close", "untracked");
-        }
     }
 
     #[inline]
@@ -4746,9 +4767,15 @@ impl<U: EventListener> Handler for Crosswords<U> {
                 if let Some(id) = &notification.id {
                     self.kitty_notifications.remove(id);
                     self.kitty_live_notifications.remove(id);
+                    self.event_proxy.send_event(
+                        RioEvent::CloseKittyNotification { id: id.clone() },
+                        self.window_id,
+                    );
                 }
             }
-            KittyNotificationKind::Title | KittyNotificationKind::Body => {
+            KittyNotificationKind::Title
+            | KittyNotificationKind::Body
+            | KittyNotificationKind::Buttons => {
                 if let Some(id) = &notification.id {
                     let display = {
                         let pending =
@@ -4795,7 +4822,7 @@ impl<U: EventListener> Handler for Crosswords<U> {
                     notification.id.as_deref().unwrap_or("0"),
                 );
             }
-            KittyNotificationKind::Buttons | KittyNotificationKind::Icon => {}
+            KittyNotificationKind::Icon => {}
         }
     }
 
@@ -6841,6 +6868,7 @@ mod tests {
                 kind: KittyNotificationKind::Title,
                 done: false,
                 close_report: false,
+                action_report: false,
                 payload: "Build".to_string(),
             },
         );
@@ -6851,6 +6879,7 @@ mod tests {
                 kind: KittyNotificationKind::Body,
                 done: true,
                 close_report: false,
+                action_report: false,
                 payload: "Done".to_string(),
             },
         );
@@ -6859,8 +6888,21 @@ mod tests {
         assert_eq!(captured.len(), 1);
         assert!(matches!(
             &captured[0],
-            RioEvent::DesktopNotification { title, body }
-                if title == "Build" && body == "Done"
+            RioEvent::KittyNotification {
+                route_id,
+                id,
+                title,
+                body,
+                report_activation,
+                report_close,
+                buttons,
+            } if *route_id == 0
+                && id.as_deref() == Some("build")
+                && title == "Build"
+                && body == "Done"
+                && !report_activation
+                && !report_close
+                && buttons.is_empty()
         ));
     }
 
@@ -6876,6 +6918,7 @@ mod tests {
                 kind: KittyNotificationKind::Query,
                 done: true,
                 close_report: false,
+                action_report: false,
                 payload: String::new(),
             },
         );
@@ -6886,6 +6929,7 @@ mod tests {
                 kind: KittyNotificationKind::Title,
                 done: true,
                 close_report: false,
+                action_report: false,
                 payload: "Done".to_string(),
             },
         );
@@ -6896,6 +6940,7 @@ mod tests {
                 kind: KittyNotificationKind::Alive,
                 done: true,
                 close_report: false,
+                action_report: false,
                 payload: String::new(),
             },
         );
@@ -6906,6 +6951,7 @@ mod tests {
                 kind: KittyNotificationKind::Close,
                 done: true,
                 close_report: false,
+                action_report: false,
                 payload: String::new(),
             },
         );
@@ -6916,6 +6962,7 @@ mod tests {
                 kind: KittyNotificationKind::Alive,
                 done: true,
                 close_report: false,
+                action_report: false,
                 payload: String::new(),
             },
         );
@@ -6928,14 +6975,16 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+        let support =
+            "\x1b]99;i=mux:p=?;a=report:c=1:o=always:p=title,body,close,alive,?,buttons:s=system,silent\x1b\\";
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        let support =
+            "\x1b]99;i=mux:p=?;o=always:p=title,body,close,alive,?:s=system,silent\x1b\\";
         assert_eq!(
             replies,
             vec![
-                (
-                    7,
-                    "\x1b]99;i=mux:p=?;o=always:p=title,body,close,alive,?:s=system,silent\x1b\\"
-                        .to_string()
-                ),
+                (7, support.to_string()),
                 (7, "\x1b]99;i=mux:p=alive;build\x1b\\".to_string()),
                 (7, "\x1b]99;i=mux:p=alive;\x1b\\".to_string()),
             ]
@@ -6943,8 +6992,8 @@ mod tests {
     }
 
     #[test]
-    // Defends: OSC 99 c=1 gets an explicit untracked close reply when Rio cannot observe OS close events.
-    fn kitty_notification_close_report_replies_untracked() {
+    // Defends: OSC 99 c=1 is carried to the frontend so platform callbacks can report close events.
+    fn kitty_notification_close_report_is_routed_to_frontend() {
         let (mut term, events) = make_capturing_crosswords(7);
 
         Handler::kitty_notification(
@@ -6954,22 +7003,100 @@ mod tests {
                 kind: KittyNotificationKind::Title,
                 done: true,
                 close_report: true,
+                action_report: false,
                 payload: "Done".to_string(),
             },
         );
 
-        let replies = events
-            .borrow()
+        let captured = events.borrow();
+        assert!(matches!(
+            &captured[0],
+            RioEvent::KittyNotification {
+                route_id,
+                id,
+                title,
+                report_close,
+                ..
+            } if *route_id == 7
+                && id.as_deref() == Some("job")
+                && title == "Done"
+                && *report_close
+        ));
+        assert!(captured
+            .iter()
+            .all(|event| !matches!(event, RioEvent::PtyWrite(_, _))));
+    }
+
+    #[test]
+    // Defends: OSC 99 a=report and p=buttons are preserved for OS notification action routing.
+    fn kitty_notification_action_report_and_buttons_are_routed_to_frontend() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_notification(
+            &mut term,
+            KittyNotification {
+                id: Some("job".to_string()),
+                kind: KittyNotificationKind::Buttons,
+                done: false,
+                close_report: false,
+                action_report: false,
+                payload: "Open\u{2028}Ignore".to_string(),
+            },
+        );
+        Handler::kitty_notification(
+            &mut term,
+            KittyNotification {
+                id: Some("job".to_string()),
+                kind: KittyNotificationKind::Title,
+                done: true,
+                close_report: false,
+                action_report: true,
+                payload: "Done".to_string(),
+            },
+        );
+
+        let captured = events.borrow();
+        assert!(matches!(
+            &captured[0],
+            RioEvent::KittyNotification {
+                id,
+                title,
+                report_activation,
+                buttons,
+                ..
+            } if id.as_deref() == Some("job")
+                && title == "Done"
+                && *report_activation
+                && buttons.as_slice() == ["Open", "Ignore"]
+        ));
+    }
+
+    #[test]
+    // Defends: OSC 99 p=close sends an OS notification close request for the matching id.
+    fn kitty_notification_close_routes_os_close_request() {
+        let (mut term, events) = make_capturing_crosswords(7);
+
+        Handler::kitty_notification(
+            &mut term,
+            KittyNotification {
+                id: Some("job".to_string()),
+                kind: KittyNotificationKind::Close,
+                done: true,
+                close_report: false,
+                action_report: false,
+                payload: String::new(),
+            },
+        );
+
+        let captured = events.borrow();
+        let closes = captured
             .iter()
             .filter_map(|event| match event {
-                RioEvent::PtyWrite(route_id, reply) => Some((*route_id, reply.clone())),
+                RioEvent::CloseKittyNotification { id } => Some(id.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(
-            replies,
-            vec![(7, "\x1b]99;i=job:p=close;untracked\x1b\\".to_string())]
-        );
+        assert_eq!(closes, vec!["job".to_string()]);
     }
 
     #[test]

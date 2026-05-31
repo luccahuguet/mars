@@ -31,6 +31,17 @@ use rio_window::window::{CursorIcon, Fullscreen};
 use std::error::Error;
 use std::time::{Duration, Instant};
 
+fn kitty_notification_activation_reply(protocol_id: &str, button: Option<u32>) -> String {
+    match button {
+        Some(button) => format!("\x1b]99;i={protocol_id};{button}\x1b\\"),
+        None => format!("\x1b]99;i={protocol_id};\x1b\\"),
+    }
+}
+
+fn kitty_notification_close_reply(protocol_id: &str, payload: &str) -> String {
+    format!("\x1b]99;i={protocol_id}:p=close;{payload}\x1b\\")
+}
+
 pub struct Application<'a> {
     config: rio_backend::config::Config,
     event_proxy: EventProxy,
@@ -140,6 +151,58 @@ impl Application<'_> {
 
     fn handle_desktop_notification(&self, title: &str, body: &str) {
         rio_notifier::send_notification(title, body);
+    }
+
+    fn handle_kitty_notification(
+        &self,
+        window_id: WindowId,
+        route_id: usize,
+        id: Option<String>,
+        title: String,
+        body: String,
+        report_activation: bool,
+        report_close: bool,
+        buttons: Vec<String>,
+    ) {
+        let protocol_id = id.clone().unwrap_or_else(|| "0".to_string());
+        let event_proxy = self.event_proxy.clone();
+        let callback: rio_notifier::NotificationCallback =
+            std::sync::Arc::new(move |event| {
+                let text = match event {
+                    rio_notifier::NotificationEvent::Activated {
+                        protocol_id,
+                        button,
+                    } => kitty_notification_activation_reply(&protocol_id, button),
+                    rio_notifier::NotificationEvent::Closed { protocol_id } => {
+                        kitty_notification_close_reply(&protocol_id, "")
+                    }
+                };
+                event_proxy.send_event(
+                    RioEventType::Rio(RioEvent::PtyWrite(route_id, text)),
+                    window_id,
+                );
+            });
+
+        let tracking = rio_notifier::send_kitty_notification(
+            rio_notifier::NotificationRequest {
+                id,
+                title,
+                body,
+                report_activation,
+                report_close,
+                buttons,
+            },
+            Some(callback),
+        );
+        if tracking == rio_notifier::NotificationTracking::Untracked && report_close {
+            self.event_proxy.send_event(
+                RioEventType::Rio(RioEvent::PtyWrite(
+                    route_id,
+                    kitty_notification_close_reply(&protocol_id, "untracked"),
+                )),
+                window_id,
+            );
+        }
     }
 
     pub fn run(
@@ -572,6 +635,29 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
             RioEventType::Rio(RioEvent::DesktopNotification { title, body }) => {
                 self.handle_desktop_notification(&title, &body);
+            }
+            RioEventType::Rio(RioEvent::KittyNotification {
+                route_id,
+                id,
+                title,
+                body,
+                report_activation,
+                report_close,
+                buttons,
+            }) => {
+                self.handle_kitty_notification(
+                    window_id,
+                    route_id,
+                    id,
+                    title,
+                    body,
+                    report_activation,
+                    report_close,
+                    buttons,
+                );
+            }
+            RioEventType::Rio(RioEvent::CloseKittyNotification { id }) => {
+                rio_notifier::close_notification(&id);
             }
             RioEventType::Rio(RioEvent::PrepareRender(millis)) => {
                 if let Some(route) = self.router.routes.get(&window_id) {
