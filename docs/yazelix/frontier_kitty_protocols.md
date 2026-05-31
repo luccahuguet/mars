@@ -291,6 +291,16 @@ Recommended first step:
 - Defer full implementation until the spec settles; optionally implement only
   support-query behavior once apps start depending on it
 
+Policy:
+
+- `docs/yazelix/kitty_dnd_tracking_policy.md`
+
+Result:
+
+- Runtime support remains intentionally unadvertised
+- `t=q` support-query replies should wait until the protocol stabilizes and the
+  frontend can actually route OS drag/drop events
+
 ### Color Stack Push/Pop
 
 Why: Kitty documents OSC 30001/30101 color stack push/pop next to OSC 21, and
