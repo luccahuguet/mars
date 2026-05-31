@@ -3074,6 +3074,20 @@ impl WgpuRenderer {
 }
 
 #[cfg(test)]
+// Test lane: default
+mod image_source_rect_tests {
+    #[test]
+    // Regression: every image-overlay shader must treat source_rect as origin+size, matching Kitty virtual placements.
+    fn image_shaders_use_origin_size_source_rect() {
+        let expected = "instance.source_rect.xy + instance.source_rect.zw * corner";
+        assert!(include_str!("image.wgsl").contains(expected));
+        assert!(include_str!("image.vert.glsl")
+            .contains("in_source_rect.xy + in_source_rect.zw * corner"));
+        assert!(include_str!("image.metal").contains(expected));
+    }
+}
+
+#[cfg(test)]
 mod rect_positioning_tests {
     // ... existing tests remain the same ...
     #[derive(Debug)]

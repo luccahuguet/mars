@@ -34,8 +34,8 @@ void main() {
     corner.x = float(gl_VertexIndex == 1 || gl_VertexIndex == 3);
     corner.y = float(gl_VertexIndex == 2 || gl_VertexIndex == 3);
 
-    // `source_rect` is `[u0, v0, u1, v1]` (origin, end).
-    out_tex_coord = mix(in_source_rect.xy, in_source_rect.zw, corner);
+    // `source_rect` is `[u0, v0, width, height]` (origin, size).
+    out_tex_coord = in_source_rect.xy + in_source_rect.zw * corner;
 
     vec2 image_pos = in_dest_pos + in_dest_size * corner;
     gl_Position = globals.transform * vec4(image_pos, 0.0, 1.0);

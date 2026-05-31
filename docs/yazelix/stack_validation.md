@@ -51,6 +51,11 @@ Two renderer bugs were fixed during this validation:
 - Kitty `U=1` virtual placements from Yazi omit explicit `c=`/`r=`
   dimensions. The backend now infers the placement grid from image dimensions
   and current cell metrics before registering the virtual placement.
+- Native Vulkan and Metal image shaders used `[u0, v0, u1, v1]` source-rect
+  semantics while WGPU, atlas graphics, and Kitty virtual placements used
+  `[u0, v0, width, height]`. That mismatch corrupted Yazi image and PDF
+  previews as repeated horizontal slices. The image-overlay shader ABI is now
+  origin-plus-size on every renderer path.
 
 The virtual placement source rectangle uses the renderer shader shape
 `[u0, v0, width, height]`.
@@ -76,7 +81,12 @@ contract error unrelated to the terminal fork. Stack probes used
 nix develop -c cargo test -p rioterm --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' graphics_namespace -- --nocapture
 nix develop -c cargo test -p rioterm --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' yazelix_mode -- --nocapture
 nix develop -c cargo test -p rio-backend --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' kitty_virtual -- --nocapture
+nix develop -c cargo test -p sugarloaf --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' image_shaders_use_origin_size_source_rect -- --nocapture
 nix develop -c cargo build -p rioterm --features wgpu
+nix build .#yazelix-terminal -o result_yazelix_terminal_package
 python3 tools/yazelix_conformance.py verify
 git diff --check
 ```
+
+The native desktop package was also smoke-tested with direct Yazi image and PDF
+fixture directories under `result_yazelix_terminal_package/bin/yazelix-terminal-desktop`.

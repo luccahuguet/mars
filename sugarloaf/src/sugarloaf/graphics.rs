@@ -99,7 +99,7 @@ pub struct GraphicOverlay {
     pub height: f32,
     /// Z-index for layering.
     pub z_index: i32,
-    /// Source rectangle in normalised texture coordinates `[u0, v0, u1, v1]`.
+    /// Source rectangle in normalised texture coordinates `[u0, v0, width, height]`.
     /// `[0.0, 0.0, 1.0, 1.0]` (the default) draws the whole image; other
     /// values draw a slice — used by the kitty Unicode-placeholder path
     /// where each placeholder cell shows one slice of the image.
