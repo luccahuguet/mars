@@ -183,3 +183,22 @@ The implementation is source-compatible with the checked-in
 WGPU/Vulkan still fails surface creation on this COSMIC Wayland/NVIDIA host, so
 the current validation recipe is WGPU/GL. That is good enough for shader-path
 evidence, but it is not proof that Vulkan is release-ready.
+
+## Yazelix Preset Validation
+
+`yzt-7p3.8` validated the generated Yazelix Ghostty cursor preset set from
+`~/.local/share/yazelix/configs/terminal_emulators/ghostty/shaders`:
+
+- generated top-level trail shaders and `generated_effects/*.glsl` validate
+  through Naga's GLSL frontend when `YAZELIX_GHOSTTY_SHADER_DIR` is set
+- the default Ghostty stack from the current Yazelix config
+  (`cursor_trail_dusk.glsl`, `generated_effects/sweep.glsl`,
+  `generated_effects/rectangle_boom.glsl`) launches through WGPU/GL
+- visual evidence is captured at
+  `artifacts/shader_probe/screenshots/yazelix_default_cursor_stack_gl.png`
+
+Compatibility shim: the Shadertoy wrapper now appends Rio's generated `main()`
+after the user shader body. WGPU/Naga accepts simple forward declarations, but
+the generated Yazelix shaders exposed validator failures when `main()` appeared
+before the full user function graph. Appending the wrapper preserves Ghostty's
+`mainImage` authoring surface while satisfying WGPU's stricter GLSL path.

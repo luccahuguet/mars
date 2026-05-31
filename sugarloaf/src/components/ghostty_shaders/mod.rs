@@ -66,8 +66,9 @@ layout(set = 0, binding = 1) uniform sampler iChannel0_sampler;
 #define texture2D texture
 
 layout(location = 0) out vec4 _fragColor;
+"#;
 
-void mainImage(out vec4 fragColor, in vec2 fragCoord);
+const SHADERTOY_SUFFIX: &str = r#"
 void main() { mainImage(_fragColor, gl_FragCoord.xy); }
 "#;
 
@@ -379,7 +380,28 @@ impl GhosttyShaderBrush {
 }
 
 fn build_shadertoy_glsl(source: &str) -> String {
-    format!("{SHADERTOY_PREFIX}\n\n{source}")
+    format!("{SHADERTOY_PREFIX}\n\n{source}\n\n{SHADERTOY_SUFFIX}")
+}
+
+fn validate_shadertoy_fragment_glsl(source: &str) -> Result<(), String> {
+    let mut frontend = wgpu::naga::front::glsl::Frontend::default();
+    let options =
+        wgpu::naga::front::glsl::Options::from(wgpu::naga::ShaderStage::Fragment);
+    let module = frontend
+        .parse(&options, source)
+        .map_err(|err| format!("GLSL parse error: {err}"))?;
+
+    let validation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut validator = wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::all(),
+        );
+        validator.validate(&module)
+    }))
+    .map_err(|_| "GLSL validation panicked".to_string())?;
+
+    validation.map_err(|err| format!("GLSL validation error: {err}"))?;
+    Ok(())
 }
 
 struct GhosttyShaderResources {
@@ -478,12 +500,7 @@ impl GhosttyShaderPipeline {
         label: &str,
         source: &str,
     ) -> Result<Self, String> {
-        let mut frontend = wgpu::naga::front::glsl::Frontend::default();
-        let options =
-            wgpu::naga::front::glsl::Options::from(wgpu::naga::ShaderStage::Fragment);
-        frontend
-            .parse(&options, source)
-            .map_err(|err| format!("GLSL parse error: {err}"))?;
+        validate_shadertoy_fragment_glsl(source)?;
 
         let vertex = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Ghostty Shader Fullscreen Vertex"),
@@ -647,17 +664,69 @@ mod tests {
     }
 
     #[test]
-    fn ghostty_probe_shader_parses_as_wgpu_glsl() {
+    fn ghostty_probe_shader_validates_as_wgpu_glsl() {
         // Defends: the checked-in Ghostty cursor probe reaches Naga's GLSL frontend.
         let probe =
             include_str!("../../../../conformance/shaders/ghostty_cursor_probe.glsl");
         let source = build_shadertoy_glsl(probe);
-        let mut frontend = wgpu::naga::front::glsl::Frontend::default();
-        let options =
-            wgpu::naga::front::glsl::Options::from(wgpu::naga::ShaderStage::Fragment);
 
-        frontend
-            .parse(&options, &source)
-            .expect("Ghostty cursor probe should parse as WGPU GLSL");
+        validate_shadertoy_fragment_glsl(&source)
+            .expect("Ghostty cursor probe should validate as WGPU GLSL");
+    }
+
+    #[test]
+    fn configured_yazelix_ghostty_shader_presets_validate_as_wgpu_glsl() {
+        // Defends: generated Yazelix Ghostty shader presets remain compatible with the WGPU shader path.
+        let Ok(shader_dir) = std::env::var("YAZELIX_GHOSTTY_SHADER_DIR") else {
+            return;
+        };
+
+        let shader_dir = std::path::PathBuf::from(shader_dir);
+        let mut shader_paths = std::fs::read_dir(&shader_dir)
+            .unwrap_or_else(|err| {
+                panic!("failed to read shader dir {}: {err}", shader_dir.display())
+            })
+            .map(|entry| entry.expect("shader dir entry").path())
+            .filter(|path| {
+                path.extension().and_then(|extension| extension.to_str()) == Some("glsl")
+                    && path.file_name().and_then(|name| name.to_str())
+                        != Some("cursor_trail_common.glsl")
+            })
+            .collect::<Vec<_>>();
+
+        let generated_effects = shader_dir.join("generated_effects");
+        if generated_effects.exists() {
+            shader_paths.extend(
+                std::fs::read_dir(&generated_effects)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "failed to read generated effects dir {}: {err}",
+                            generated_effects.display()
+                        )
+                    })
+                    .map(|entry| entry.expect("generated effect entry").path())
+                    .filter(|path| {
+                        path.extension().and_then(|extension| extension.to_str())
+                            == Some("glsl")
+                    }),
+            );
+        }
+
+        shader_paths.sort();
+        assert!(
+            !shader_paths.is_empty(),
+            "no generated Yazelix Ghostty shaders found in {}",
+            shader_dir.display()
+        );
+
+        for path in &shader_paths {
+            let source = std::fs::read_to_string(path).unwrap_or_else(|err| {
+                panic!("failed to read shader {}: {err}", path.display())
+            });
+            let source = build_shadertoy_glsl(&source);
+            validate_shadertoy_fragment_glsl(&source).unwrap_or_else(|err| {
+                panic!("{} failed to validate: {err}", path.display())
+            });
+        }
     }
 }

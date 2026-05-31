@@ -147,13 +147,14 @@ def ensure_cpu_config(path: Path) -> None:
     config.write_text("[renderer]\nuse-cpu = true\n", encoding="utf-8")
 
 
-def ensure_shader_config(path: Path) -> None:
+def ensure_shader_config(path: Path, shader_paths: list[str]) -> None:
     path.mkdir(parents=True, exist_ok=True)
     config = path / "config.toml"
+    shader_entries = ", ".join(json.dumps(shader) for shader in shader_paths)
     config.write_text(
         "[renderer]\n"
         'backend = "Webgpu"\n'
-        'custom-shader = ["conformance/shaders/ghostty_cursor_probe.glsl"]\n',
+        f"custom-shader = [{shader_entries}]\n",
         encoding="utf-8",
     )
 
@@ -170,6 +171,12 @@ def capture_cosmic_screenshot(
 
     try:
         time.sleep(max(1, int(settle_seconds)))
+        early_status = process.poll()
+        if early_status is not None:
+            raise SystemExit(
+                f"launched terminal exited before screenshot: {early_status}"
+            )
+
         shot = subprocess.run(
             [
                 screenshot_tool,
@@ -186,14 +193,18 @@ def capture_cosmic_screenshot(
         )
         if shot.returncode != 0:
             raise SystemExit(shot.stderr.strip() or "screenshot failed")
+
+        status = process.wait(timeout=max(1, int(sleep_seconds) + 3))
+        if status != 0:
+            raise SystemExit(f"launched terminal exited after screenshot: {status}")
+
         print(shot.stdout.strip())
         return 0
-    finally:
-        try:
-            process.wait(timeout=max(1, int(sleep_seconds) + 3))
-        except subprocess.TimeoutExpired:
+    except BaseException:
+        if process.poll() is None:
             process.terminate()
             process.wait(timeout=5)
+        raise
 
 
 def command_launch_cpu_screenshot(args: argparse.Namespace) -> int:
@@ -239,7 +250,8 @@ def command_launch_wgpu_shader_screenshot(args: argparse.Namespace) -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     shader_config = Path(args.config_dir).expanduser().resolve()
-    ensure_shader_config(shader_config)
+    shader_paths = args.shader or ["conformance/shaders/ghostty_cursor_probe.glsl"]
+    ensure_shader_config(shader_config, shader_paths)
 
     env = os.environ.copy()
     env["RIO_CONFIG_HOME"] = str(shader_config)
@@ -315,6 +327,11 @@ def build_parser() -> argparse.ArgumentParser:
     shader_shot_parser.add_argument("--config-dir", default=str(DEFAULT_SHADER_CONFIG))
     shader_shot_parser.add_argument("--rio-bin", default="target/debug/rio")
     shader_shot_parser.add_argument("--wgpu-backend", default="gl")
+    shader_shot_parser.add_argument(
+        "--shader",
+        action="append",
+        help="Shader path to load; repeat for a Ghostty-style shader chain",
+    )
     shader_shot_parser.add_argument("--sleep-seconds", default=8, type=int)
     shader_shot_parser.add_argument("--settle-seconds", default=2, type=int)
     shader_shot_parser.set_defaults(func=command_launch_wgpu_shader_screenshot)

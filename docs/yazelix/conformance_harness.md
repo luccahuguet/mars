@@ -43,6 +43,15 @@ capture a COSMIC screenshot:
 python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot
 ```
 
+Pass `--shader` more than once to validate a Ghostty-style shader chain:
+
+```text
+python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot \
+  --shader /path/to/cursor_trail_dusk.glsl \
+  --shader /path/to/generated_effects/sweep.glsl \
+  --shader /path/to/generated_effects/rectangle_boom.glsl
+```
+
 The WGPU renderer probe config lives at
 `artifacts/shader_probe/rio_wgpu_config/config.toml`. It sets the WGPU backend
 and loads the checked-in Ghostty cursor probe:
