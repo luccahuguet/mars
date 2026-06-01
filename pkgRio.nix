@@ -5,6 +5,7 @@
   ncurses,
   noto-fonts-color-emoji,
   unwrapped,
+  pname ? "yazelix-terminal",
   ...
 }: let
   readTOML = f: builtins.fromTOML (builtins.readFile f);
@@ -15,7 +16,7 @@
   inherit (lib.fileset) unions toSource;
 in
   stdenv.mkDerivation {
-    pname = "yazelix-terminal";
+    inherit pname;
     inherit (cargoToml.workspace.package) version;
     src = toSource {
       root = ./.;

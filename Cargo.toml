@@ -96,3 +96,12 @@ split-debuginfo = "unpacked"
 lto = false
 incremental = true
 opt-level = 0
+
+[profile.fast]
+inherits = "dev"
+split-debuginfo = "unpacked"
+debug = "line-tables-only"
+codegen-units = 256
+incremental = false
+lto = false
+opt-level = 1

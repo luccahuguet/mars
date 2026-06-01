@@ -20,7 +20,7 @@ nix run .#yazelix-terminal -- --version
 Useful package outputs:
 
 - `.#yazelix-terminal`: checked package with the desktop wrapper and full checks
-- `.#yazelix-terminal-fast`: same wrapper shape with unchecked Rust build for local iteration
+- `.#yazelix-terminal-fast`: same wrapper shape using the maintainer fast Cargo profile for local iteration
 - `.#yazelix-terminal-unwrapped`: unwrapped Rio-derived binary
 - `.#rio`: compatibility alias to `.#yazelix-terminal`
 

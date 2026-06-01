@@ -24,16 +24,18 @@ Nix package for every Rust edit.
 
 ## Packaging Loop
 
-Use the unchecked package when validating local desktop entries, wrapper scripts,
-or launcher behavior after Rust has already compiled:
+Use the fast package when validating local desktop entries, wrapper scripts, or
+launcher behavior before paying for the full release profile:
 
 ```sh
 nix build .#yazelix-terminal-fast -o result_yazelix_terminal_fast_package
 ```
 
 `yazelix-terminal-fast` has the same wrapped desktop package shape as
-`yazelix-terminal`, but its unwrapped Rust derivation sets `doCheck = false`.
-It is for local iteration, not release evidence.
+`yazelix-terminal`, but its unwrapped Rust derivation uses Cargo profile `fast`
+and sets `doCheck = false`. The fast profile disables LTO, avoids packed full
+debug info, uses many codegen units, and keeps only modest `opt-level = 1`
+optimization. It is for maintainer smoke testing, not release evidence.
 
 Wrapper-only changes should rebuild only the cheap `yazelix-terminal` wrapper
 derivation. The Rust compile lives in `yazelix-terminal-unwrapped`, while the

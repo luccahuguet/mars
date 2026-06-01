@@ -37,18 +37,30 @@
             inherit rust-toolchain;
             doCheck = false;
           };
+        fastUnwrappedPackageFor = rust-toolchain:
+          pkgs.callPackage ./pkgRioUnwrapped.nix {
+            inherit rust-toolchain;
+            pname = "yazelix-terminal-fast-unwrapped";
+            buildType = "fast";
+            doCheck = false;
+          };
         packageFor = unwrapped:
           pkgs.callPackage ./pkgRio.nix {inherit unwrapped;};
+        fastPackageFor = unwrapped:
+          pkgs.callPackage ./pkgRio.nix {
+            inherit unwrapped;
+            pname = "yazelix-terminal-fast";
+          };
         defaultUnwrappedPackage = unwrappedPackageFor toolchains.default;
         msrvUnwrappedPackage = unwrappedPackageFor toolchains.msrv;
         stableUnwrappedPackage = unwrappedPackageFor toolchains.stable;
         nightlyUnwrappedPackage = unwrappedPackageFor toolchains.nightly;
-        fastUnwrappedPackage = uncheckedUnwrappedPackageFor toolchains.default;
+        fastUnwrappedPackage = fastUnwrappedPackageFor toolchains.default;
         defaultPackage = packageFor defaultUnwrappedPackage;
         msrvPackage = packageFor msrvUnwrappedPackage;
         stablePackage = packageFor stableUnwrappedPackage;
         nightlyPackage = packageFor nightlyUnwrappedPackage;
-        fastPackage = packageFor fastUnwrappedPackage;
+        fastPackage = fastPackageFor fastUnwrappedPackage;
         appFor = package: {
           type = "app";
           program = "${package}/bin/yazelix-terminal";

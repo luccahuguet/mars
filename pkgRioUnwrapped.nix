@@ -23,6 +23,8 @@
   withWayland ? !stdenv.isDarwin,
   wayland,
   shaderc,
+  pname ? "yazelix-terminal-unwrapped",
+  buildType ? "release",
   doCheck ? true,
   ...
 }: let
@@ -66,7 +68,7 @@
   inherit (lib.fileset) unions toSource;
 in
   rustPlatform.buildRustPackage {
-    pname = "yazelix-terminal-unwrapped";
+    inherit pname buildType;
     inherit (cargoToml.workspace.package) version;
     src = toSource {
       root = ./.;
