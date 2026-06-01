@@ -95,16 +95,16 @@ fn ghostty_cursor_rect(
     let y = panel_top + extent.row as f32 * cell_h;
     let width = cell_w * extent.width.max(1) as f32;
     let height = cell_h * extent.height.max(1) as f32;
+    // Ghostty shader cursor uniforms use the cursor bottom edge as y.
+    let bottom = y + height;
     let thickness =
         crate::grid_emit::cursor_thickness(cell_h.round().max(1.0) as u32) as f32;
 
     match style {
         crate::grid_emit::CursorRenderStyle::Block
-        | crate::grid_emit::CursorRenderStyle::BlockHollow => [x, y, width, height],
-        crate::grid_emit::CursorRenderStyle::Bar => [x, y, thickness, height],
-        crate::grid_emit::CursorRenderStyle::Underline => {
-            [x, y + (height - thickness).max(0.0), cell_w, thickness]
-        }
+        | crate::grid_emit::CursorRenderStyle::BlockHollow => [x, bottom, width, height],
+        crate::grid_emit::CursorRenderStyle::Bar => [x, bottom, thickness, height],
+        crate::grid_emit::CursorRenderStyle::Underline => [x, bottom, cell_w, thickness],
     }
 }
 
@@ -5006,6 +5006,54 @@ fn post_process_hyperlink_uri(uri: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn ghostty_cursor_rect_uses_bottom_edge_y() {
+        // Defends: Ghostty cursor shaders expect y to be the cursor
+        // bottom edge, not the top-left grid origin used by Rio layout.
+        let extent = crate::grid_emit::CursorVisualExtent {
+            col: 3,
+            row: 2,
+            width: 1,
+            height: 1,
+        };
+        let thickness = crate::grid_emit::cursor_thickness(18) as f32;
+
+        assert_eq!(
+            ghostty_cursor_rect(
+                crate::grid_emit::CursorRenderStyle::Block,
+                extent,
+                10.0,
+                20.0,
+                8.0,
+                18.0,
+            ),
+            [34.0, 74.0, 8.0, 18.0]
+        );
+        assert_eq!(
+            ghostty_cursor_rect(
+                crate::grid_emit::CursorRenderStyle::Bar,
+                extent,
+                10.0,
+                20.0,
+                8.0,
+                18.0,
+            ),
+            [34.0, 74.0, thickness, 18.0]
+        );
+        assert_eq!(
+            ghostty_cursor_rect(
+                crate::grid_emit::CursorRenderStyle::Underline,
+                extent,
+                10.0,
+                20.0,
+                8.0,
+                18.0,
+            ),
+            [34.0, 74.0, 8.0, thickness]
+        );
+    }
 
     #[test]
     fn test_post_process_hyperlink_uri() {
