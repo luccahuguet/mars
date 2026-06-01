@@ -73,6 +73,7 @@ in
       fileset = unions ([
           ./Cargo.lock
           ./Cargo.toml
+          ./conformance/shaders/ghostty_cursor_probe.glsl
         ]
         ++ (map (x: ./. + "/${x}") cargoToml.workspace.members));
     };
