@@ -3,6 +3,7 @@
 // which is licensed under Apache 2.0 license.
 
 use parking_lot::{Mutex, MutexGuard};
+use std::time::Duration;
 
 /// A fair mutex.
 ///
@@ -48,5 +49,10 @@ impl<T> FairMutex<T> {
     /// Unfairly try to lock the mutex.
     pub fn try_lock_unfair(&self) -> Option<MutexGuard<'_, T>> {
         self.data.try_lock()
+    }
+
+    /// Unfairly try to lock the mutex for a bounded duration.
+    pub fn try_lock_unfair_for(&self, timeout: Duration) -> Option<MutexGuard<'_, T>> {
+        self.data.try_lock_for(timeout)
     }
 }

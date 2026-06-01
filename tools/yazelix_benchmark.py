@@ -394,6 +394,22 @@ def stats_ms(ns_values: list[int]) -> dict[str, float | int]:
     }
 
 
+def stats_values(values: list[int]) -> dict[str, float | int]:
+    sorted_values = sorted(float(value) for value in values)
+    if not sorted_values:
+        return {"count": 0}
+    return {
+        "count": len(sorted_values),
+        "min": sorted_values[0],
+        "mean": sum(sorted_values) / len(sorted_values),
+        "median": percentile(sorted_values, 0.50),
+        "p95": percentile(sorted_values, 0.95),
+        "p99": percentile(sorted_values, 0.99),
+        "max": sorted_values[-1],
+        "total": sum(sorted_values),
+    }
+
+
 def frame_deltas(events: list[dict[str, Any]]) -> list[int]:
     deltas: list[int] = []
     previous_end: int | None = None
@@ -441,7 +457,7 @@ def summarize(events: list[dict[str, Any]], samples: list[dict[str, int]]) -> di
         if int(event.get("vblank_interval_ns", 0)) > 0
     ]
 
-    return {
+    summary = {
         "schema": 1,
         "frame_count": len(redraws),
         "presented_frame_count": len(presented),
@@ -459,6 +475,35 @@ def summarize(events: list[dict[str, Any]], samples: list[dict[str, int]]) -> di
         "target_vblank_ms": stats_ms(vblank_values),
         "process": summarize_proc(samples),
     }
+
+    phase_fields = [
+        ("renderer_run_duration_ms", "renderer_run_duration_ns"),
+        ("terminal_lock_wait_duration_ms", "terminal_lock_wait_duration_ns"),
+        ("terminal_snapshot_duration_ms", "terminal_snapshot_duration_ns"),
+        ("snapshot_visible_duration_ms", "snapshot_visible_duration_ns"),
+        ("panel_collect_duration_ms", "panel_collect_duration_ns"),
+        ("grid_emit_duration_ms", "grid_emit_duration_ns"),
+        ("sugarloaf_render_duration_ms", "sugarloaf_render_duration_ns"),
+    ]
+    for output_name, field_name in phase_fields:
+        values = [int(event[field_name]) for event in redraws if field_name in event]
+        if values:
+            summary[output_name] = stats_ms(values)
+
+    count_fields = [
+        "panel_count",
+        "visible_row_count",
+        "row_rebuild_count",
+        "full_row_rebuild_count",
+        "dirty_row_rebuild_count",
+        "terminal_lock_busy_count",
+    ]
+    for field_name in count_fields:
+        values = [int(event[field_name]) for event in redraws if field_name in event]
+        if values:
+            summary[field_name] = stats_values(values)
+
+    return summary
 
 
 def flatten_summary(summary: dict[str, Any], prefix: str = "") -> list[tuple[str, Any]]:

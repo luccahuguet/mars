@@ -22,8 +22,26 @@ pub(crate) struct RedrawMetrics<'a> {
     pub(crate) dirty_after: bool,
     pub(crate) game_mode: bool,
     pub(crate) vblank_interval: Duration,
+    pub(crate) render_phases: RenderPhaseMetrics,
     pub(crate) render_start: Instant,
     pub(crate) render_end: Instant,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RenderPhaseMetrics {
+    pub(crate) renderer_run_duration: Duration,
+    pub(crate) terminal_lock_wait_duration: Duration,
+    pub(crate) terminal_snapshot_duration: Duration,
+    pub(crate) snapshot_visible_duration: Duration,
+    pub(crate) panel_collect_duration: Duration,
+    pub(crate) grid_emit_duration: Duration,
+    pub(crate) sugarloaf_render_duration: Duration,
+    pub(crate) panel_count: u64,
+    pub(crate) visible_row_count: u64,
+    pub(crate) row_rebuild_count: u64,
+    pub(crate) full_row_rebuild_count: u64,
+    pub(crate) dirty_row_rebuild_count: u64,
+    pub(crate) terminal_lock_busy_count: u64,
 }
 
 pub(crate) fn init_from_env() -> io::Result<()> {
@@ -100,7 +118,18 @@ impl FrameLogger {
             self.file,
             "\"presented\":{},\"dirty_after\":{},\"game_mode\":{},\
              \"start_elapsed_ns\":{},\"end_elapsed_ns\":{},\
-             \"render_duration_ns\":{},\"delta_ns\":{},\"vblank_interval_ns\":{}}}",
+             \"render_duration_ns\":{},\"delta_ns\":{},\"vblank_interval_ns\":{},\
+             \"renderer_run_duration_ns\":{},\
+             \"terminal_lock_wait_duration_ns\":{},\
+             \"terminal_snapshot_duration_ns\":{},\
+             \"snapshot_visible_duration_ns\":{},\
+             \"panel_collect_duration_ns\":{},\
+             \"grid_emit_duration_ns\":{},\
+             \"sugarloaf_render_duration_ns\":{},\
+             \"panel_count\":{},\"visible_row_count\":{},\
+             \"row_rebuild_count\":{},\"full_row_rebuild_count\":{},\
+             \"dirty_row_rebuild_count\":{},\
+             \"terminal_lock_busy_count\":{}}}",
             metrics.presented,
             metrics.dirty_after,
             metrics.game_mode,
@@ -108,7 +137,20 @@ impl FrameLogger {
             end_elapsed.as_nanos(),
             render_duration.as_nanos(),
             delta.as_nanos(),
-            metrics.vblank_interval.as_nanos()
+            metrics.vblank_interval.as_nanos(),
+            metrics.render_phases.renderer_run_duration.as_nanos(),
+            metrics.render_phases.terminal_lock_wait_duration.as_nanos(),
+            metrics.render_phases.terminal_snapshot_duration.as_nanos(),
+            metrics.render_phases.snapshot_visible_duration.as_nanos(),
+            metrics.render_phases.panel_collect_duration.as_nanos(),
+            metrics.render_phases.grid_emit_duration.as_nanos(),
+            metrics.render_phases.sugarloaf_render_duration.as_nanos(),
+            metrics.render_phases.panel_count,
+            metrics.render_phases.visible_row_count,
+            metrics.render_phases.row_rebuild_count,
+            metrics.render_phases.full_row_rebuild_count,
+            metrics.render_phases.dirty_row_rebuild_count,
+            metrics.render_phases.terminal_lock_busy_count
         )?;
         self.file.flush()
     }

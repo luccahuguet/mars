@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 const VISUAL_BELL_DURATION: Duration = Duration::from_millis(180);
 const VISUAL_BELL_MAX_ALPHA: f32 = 0.28;
 const VISUAL_BELL_ORDER: u8 = 10;
+const TERMINAL_RENDER_LOCK_TIMEOUT: Duration = Duration::from_millis(8);
 
 /// The window-bg clear alpha that flows into sugarloaf's
 /// `set_background_color`. Stored on the renderer and re-applied on
@@ -378,6 +379,7 @@ impl Renderer {
         &mut self,
         sugarloaf: &mut Sugarloaf,
         context_manager: &mut ContextManager<EventProxy>,
+        metrics: &mut crate::frame_metrics::RenderPhaseMetrics,
     ) -> (Option<crate::context::renderable::WindowUpdate>, bool) {
         let mut any_panel_dirty = false;
         let grid = context_manager.current_grid_mut();
@@ -387,24 +389,6 @@ impl Renderer {
         if self.last_active != Some(active_key) {
             has_active_changed = true;
             self.last_active = Some(active_key);
-        }
-
-        // Update per-panel scroll state for scrollbar rendering (all panels, not just dirty ones)
-        if self.scrollbar.is_enabled() {
-            self.scrollbar.clear_panel_states();
-            for grid_context in grid.contexts_mut().values() {
-                let panel_rect = grid_context.layout_rect;
-                let ctx = grid_context.context();
-                let terminal = ctx.terminal.lock();
-                self.scrollbar
-                    .push_panel_state(scrollbar::PanelScrollState {
-                        rich_text_id: ctx.rich_text_id,
-                        panel_rect,
-                        display_offset: terminal.display_offset(),
-                        history_size: terminal.history_size(),
-                        screen_lines: terminal.screen_lines(),
-                    });
-            }
         }
 
         for (_key, grid_context) in grid.contexts_mut().iter_mut() {
@@ -435,6 +419,24 @@ impl Renderer {
                 // No updates pending, skip rendering
                 continue;
             }
+
+            let lock_started_at = Instant::now();
+            let mut terminal = if force_full_damage {
+                context.terminal.lock()
+            } else {
+                match context
+                    .terminal
+                    .try_lock_unfair_for(TERMINAL_RENDER_LOCK_TIMEOUT)
+                {
+                    Some(terminal) => terminal,
+                    None => {
+                        metrics.terminal_lock_wait_duration += lock_started_at.elapsed();
+                        metrics.terminal_lock_busy_count += 1;
+                        continue;
+                    }
+                }
+            };
+            metrics.terminal_lock_wait_duration += lock_started_at.elapsed();
             any_panel_dirty = true;
 
             // UI-side damage (scroll, selection, resize, etc.)
@@ -445,7 +447,7 @@ impl Renderer {
             context.renderable_content.pending_update.reset();
 
             {
-                let mut terminal = context.terminal.lock();
+                let terminal_snapshot_started_at = Instant::now();
 
                 // Clear in-flight flag so PTY thread can notify again
                 terminal.damage_event_in_flight = false;
@@ -474,6 +476,7 @@ impl Renderer {
                 terminal.reset_damage();
 
                 let snapshot_cols = terminal.columns();
+                let snapshot_visible_started_at = Instant::now();
                 terminal.snapshot_visible(
                     &damage,
                     snapshot_cols,
@@ -481,6 +484,8 @@ impl Renderer {
                     &mut context.renderable_content.style_table,
                     &mut context.renderable_content.extras,
                 );
+                metrics.snapshot_visible_duration +=
+                    snapshot_visible_started_at.elapsed();
                 context.renderable_content.term_colors = terminal.colors;
                 context.renderable_content.display_offset = terminal.display_offset();
                 context.renderable_content.columns = snapshot_cols;
@@ -515,6 +520,8 @@ impl Renderer {
                     terminal.graphics.kitty_graphics_dirty;
                 terminal.graphics.kitty_graphics_dirty = false;
                 context.renderable_content.frame_damage = damage;
+                metrics.terminal_snapshot_duration +=
+                    terminal_snapshot_started_at.elapsed();
                 drop(terminal);
             }
 
@@ -640,9 +647,29 @@ impl Renderer {
             }
         }
 
+        // Update per-panel scroll state from the fresh terminal
+        // snapshots above. This keeps scrollbar rendering lock-free
+        // without showing one-frame-stale positions.
+        if self.scrollbar.is_enabled() {
+            self.scrollbar.clear_panel_states();
+            for grid_context in grid.contexts_mut().values() {
+                let panel_rect = grid_context.layout_rect;
+                let ctx = grid_context.context();
+                let renderable_content = &ctx.renderable_content;
+                self.scrollbar
+                    .push_panel_state(scrollbar::PanelScrollState {
+                        rich_text_id: ctx.rich_text_id,
+                        panel_rect,
+                        display_offset: renderable_content.display_offset,
+                        history_size: renderable_content.history_size,
+                        screen_lines: renderable_content.screen_lines,
+                    });
+            }
+        }
+
         let window_size = sugarloaf.window_size();
         let scale_factor = sugarloaf.scale_factor();
-        let active_term_colors = grid.current().terminal.lock().colors;
+        let active_term_colors = grid.current().renderable_content.term_colors;
         self.render_visual_bell(
             sugarloaf,
             &active_term_colors,
@@ -757,7 +784,7 @@ impl Renderer {
         // want it to follow focus the way does (each surface's
         // `terminal.colors.background` drives its own window chrome).
         let current_context = context_manager.current_grid_mut().current_mut();
-        let active_term_colors = current_context.terminal.lock().colors;
+        let active_term_colors = current_context.renderable_content.term_colors;
         let mut effective_bg = match &current_context.renderable_content.background {
             Some(crate::context::renderable::BackgroundState::Set(color)) => *color,
             // Explicit OSC 111 reset OR panel that never ran OSC 11 →

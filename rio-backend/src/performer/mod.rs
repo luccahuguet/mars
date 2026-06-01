@@ -14,8 +14,8 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::Arc;
-use std::thread::{Builder, JoinHandle};
-use std::time::Instant;
+use std::thread::{self, Builder, JoinHandle};
+use std::time::{Duration, Instant};
 use tracing::error;
 
 /// Like `thread::spawn`, but with a `name` argument.
@@ -33,7 +33,8 @@ where
 
 const READ_BUFFER_SIZE: usize = 0x10_0000;
 /// Max bytes to read from the PTY while the terminal is locked.
-const MAX_LOCKED_READ: usize = u16::MAX as usize;
+const MAX_LOCKED_READ: usize = 16 * 1024;
+const DAMAGE_EVENT_IN_FLIGHT_BACKOFF: Duration = Duration::from_millis(4);
 
 struct PeekableReceiver<T> {
     rx: channel::Receiver<T>,
@@ -170,6 +171,17 @@ where
     fn pty_read(&mut self, state: &mut State, buf: &mut [u8]) -> io::Result<()> {
         let mut unprocessed = 0;
         let mut processed = 0;
+        let read_limit = MAX_LOCKED_READ.min(buf.len());
+
+        if let Some(terminal) = self.terminal.try_lock_unfair() {
+            let should_wait_for_renderer =
+                terminal.damage_event_in_flight && terminal.peek_damage_event().is_some();
+            drop(terminal);
+            if should_wait_for_renderer {
+                thread::sleep(DAMAGE_EVENT_IN_FLIGHT_BACKOFF);
+                return Ok(());
+            }
+        }
 
         // Reserve the next terminal lock for PTY reading.
         let _terminal_lease = Some(self.terminal.lease());
@@ -177,29 +189,31 @@ where
 
         loop {
             // Read from the PTY.
-            match self.pty.reader().read(&mut buf[unprocessed..]) {
-                // This is received on Windows/macOS when no more data is readable from the PTY.
-                Ok(0) if unprocessed == 0 => break,
-                Ok(got) => unprocessed += got,
-                Err(err) => match err.kind() {
-                    ErrorKind::Interrupted | ErrorKind::WouldBlock => {
-                        // Go back to mio if we're caught up on parsing and the PTY would block.
-                        if unprocessed == 0 {
-                            break;
+            if unprocessed < read_limit {
+                match self.pty.reader().read(&mut buf[unprocessed..read_limit]) {
+                    // This is received on Windows/macOS when no more data is readable from the PTY.
+                    Ok(0) if unprocessed == 0 => break,
+                    Ok(got) => unprocessed += got,
+                    Err(err) => match err.kind() {
+                        ErrorKind::Interrupted | ErrorKind::WouldBlock => {
+                            // Go back to mio if we're caught up on parsing and the PTY would block.
+                            if unprocessed == 0 {
+                                break;
+                            }
                         }
-                    }
-                    _ => return Err(err),
-                },
+                        _ => return Err(err),
+                    },
+                }
             }
 
             // Attempt to lock the terminal.
             let terminal = match &mut terminal {
                 Some(terminal) => terminal,
                 None => terminal.insert(match self.terminal.try_lock_unfair() {
-                    // Force block if we are at the buffer size limit.
-                    None if unprocessed >= READ_BUFFER_SIZE => {
-                        self.terminal.lock_unfair()
-                    }
+                    // Force block once this read cycle has accumulated a
+                    // full parser batch; otherwise keep collecting bytes
+                    // without taking the terminal lock.
+                    None if unprocessed >= read_limit => self.terminal.lock_unfair(),
                     None => continue,
                     Some(terminal) => terminal,
                 }),
@@ -220,16 +234,24 @@ where
         // Notify renderer that new damage is available.
         // Only send if no event is already in flight — the renderer will
         // extract all accumulated damage when it locks the terminal.
+        let mut should_yield_after_damage = false;
         if state.parser.sync_bytes_count() < processed && processed > 0 {
             if let Some(ref mut term) = terminal {
-                if !term.damage_event_in_flight && term.peek_damage_event().is_some() {
-                    term.damage_event_in_flight = true;
-                    self.event_proxy.send_event(
-                        RioEvent::TerminalDamaged(self.route_id),
-                        self.window_id,
-                    );
+                if term.peek_damage_event().is_some() {
+                    should_yield_after_damage = true;
+                    if !term.damage_event_in_flight {
+                        term.damage_event_in_flight = true;
+                        self.event_proxy.send_event(
+                            RioEvent::TerminalDamaged(self.route_id),
+                            self.window_id,
+                        );
+                    }
                 }
             }
+        }
+        drop(terminal);
+        if should_yield_after_damage {
+            thread::yield_now();
         }
 
         Ok(())

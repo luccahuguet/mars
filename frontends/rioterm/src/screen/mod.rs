@@ -189,6 +189,8 @@ pub struct Screen<'screen> {
     pub resize_state: Option<crate::layout::ResizeState>,
     last_render_presented: bool,
     last_render_needs_redraw: bool,
+    last_render_deferred_due_terminal_lock: bool,
+    last_render_metrics: crate::frame_metrics::RenderPhaseMetrics,
     /// Per-panel `GridRenderer`, keyed by `route_id`. Lazily created
     /// on first render of each panel so construction (which compiles
     /// the Metal/WGSL shaders and builds pipeline states) runs once
@@ -443,6 +445,8 @@ impl Screen<'_> {
             resize_state: None,
             last_render_presented: false,
             last_render_needs_redraw: false,
+            last_render_deferred_due_terminal_lock: false,
+            last_render_metrics: crate::frame_metrics::RenderPhaseMetrics::default(),
             grids: rustc_hash::FxHashMap::default(),
             grid_rasterizer: crate::grid_emit::GridGlyphRasterizer::new(),
         })
@@ -3466,6 +3470,8 @@ impl Screen<'_> {
         self.sugarloaf.render();
         self.last_render_presented = true;
         self.last_render_needs_redraw = false;
+        self.last_render_deferred_due_terminal_lock = false;
+        self.last_render_metrics = crate::frame_metrics::RenderPhaseMetrics::default();
     }
 
     #[inline]
@@ -3476,6 +3482,16 @@ impl Screen<'_> {
     #[inline]
     pub(crate) fn last_render_needs_redraw(&self) -> bool {
         self.last_render_needs_redraw
+    }
+
+    #[inline]
+    pub(crate) fn last_render_deferred_due_terminal_lock(&self) -> bool {
+        self.last_render_deferred_due_terminal_lock
+    }
+
+    #[inline]
+    pub(crate) fn last_render_metrics(&self) -> crate::frame_metrics::RenderPhaseMetrics {
+        self.last_render_metrics
     }
 
     pub fn execute_palette_action(
@@ -3599,25 +3615,10 @@ impl Screen<'_> {
         &mut self,
         before_present: impl FnOnce(),
     ) -> Option<crate::context::renderable::WindowUpdate> {
-        // Phase 2.0 smoke test: ensure the active panel has a
-        // `GridRenderer`. This forces `MetalGridRenderer::new` /
-        // `WgpuGridRenderer::new` to actually run on real hardware,
-        // which is when the Metal shader compiler + wgpu pipeline
-        // creator first see our shader source. Any shader syntax
-        // error here becomes a startup panic rather than a silent
-        // failure later. Nothing is rendered *through* the grid yet
-        // — `sugarloaf.render()` is still called with no grids
-        // slice below.
-        let current_route = self.context_manager.current_route();
-        let (grid_cols, grid_rows) = {
-            let terminal = self.context_manager.current().terminal.lock();
-            (terminal.columns() as u32, terminal.screen_lines() as u32)
-        };
-        if grid_cols > 0 && grid_rows > 0 {
-            self.ensure_grid(current_route, grid_cols, grid_rows);
-        }
+        self.last_render_metrics = crate::frame_metrics::RenderPhaseMetrics::default();
         self.last_render_presented = false;
         self.last_render_needs_redraw = false;
+        self.last_render_deferred_due_terminal_lock = false;
 
         let is_search_active = self.search_active();
         if is_search_active {
@@ -3654,9 +3655,16 @@ impl Screen<'_> {
             }
         }
 
-        let (window_update, any_panel_dirty) = self
-            .renderer
-            .run(&mut self.sugarloaf, &mut self.context_manager);
+        let renderer_run_started_at = std::time::Instant::now();
+        let (window_update, any_panel_dirty) = self.renderer.run(
+            &mut self.sugarloaf,
+            &mut self.context_manager,
+            &mut self.last_render_metrics,
+        );
+        self.last_render_metrics.renderer_run_duration +=
+            renderer_run_started_at.elapsed();
+        self.last_render_deferred_due_terminal_lock =
+            self.last_render_metrics.terminal_lock_busy_count > 0;
         let had_renderer_animation = self.renderer.needs_redraw();
         #[cfg(feature = "wgpu")]
         let had_shader_animation = self.sugarloaf.ghostty_shader_needs_redraw();
@@ -3727,6 +3735,7 @@ impl Screen<'_> {
         // rebuild only those rows.
         // Unchanged rows keep their CellBg + CellText resident in
         // the grid's CPU state, which is re-uploaded verbatim.
+        let mut sugarloaf_render_duration = std::time::Duration::ZERO;
         {
             struct PanelFrame {
                 route_id: usize,
@@ -3816,6 +3825,7 @@ impl Screen<'_> {
                 )>,
             }
 
+            let panel_collect_started_at = std::time::Instant::now();
             let (active_key, scaled_margin) = {
                 let grid = self.context_manager.current_grid();
                 (grid.current, grid.scaled_margin)
@@ -3977,6 +3987,13 @@ impl Screen<'_> {
                     hovered_hyperlink,
                 });
             }
+            self.last_render_metrics.panel_collect_duration +=
+                panel_collect_started_at.elapsed();
+            self.last_render_metrics.panel_count += panels.len() as u64;
+            self.last_render_metrics.visible_row_count += panels
+                .iter()
+                .map(|panel| panel.visible_rows.len() as u64)
+                .sum::<u64>();
 
             // --- ensure every panel has a matching GridRenderer ---
             for p in &panels {
@@ -4003,6 +4020,10 @@ impl Screen<'_> {
 
             let rasterizer = &mut self.grid_rasterizer;
             let renderer_ref = &self.renderer;
+            let grid_emit_started_at = std::time::Instant::now();
+            let mut row_rebuild_count = 0u64;
+            let mut full_row_rebuild_count = 0u64;
+            let mut dirty_row_rebuild_count = 0u64;
             for (route_id, grid) in self.grids.iter_mut() {
                 let Some(p) = panels.iter_mut().find(|p| p.route_id == *route_id) else {
                     continue;
@@ -4064,9 +4085,10 @@ impl Screen<'_> {
                     |p: &PanelFrame,
                      y: usize,
                      grid: &mut rio_backend::sugarloaf::grid::GridRenderer,
-                     rasterizer: &mut crate::grid_emit::GridGlyphRasterizer| {
+                     rasterizer: &mut crate::grid_emit::GridGlyphRasterizer|
+                     -> bool {
                         let Some(row) = p.visible_rows.get(y) else {
-                            return;
+                            return false;
                         };
                         let style_table = p.style_table.as_slice();
                         let row_sel = crate::grid_emit::row_selection_for(
@@ -4123,6 +4145,7 @@ impl Screen<'_> {
                             &mut fg_scratch,
                         );
                         grid.write_row(y as u32, &bg_scratch, &fg_scratch);
+                        true
                     };
 
                 match rows_to_rebuild {
@@ -4134,7 +4157,10 @@ impl Screen<'_> {
                     }
                     RowsToRebuild::All => {
                         for y in 0..p.visible_rows.len() {
-                            rebuild_row(p, y, grid, rasterizer);
+                            if rebuild_row(p, y, grid, rasterizer) {
+                                row_rebuild_count += 1;
+                                full_row_rebuild_count += 1;
+                            }
                         }
                         grid.mark_full_rebuild_done();
                     }
@@ -4147,7 +4173,10 @@ impl Screen<'_> {
                             if !p.visible_rows[y].dirty {
                                 continue;
                             }
-                            rebuild_row(p, y, grid, rasterizer);
+                            if rebuild_row(p, y, grid, rasterizer) {
+                                row_rebuild_count += 1;
+                                dirty_row_rebuild_count += 1;
+                            }
                             p.visible_rows[y].dirty = false;
                         }
                     }
@@ -4469,6 +4498,10 @@ impl Screen<'_> {
 
                 frame_grids.push((grid, uniforms));
             }
+            self.last_render_metrics.grid_emit_duration += grid_emit_started_at.elapsed();
+            self.last_render_metrics.row_rebuild_count += row_rebuild_count;
+            self.last_render_metrics.full_row_rebuild_count += full_row_rebuild_count;
+            self.last_render_metrics.dirty_row_rebuild_count += dirty_row_rebuild_count;
 
             #[cfg(feature = "wgpu")]
             if let Some(state) = ghostty_shader_frame_state {
@@ -4490,11 +4523,13 @@ impl Screen<'_> {
 
             if should_present {
                 before_present();
+                let sugarloaf_render_started_at = std::time::Instant::now();
                 if frame_grids.is_empty() {
                     self.sugarloaf.render();
                 } else {
                     self.sugarloaf.render_with_grids(&mut frame_grids);
                 }
+                sugarloaf_render_duration += sugarloaf_render_started_at.elapsed();
                 self.last_render_presented = true;
             } else {
                 // Nothing to draw this frame, but `Renderer::run`
@@ -4502,7 +4537,9 @@ impl Screen<'_> {
                 // pushed into sugarloaf's per-frame queues. Drain
                 // them so the next presented frame doesn't
                 // composite them on top of their re-pushed selves.
+                let sugarloaf_render_started_at = std::time::Instant::now();
                 self.sugarloaf.discard_frame();
+                sugarloaf_render_duration += sugarloaf_render_started_at.elapsed();
             }
 
             // Return each panel's snapshot buffers to the matching
@@ -4527,6 +4564,7 @@ impl Screen<'_> {
             }
             panels.clear();
         }
+        self.last_render_metrics.sugarloaf_render_duration += sugarloaf_render_duration;
 
         // Mark as dirty if we need continuous rendering (e.g.,
         // indeterminate progress bar, trail cursor animation). UI-only
@@ -4577,9 +4615,7 @@ impl Screen<'_> {
         };
 
         let layout = current_item.val.dimension;
-        let terminal = current_item.val.terminal.lock();
-        let cursor_pos = terminal.grid.cursor.pos;
-        drop(terminal);
+        let cursor_pos = current_item.val.renderable_content.cursor.state.pos;
 
         // Calculate pixel position of cursor — canonical integer
         // stride (line_height already baked into cell_height).
