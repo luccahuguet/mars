@@ -69,7 +69,7 @@ def write_rio_config(config_home: Path, template: str) -> Path | None:
     elif template in {"wgpu-shader", "wgpu-shader-event"}:
         strategy = 'strategy = "game"\n' if template == "wgpu-shader" else ""
         text = (
-            '[renderer]\n'
+            "[renderer]\n"
             'backend = "Webgpu"\n'
             f"{strategy}"
             f"custom-shader = [{json_string(str(DEFAULT_SHADER))}]\n"
@@ -77,7 +77,7 @@ def write_rio_config(config_home: Path, template: str) -> Path | None:
     elif template in {"yzt-default", "yzt-default-game"}:
         strategy = 'strategy = "game"\n' if template == "yzt-default-game" else ""
         text = (
-            '[renderer]\n'
+            "[renderer]\n"
             'backend = "Webgpu"\n'
             f"{strategy}"
             f"custom-shader = {shader_list(yazelix_default_shader_paths())}\n"
@@ -300,7 +300,9 @@ def start_gpu_sampler(
     nvidia_smi = shutil.which("nvidia-smi")
     if nvidia_smi is None:
         if mode == "nvidia-smi":
-            raise SystemExit("--gpu-sampler=nvidia-smi requested but nvidia-smi is not on PATH")
+            raise SystemExit(
+                "--gpu-sampler=nvidia-smi requested but nvidia-smi is not on PATH"
+            )
         return None
 
     samples_path = artifact_dir / "gpu_samples.csv"
@@ -363,7 +365,9 @@ def read_frame_log(path: Path) -> list[dict[str, Any]]:
             try:
                 events.append(json.loads(line))
             except json.JSONDecodeError as err:
-                raise SystemExit(f"{path}:{line_number}: invalid frame JSON: {err}") from err
+                raise SystemExit(
+                    f"{path}:{line_number}: invalid frame JSON: {err}"
+                ) from err
     return events
 
 
@@ -434,7 +438,9 @@ def summarize_proc(samples: list[dict[str, int]]) -> dict[str, float | int | Non
     first = samples[0]
     last = samples[-1]
     ticks_per_second = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
-    wall_seconds = max(0.0, (last["elapsed_ns"] - first["elapsed_ns"]) / 1_000_000_000.0)
+    wall_seconds = max(
+        0.0, (last["elapsed_ns"] - first["elapsed_ns"]) / 1_000_000_000.0
+    )
     cpu_seconds = max(0.0, (last["cpu_ticks"] - first["cpu_ticks"]) / ticks_per_second)
     cpu_percent = None if wall_seconds == 0.0 else (cpu_seconds / wall_seconds) * 100.0
     return {
@@ -446,7 +452,9 @@ def summarize_proc(samples: list[dict[str, int]]) -> dict[str, float | int | Non
     }
 
 
-def summarize(events: list[dict[str, Any]], samples: list[dict[str, int]]) -> dict[str, Any]:
+def summarize(
+    events: list[dict[str, Any]], samples: list[dict[str, int]]
+) -> dict[str, Any]:
     redraws = [event for event in events if event.get("event") == "redraw"]
     presented = [event for event in redraws if event.get("presented")]
     first_redraw = redraws[0] if redraws else None
@@ -518,7 +526,9 @@ def flatten_summary(summary: dict[str, Any], prefix: str = "") -> list[tuple[str
 
 
 def write_summary(summary: dict[str, Any], json_path: Path, csv_path: Path) -> None:
-    json_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    json_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     with csv_path.open("w", encoding="utf-8", newline="") as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(["metric", "value"])
@@ -533,7 +543,9 @@ def child_command_from_args(args: argparse.Namespace) -> list[str]:
         if not command:
             raise SystemExit("--command requires argv after --")
         return command
-    lines = args.lines if args.lines is not None else default_workload_lines(args.workload)
+    lines = (
+        args.lines if args.lines is not None else default_workload_lines(args.workload)
+    )
     return built_in_workload(args.workload, lines, args.hold_seconds)
 
 
@@ -622,7 +634,9 @@ def command_frame_run(args: argparse.Namespace) -> int:
             None if gpu_samples is None else str(gpu_samples.relative_to(ROOT))
         ),
         "config_template": args.config_template,
-        "config_path": None if config_path is None else str(config_path.relative_to(ROOT)),
+        "config_path": None
+        if config_path is None
+        else str(config_path.relative_to(ROOT)),
     }
     write_summary(summary, artifact_dir / "summary.json", artifact_dir / "summary.csv")
 
@@ -637,8 +651,12 @@ def command_frame_summary(args: argparse.Namespace) -> int:
     samples = read_samples(Path(args.samples) if args.samples else None)
     summary = summarize(events, samples)
     if args.json_out or args.csv_out:
-        json_path = Path(args.json_out or Path(args.frame_log).with_suffix(".summary.json"))
-        csv_path = Path(args.csv_out or Path(args.frame_log).with_suffix(".summary.csv"))
+        json_path = Path(
+            args.json_out or Path(args.frame_log).with_suffix(".summary.json")
+        )
+        csv_path = Path(
+            args.csv_out or Path(args.frame_log).with_suffix(".summary.csv")
+        )
         write_summary(summary, json_path, csv_path)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
@@ -691,7 +709,9 @@ def command_self_test(_: argparse.Namespace) -> int:
         assert "custom-shader" not in baseline_text
         assert "trail-cursor" not in baseline_text
         assert child_command_from_args(
-            argparse.Namespace(command=[], workload="helix-jk", lines=16, hold_seconds=0.01)
+            argparse.Namespace(
+                command=[], workload="helix-jk", lines=16, hold_seconds=0.01
+            )
         )
         assert child_command_from_args(
             argparse.Namespace(

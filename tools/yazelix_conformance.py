@@ -38,7 +38,9 @@ def load_keyboard_manifest() -> dict[str, Any]:
     with KEYBOARD_MANIFEST.open("r", encoding="utf-8") as manifest_file:
         manifest = json.load(manifest_file)
     if manifest.get("version") != 1:
-        raise SystemExit(f"unsupported keyboard manifest version in {KEYBOARD_MANIFEST}")
+        raise SystemExit(
+            f"unsupported keyboard manifest version in {KEYBOARD_MANIFEST}"
+        )
     return manifest
 
 
@@ -76,7 +78,9 @@ def expected_keyboard_fragments(case: dict[str, Any]) -> list[bytes]:
     expect = case.get("expect", {})
     mode = expect.get("mode")
     if mode == "exact":
-        return [hex_bytes(expect.get("hex", ""), f"keyboard case {case['id']} expected hex")]
+        return [
+            hex_bytes(expect.get("hex", ""), f"keyboard case {case['id']} expected hex")
+        ]
     if mode == "contains":
         fragments = expect.get("fragments", [])
         if not fragments:
@@ -85,7 +89,9 @@ def expected_keyboard_fragments(case: dict[str, Any]) -> list[bytes]:
             hex_bytes(fragment, f"keyboard case {case['id']} expected fragment")
             for fragment in fragments
         ]
-    raise SystemExit(f"keyboard case {case['id']} has unsupported expectation mode: {mode}")
+    raise SystemExit(
+        f"keyboard case {case['id']} has unsupported expectation mode: {mode}"
+    )
 
 
 def keyboard_capture_matches(case: dict[str, Any], captured: bytes) -> bool:
@@ -109,7 +115,9 @@ def validate_keyboard_manifest() -> None:
     if not cleanup:
         raise SystemExit("keyboard cleanup is empty")
     for case in keyboard_cases_by_id(manifest).values():
-        setup = hex_bytes(case.get("setup_hex", ""), f"keyboard case {case['id']} setup")
+        setup = hex_bytes(
+            case.get("setup_hex", ""), f"keyboard case {case['id']} setup"
+        )
         if not setup:
             raise SystemExit(f"keyboard case {case['id']} setup is empty")
         expected_keyboard_fragments(case)
@@ -226,7 +234,9 @@ def selected_keyboard_cases(
             selected.append(cases[case_id])
         except KeyError as err:
             known = ", ".join(cases)
-            raise SystemExit(f"unknown keyboard case {case_id!r}; known cases: {known}") from err
+            raise SystemExit(
+                f"unknown keyboard case {case_id!r}; known cases: {known}"
+            ) from err
     return selected
 
 
@@ -263,8 +273,16 @@ def command_keyboard_capture(args: argparse.Namespace) -> int:
     manifest = load_keyboard_manifest()
     cleanup = hex_bytes(manifest["cleanup_hex"], "keyboard cleanup")
     cases = selected_keyboard_cases(manifest, args.case)
-    output = Path(args.output).expanduser().resolve() if args.output else (
-        ROOT / "artifacts" / "conformance" / "keyboard_captures" / f"{args.terminal}.json"
+    output = (
+        Path(args.output).expanduser().resolve()
+        if args.output
+        else (
+            ROOT
+            / "artifacts"
+            / "conformance"
+            / "keyboard_captures"
+            / f"{args.terminal}.json"
+        )
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     report = {
@@ -283,7 +301,9 @@ def command_keyboard_capture(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         input()
-        sys.stdout.buffer.write(hex_bytes(case["setup_hex"], f"keyboard case {case['id']} setup"))
+        sys.stdout.buffer.write(
+            hex_bytes(case["setup_hex"], f"keyboard case {case['id']} setup")
+        )
         sys.stdout.buffer.flush()
         try:
             captured = read_keyboard_capture(args.timeout, args.idle_timeout)
@@ -350,7 +370,9 @@ def command_record_env(args: argparse.Namespace) -> int:
             "rio_version": run_capture([args.rio_bin, "--version"]),
             "rustc": run_capture(["rustc", "--version"]),
             "cargo": run_capture(["cargo", "--version"]),
-            "rustup_active_toolchain": run_capture(["rustup", "show", "active-toolchain"]),
+            "rustup_active_toolchain": run_capture(
+                ["rustup", "show", "active-toolchain"]
+            ),
             "vulkaninfo_summary": run_capture(["vulkaninfo", "--summary"]),
         },
     }
@@ -370,9 +392,7 @@ def ensure_shader_config(path: Path, shader_paths: list[str]) -> None:
     config = path / "config.toml"
     shader_entries = ", ".join(json.dumps(shader) for shader in shader_paths)
     config.write_text(
-        "[renderer]\n"
-        'backend = "Webgpu"\n'
-        f"custom-shader = [{shader_entries}]\n",
+        f'[renderer]\nbackend = "Webgpu"\ncustom-shader = [{shader_entries}]\n',
         encoding="utf-8",
     )
 
@@ -516,7 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
     emit_parser.add_argument("fixture")
     emit_parser.set_defaults(func=command_emit)
 
-    verify_parser = subcommands.add_parser("verify", help="Validate fixtures and shader probe")
+    verify_parser = subcommands.add_parser(
+        "verify", help="Validate fixtures and shader probe"
+    )
     verify_parser.set_defaults(func=command_verify)
 
     keyboard_list_parser = subcommands.add_parser(
@@ -548,7 +570,9 @@ def build_parser() -> argparse.ArgumentParser:
     keyboard_verify_parser.add_argument("--require-all", action="store_true")
     keyboard_verify_parser.set_defaults(func=command_keyboard_verify_capture)
 
-    env_parser = subcommands.add_parser("record-env", help="Record local version/source evidence")
+    env_parser = subcommands.add_parser(
+        "record-env", help="Record local version/source evidence"
+    )
     env_parser.add_argument("--output", default=str(DEFAULT_ENV_OUTPUT))
     env_parser.add_argument("--rio-bin", default="target/debug/rio")
     env_parser.set_defaults(func=command_record_env)
