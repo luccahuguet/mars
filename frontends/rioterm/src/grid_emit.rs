@@ -2913,7 +2913,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     // Defends: Linux grid rendering uses the same lazy fallback discovery as Sugarloaf font resolution.
     fn grid_font_resolution_discovers_missing_primary_glyphs() {
         let (font_library, _errors) =
@@ -2921,12 +2921,12 @@ mod tests {
         let mut rasterizer = GridGlyphRasterizer::new();
         let starting_len = font_library.inner.read().inner.len();
 
-        let (font_id, _) = rasterizer.resolve_font('\u{6C34}', 0, &font_library, 0);
+        let (font_id, _) = rasterizer.resolve_font('\u{2600}', 0, &font_library, 0);
 
         assert_ne!(
             font_id,
             rio_backend::sugarloaf::font::FONT_ID_REGULAR as u32,
-            "a CJK glyph missing from Cascadia Code NF should resolve to a fallback font"
+            "a DejaVu Sans Mono glyph missing from Cascadia Code NF should resolve to a fallback font"
         );
         assert!(
             font_library.inner.read().inner.len() > starting_len,
