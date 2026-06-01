@@ -3657,9 +3657,11 @@ impl Screen<'_> {
         let (window_update, any_panel_dirty) = self
             .renderer
             .run(&mut self.sugarloaf, &mut self.context_manager);
-        let has_animation = self.renderer.needs_redraw();
-        self.last_render_needs_redraw = has_animation;
-        let should_present = any_panel_dirty || has_animation;
+        let had_renderer_animation = self.renderer.needs_redraw();
+        #[cfg(feature = "wgpu")]
+        let had_shader_animation = self.sugarloaf.ghostty_shader_needs_redraw();
+        #[cfg(not(feature = "wgpu"))]
+        let had_shader_animation = false;
 
         if self.renderer.custom_mouse_cursor {
             let scale = self.sugarloaf.scale_factor();
@@ -4473,6 +4475,19 @@ impl Screen<'_> {
                 self.sugarloaf.update_ghostty_shader_frame_state(state);
             }
 
+            let has_renderer_animation = self.renderer.needs_redraw();
+            #[cfg(feature = "wgpu")]
+            let has_shader_animation = self.sugarloaf.ghostty_shader_needs_redraw();
+            #[cfg(not(feature = "wgpu"))]
+            let has_shader_animation = false;
+            self.last_render_needs_redraw =
+                has_renderer_animation || has_shader_animation;
+            let should_present = any_panel_dirty
+                || had_renderer_animation
+                || had_shader_animation
+                || has_renderer_animation
+                || has_shader_animation;
+
             if should_present {
                 before_present();
                 if frame_grids.is_empty() {
@@ -4517,7 +4532,7 @@ impl Screen<'_> {
         // indeterminate progress bar, trail cursor animation). UI-only
         // — terminal cells didn't change, but we want the next vsync
         // to fire a render so overlays/animations tick forward.
-        if has_animation {
+        if self.last_render_needs_redraw {
             self.context_manager
                 .current_mut()
                 .renderable_content

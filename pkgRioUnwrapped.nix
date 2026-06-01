@@ -84,7 +84,10 @@ in
     nativeBuildInputs = packageNativeBuildInputs;
 
     buildNoDefaultFeatures = true;
-    buildFeatures = (lib.optionals withX11 ["x11"]) ++ (lib.optionals withWayland ["wayland"]);
+    buildFeatures =
+      ["wgpu"]
+      ++ (lib.optionals withX11 ["x11"])
+      ++ (lib.optionals withWayland ["wayland"]);
     inherit doCheck;
     checkType = "debug";
 

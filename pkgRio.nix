@@ -48,10 +48,16 @@ in
                           $out/share/icons/hicolor/scalable/apps/yazelix-terminal.svg
         install -D -m 644 sugarloaf/src/font/resources/SymbolsNerdFontMono/SymbolsNerdFontMono-Regular.ttf \
                           $out/share/yazelix-terminal/fonts/SymbolsNerdFontMono-Regular.ttf
+        install -dm 755 $out/share/yazelix-terminal/shaders/generated_effects
+        install -m 644 misc/yazelix_terminal_shaders/cursor_trail_dusk.glsl \
+                         $out/share/yazelix-terminal/shaders/cursor_trail_dusk.glsl
+        install -m 644 misc/yazelix_terminal_shaders/generated_effects/*.glsl \
+                         $out/share/yazelix-terminal/shaders/generated_effects/
         substitute misc/yazelix_terminal_config.toml \
           $out/share/yazelix-terminal/config.toml \
           --replace-fail "@yazelix_terminal_font_dir@" "$out/share/yazelix-terminal/fonts" \
-          --replace-fail "@yazelix_terminal_emoji_font_dir@" "${noto-fonts-color-emoji}/share/fonts/truetype"
+          --replace-fail "@yazelix_terminal_emoji_font_dir@" "${noto-fonts-color-emoji}/share/fonts/truetype" \
+          --replace-fail "@yazelix_terminal_shader_dir@" "$out/share/yazelix-terminal/shaders"
 
         makeWrapper "${unwrapped}/bin/rio" "$out/bin/rio" \
           --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath rlinkLibs}"

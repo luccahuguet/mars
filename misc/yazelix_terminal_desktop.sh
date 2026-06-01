@@ -127,11 +127,8 @@ configure_rio_config() {
       config_parent="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/yazelix-terminal"
       config_home="$config_parent/game-config"
       mkdir -p "$config_home"
-      install -m 600 "$default_config_home/config.toml" "$config_home/config.toml"
-      {
-        printf '\n[renderer]\n'
-        printf 'strategy = "game"\n'
-      } >> "$config_home/config.toml"
+      write_game_config "$default_config_home/config.toml" "$config_home/config.toml"
+      chmod 600 "$config_home/config.toml"
       export RIO_CONFIG_HOME="$config_home"
       ;;
     *)
@@ -140,6 +137,31 @@ configure_rio_config() {
       exit 64
       ;;
   esac
+}
+
+write_game_config() {
+  src="$1"
+  dst="$2"
+  awk '
+    BEGIN { inserted = 0; in_renderer = 0 }
+    /^[[:space:]]*\[renderer\][[:space:]]*$/ {
+      print
+      print "strategy = \"game\""
+      inserted = 1
+      in_renderer = 1
+      next
+    }
+    /^[[:space:]]*\[/ { in_renderer = 0 }
+    in_renderer && /^[[:space:]]*strategy[[:space:]]*=/ { next }
+    { print }
+    END {
+      if (!inserted) {
+        print ""
+        print "[renderer]"
+        print "strategy = \"game\""
+      }
+    }
+  ' "$src" > "$dst"
 }
 
 configure_rio_config

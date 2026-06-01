@@ -2,7 +2,7 @@ use crate::context::webgpu::WgpuContext;
 use bytemuck::Zeroable;
 use std::borrow::Cow;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub type GhosttyShaderPath = String;
 pub const MAX_GHOSTTY_SHADER_EXTRA_CURSORS: usize = crate::grid::MAX_CURSOR_REVERSE_CELLS;
@@ -10,6 +10,7 @@ pub const MAX_GHOSTTY_SHADER_EXTRA_CURSORS: usize = crate::grid::MAX_CURSOR_REVE
 const TEXTURE_BINDING: u32 = 0;
 const SAMPLER_BINDING: u32 = 1;
 const UNIFORM_BINDING: u32 = 2;
+const SHADER_ANIMATION_WINDOW: Duration = Duration::from_millis(650);
 
 const FULLSCREEN_VERTEX: &str = r#"
 @vertex
@@ -199,6 +200,7 @@ pub struct GhosttyShaderBrush {
     frame_state: GhosttyShaderFrameState,
     first_frame: Option<Instant>,
     last_frame: Option<Instant>,
+    animation_until: Option<Instant>,
     focus: bool,
 }
 
@@ -245,7 +247,16 @@ impl GhosttyShaderBrush {
 
     #[inline]
     pub fn update_frame_state(&mut self, state: GhosttyShaderFrameState) {
+        if self.frame_state != state {
+            self.animation_until = Some(Instant::now() + SHADER_ANIMATION_WINDOW);
+        }
         self.frame_state = state;
+    }
+
+    #[inline]
+    pub fn needs_redraw(&self) -> bool {
+        self.animation_until
+            .is_some_and(|deadline| Instant::now() <= deadline)
     }
 
     pub fn render(
@@ -713,6 +724,23 @@ mod tests {
 
         validate_shadertoy_fragment_glsl(&source)
             .expect("Ghostty cursor probe should validate as WGPU GLSL");
+    }
+
+    #[test]
+    fn cursor_frame_state_change_requests_redraw_window() {
+        // Defends: event-mode custom shader animation gets a paced redraw window
+        // without forcing global game mode.
+        let mut brush = GhosttyShaderBrush::default();
+        let mut state = GhosttyShaderFrameState::default();
+        state.cursor = Some(GhosttyShaderCursor {
+            rect: [10.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        });
+
+        brush.update_frame_state(state);
+
+        assert!(brush.needs_redraw());
     }
 
     #[test]

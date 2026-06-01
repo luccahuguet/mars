@@ -1,7 +1,18 @@
 confirm-before-quit = false
 
+[renderer]
+backend = "Webgpu"
+custom-shader = [
+  "@yazelix_terminal_shader_dir@/cursor_trail_dusk.glsl",
+  "@yazelix_terminal_shader_dir@/generated_effects/sweep.glsl",
+  "@yazelix_terminal_shader_dir@/generated_effects/rectangle_boom.glsl",
+]
+
 [window]
 decorations = "Disabled"
+
+[effects]
+trail-cursor = true
 
 [fonts]
 family = "cascadiacode"

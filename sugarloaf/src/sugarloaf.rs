@@ -550,6 +550,14 @@ impl Sugarloaf<'_> {
     }
 
     #[inline]
+    #[cfg(feature = "wgpu")]
+    pub fn ghostty_shader_needs_redraw(&self) -> bool {
+        self.ghostty_shader_brush
+            .as_ref()
+            .is_some_and(GhosttyShaderBrush::needs_redraw)
+    }
+
+    #[inline]
     pub fn set_background_color(&mut self, color: Option<Color>) -> &mut Self {
         self.background_color = color;
         self
