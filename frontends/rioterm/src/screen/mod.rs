@@ -188,6 +188,7 @@ pub struct Screen<'screen> {
     hints_config: Vec<std::rc::Rc<rio_backend::config::hints::Hint>>,
     pub resize_state: Option<crate::layout::ResizeState>,
     last_render_presented: bool,
+    last_render_needs_redraw: bool,
     /// Per-panel `GridRenderer`, keyed by `route_id`. Lazily created
     /// on first render of each panel so construction (which compiles
     /// the Metal/WGSL shaders and builds pipeline states) runs once
@@ -441,6 +442,7 @@ impl Screen<'_> {
             last_ime_cursor_pos: None,
             resize_state: None,
             last_render_presented: false,
+            last_render_needs_redraw: false,
             grids: rustc_hash::FxHashMap::default(),
             grid_rasterizer: crate::grid_emit::GridGlyphRasterizer::new(),
         })
@@ -3463,11 +3465,17 @@ impl Screen<'_> {
         );
         self.sugarloaf.render();
         self.last_render_presented = true;
+        self.last_render_needs_redraw = false;
     }
 
     #[inline]
     pub(crate) fn last_render_presented(&self) -> bool {
         self.last_render_presented
+    }
+
+    #[inline]
+    pub(crate) fn last_render_needs_redraw(&self) -> bool {
+        self.last_render_needs_redraw
     }
 
     pub fn execute_palette_action(
@@ -3587,7 +3595,10 @@ impl Screen<'_> {
     /// `RedrawRequested` which consumes the damage here. `pub(crate)`
     /// enforces that contract — external callers (plugins, tests)
     /// can't force a render outside the vsync-paced path.
-    pub(crate) fn render(&mut self) -> Option<crate::context::renderable::WindowUpdate> {
+    pub(crate) fn render(
+        &mut self,
+        before_present: impl FnOnce(),
+    ) -> Option<crate::context::renderable::WindowUpdate> {
         // Phase 2.0 smoke test: ensure the active panel has a
         // `GridRenderer`. This forces `MetalGridRenderer::new` /
         // `WgpuGridRenderer::new` to actually run on real hardware,
@@ -3606,6 +3617,7 @@ impl Screen<'_> {
             self.ensure_grid(current_route, grid_cols, grid_rows);
         }
         self.last_render_presented = false;
+        self.last_render_needs_redraw = false;
 
         let is_search_active = self.search_active();
         if is_search_active {
@@ -3646,6 +3658,7 @@ impl Screen<'_> {
             .renderer
             .run(&mut self.sugarloaf, &mut self.context_manager);
         let has_animation = self.renderer.needs_redraw();
+        self.last_render_needs_redraw = has_animation;
         let should_present = any_panel_dirty || has_animation;
 
         if self.renderer.custom_mouse_cursor {
@@ -4461,6 +4474,7 @@ impl Screen<'_> {
             }
 
             if should_present {
+                before_present();
                 if frame_grids.is_empty() {
                     self.sugarloaf.render();
                 } else {

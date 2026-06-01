@@ -119,15 +119,24 @@ configure_rio_config() {
     return 0
   fi
 
-  case "${YAZELIX_TERMINAL_RENDER_STRATEGY:-game}" in
-    game | Game | GAME)
+  case "${YAZELIX_TERMINAL_RENDER_STRATEGY:-events}" in
+    events | Events | EVENTS | event | Event | EVENT | default | none | NONE | 0)
       export RIO_CONFIG_HOME="$default_config_home"
       ;;
-    default | none | NONE | 0)
+    game | Game | GAME)
+      config_parent="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/yazelix-terminal"
+      config_home="$config_parent/game-config"
+      mkdir -p "$config_home"
+      cp "$default_config_home/config.toml" "$config_home/config.toml"
+      {
+        printf '\n[renderer]\n'
+        printf 'strategy = "game"\n'
+      } >> "$config_home/config.toml"
+      export RIO_CONFIG_HOME="$config_home"
       ;;
     *)
       printf 'Unsupported YAZELIX_TERMINAL_RENDER_STRATEGY: %s\n' "$YAZELIX_TERMINAL_RENDER_STRATEGY" >&2
-      printf 'Use game, default, none, or 0.\n' >&2
+      printf 'Use events, game, default, none, or 0.\n' >&2
       exit 64
       ;;
   esac

@@ -11,8 +11,3 @@ symbol-map = [
   { start = "F0001", end = "F1AF1", font-family = "Symbols Nerd Font Mono" },
   { start = "1F000", end = "1FB00", font-family = "Noto Color Emoji" },
 ]
-
-[renderer]
-# Work around upstream Rio #1603 on Wayland/COSMIC, where the default renderer
-# strategy can stop waking for input and resize events while the shell is idle.
-strategy = "game"

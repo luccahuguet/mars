@@ -1990,12 +1990,12 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 route.begin_render();
                 let render_start = route.window.render_timestamp;
                 let is_game_mode = self.config.renderer.strategy.is_game();
-                if !is_game_mode {
-                    route.window.winit_window.pre_present_notify();
-                }
 
                 match route.path {
                     RoutePath::Welcome => {
+                        if !is_game_mode {
+                            route.window.winit_window.pre_present_notify();
+                        }
                         route.window.screen.render_welcome();
                     }
                     RoutePath::Terminal | RoutePath::ConfirmQuit => {
@@ -2010,7 +2010,15 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             );
                         }
 
-                        if let Some(window_update) = route.window.screen.render() {
+                        let screen = &mut route.window.screen;
+                        let winit_window = &route.window.winit_window;
+                        let window_update = if is_game_mode {
+                            screen.render(|| {})
+                        } else {
+                            screen.render(|| winit_window.pre_present_notify())
+                        };
+
+                        if let Some(window_update) = window_update {
                             use crate::context::renderable::{
                                 BackgroundState, WindowUpdate,
                             };
@@ -2110,6 +2118,22 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     }
                     event_loop.set_control_flow(ControlFlow::Wait);
                 } else {
+                    if presented && route.window.screen.last_render_needs_redraw() {
+                        let route_id = route.window.screen.ctx().current_route();
+                        let timer_id = TimerId::new(Topic::Render, route_id);
+                        let event = EventPayload::new(
+                            RioEventType::Rio(RioEvent::Render),
+                            window_id,
+                        );
+                        if !self.scheduler.scheduled(timer_id) {
+                            self.scheduler.schedule(
+                                event,
+                                route.window.vblank_interval,
+                                false,
+                                timer_id,
+                            );
+                        }
+                    }
                     if route.path == RoutePath::Welcome
                         || route.path == RoutePath::ConfirmQuit
                         || route

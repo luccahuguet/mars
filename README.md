@@ -34,8 +34,8 @@ The package installs:
 The desktop wrapper sets `--app-id yazelix-terminal`, searches for available
 Nix graphics wrappers, and uses Rio's supported `RIO_CONFIG_HOME` config
 directory contract. Its packaged config disables confirm-before-quit and uses
-`[renderer] strategy = "game"` by default, which keeps Wayland/COSMIC desktop
-launches responsive for idle shells, input, and resize events.
+the default event renderer strategy. `YAZELIX_TERMINAL_RENDER_STRATEGY=game`
+is kept as an explicit diagnostic override
 
 Wrapper override knobs:
 
@@ -43,7 +43,8 @@ Wrapper override knobs:
 | --- | --- |
 | `RIO_CONFIG_HOME` | Uses an existing Rio config directory unchanged |
 | `YAZELIX_TERMINAL_CONFIG` | Uses a custom Rio config directory; must contain readable `config.toml` |
-| `YAZELIX_TERMINAL_RENDER_STRATEGY=default` | Skips the packaged `strategy = "game"` config when no other config is set |
+| `YAZELIX_TERMINAL_RENDER_STRATEGY=events` | Uses the packaged config with Rio's default event renderer strategy |
+| `YAZELIX_TERMINAL_RENDER_STRATEGY=game` | Creates a runtime copy of the packaged config with `strategy = "game"` for diagnostics |
 | `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=none` | Skips automatic nixGL/nixVulkan wrapper discovery |
 | `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=/path/to/wrapper` | Runs the terminal through the selected wrapper |
 
