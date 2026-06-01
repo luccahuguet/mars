@@ -180,7 +180,7 @@ fn strip_path_prefix(
     std::env::join_paths(&current_paths[prefix_paths.len()..]).ok()
 }
 
-fn sanitize_yazelix_terminal_child_command(command: &mut Command) {
+pub fn sanitize_yazelix_terminal_child_command(command: &mut Command) {
     if !should_sanitize_yazelix_terminal_child_env() {
         return;
     }
@@ -631,9 +631,10 @@ pub fn create_pty_with_spawn(
                 ));
             }
 
-            let output = std::process::Command::new("flatpak-spawn")
-                .args(["--host", "sh", "-c", "echo $SHELL"])
-                .output()?;
+            let mut shell_probe = std::process::Command::new("flatpak-spawn");
+            shell_probe.args(["--host", "sh", "-c", "echo $SHELL"]);
+            sanitize_yazelix_terminal_child_command(&mut shell_probe);
+            let output = shell_probe.output()?;
             let shell = String::from_utf8_lossy(&output.stdout);
 
             with_args.push(shell.trim().to_string());
@@ -920,14 +921,15 @@ impl Drop for Child {
 }
 
 pub fn command_per_pid(pid: libc::pid_t) -> String {
-    let current_process_name = Command::new("ps")
+    let mut command = Command::new("ps");
+    command
         .arg("-p")
         .arg(format!("{pid:}"))
         .arg("-o")
-        .arg("comm=")
-        .output()
-        .expect("failed to execute process")
-        .stdout;
+        .arg("comm=");
+    sanitize_yazelix_terminal_child_command(&mut command);
+    let current_process_name =
+        command.output().expect("failed to execute process").stdout;
 
     std::str::from_utf8(&current_process_name)
         .unwrap_or("")
@@ -1182,6 +1184,38 @@ mod tests {
             command_env_override(&command, "LD_LIBRARY_PATH"),
             Some(Some(OsString::from("/host/original")))
         );
+        assert_env_removed(&command, YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH);
+        assert_env_removed(&command, YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX);
+    }
+
+    #[test]
+    fn yazelix_child_command_removes_wrapper_loader_path_for_empty_host_snapshot() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LD_LIBRARY_PATH",
+            "RIO_CONFIG_HOME",
+            YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
+            YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
+            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
+            "YAZELIX_TERMINAL_GRAPHICS_WRAPPER",
+            "YAZELIX_TERMINAL_RENDER_STRATEGY",
+        ]);
+
+        std::env::set_var(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE, "1");
+        std::env::set_var(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH, "");
+        std::env::set_var(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX, "/nix/lib");
+        std::env::set_var("LD_LIBRARY_PATH", "/nix/lib:/other/nix/lib");
+        std::env::set_var("RIO_CONFIG_HOME", "/tmp/yazelix-terminal-config");
+        std::env::set_var("YAZELIX_TERMINAL_GRAPHICS_WRAPPER", "nixGL");
+        std::env::set_var("YAZELIX_TERMINAL_RENDER_STRATEGY", "game");
+
+        let mut command = Command::new("env");
+        sanitize_yazelix_terminal_child_command(&mut command);
+
+        assert_env_removed(&command, "LD_LIBRARY_PATH");
+        assert_env_removed(&command, "RIO_CONFIG_HOME");
+        assert_env_removed(&command, "YAZELIX_TERMINAL_GRAPHICS_WRAPPER");
+        assert_env_removed(&command, "YAZELIX_TERMINAL_RENDER_STRATEGY");
         assert_env_removed(&command, YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH);
         assert_env_removed(&command, YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX);
     }

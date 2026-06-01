@@ -2643,18 +2643,30 @@ impl Screen<'_> {
         let url = "https://rioterm.com/docs/config";
         #[cfg(target_os = "macos")]
         {
-            let _ = std::process::Command::new("open").arg(url).spawn();
+            Self::spawn_external_command("open", [url]);
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         {
-            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+            Self::spawn_external_command("xdg-open", [url]);
         }
         #[cfg(windows)]
         {
-            let _ = std::process::Command::new("cmd")
-                .args(["/c", "start", "", url])
-                .spawn();
+            Self::spawn_external_command("cmd", ["/c", "start", "", url]);
         }
+    }
+
+    fn spawn_external_command<I, S>(program: &str, args: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        let mut command = std::process::Command::new(program);
+        command.args(args);
+
+        #[cfg(unix)]
+        teletypewriter::sanitize_yazelix_terminal_child_command(&mut command);
+
+        let _ = command.spawn();
     }
 
     pub fn handle_scrollbar_click(&mut self) -> bool {
