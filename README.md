@@ -32,17 +32,21 @@ The package installs:
 - `share/yazelix-terminal/config.toml`
 
 The desktop wrapper sets `--app-id yazelix-terminal`, searches for available
-Nix graphics wrappers, and uses Rio's supported `RIO_CONFIG_HOME` config
-directory contract. Its packaged config disables confirm-before-quit, disables
-native window decorations, sets the terminal font size to `18.0`, and uses the
-default event renderer strategy. `YAZELIX_TERMINAL_RENDER_STRATEGY=game` is kept
-as an explicit diagnostic override
+Nix graphics wrappers, and maps Yazelix-owned config directories into Rio's
+supported `RIO_CONFIG_HOME` contract only for the terminal process. It ignores
+ambient host `RIO_CONFIG_HOME`; use `YAZELIX_TERMINAL_CONFIG` for an explicit
+Yazelix Terminal config override. Child shells launched by the packaged wrapper
+do not inherit Yazelix Terminal's private `RIO_CONFIG_HOME` or package loader
+paths, so plain host `rio` invocations keep using the user's host Rio defaults.
+The packaged config disables confirm-before-quit, disables native window
+decorations, sets the terminal font size to `18.0`, and uses the default event
+renderer strategy. `YAZELIX_TERMINAL_RENDER_STRATEGY=game` is kept as an
+explicit diagnostic override.
 
 Wrapper override knobs:
 
 | Variable | Behavior |
 | --- | --- |
-| `RIO_CONFIG_HOME` | Uses an existing Rio config directory unchanged |
 | `YAZELIX_TERMINAL_CONFIG` | Uses a custom Rio config directory; must contain readable `config.toml` |
 | `YAZELIX_TERMINAL_RENDER_STRATEGY=events` | Uses the packaged config with Rio's default event renderer strategy |
 | `YAZELIX_TERMINAL_RENDER_STRATEGY=game` | Creates a runtime copy of the packaged config with `strategy = "game"` for diagnostics |

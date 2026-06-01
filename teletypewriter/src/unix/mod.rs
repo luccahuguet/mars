@@ -26,6 +26,23 @@ use std::process::{Command, Stdio};
 use std::ptr;
 use std::sync::Arc;
 
+const YAZELIX_TERMINAL_CHILD_ENV_SANITIZE: &str = "YAZELIX_TERMINAL_CHILD_ENV_SANITIZE";
+const YAZELIX_TERMINAL_CONFIG: &str = "YAZELIX_TERMINAL_CONFIG";
+const YAZELIX_TERMINAL_HOST: &str = "YAZELIX_TERMINAL_HOST";
+const YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH: &str =
+    "YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH";
+const YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX: &str =
+    "YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX";
+const YAZELIX_TERMINAL_LAUNCH_ONLY_ENV: &[&str] = &[
+    "RIO_CONFIG_HOME",
+    YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
+    YAZELIX_TERMINAL_CONFIG,
+    YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
+    YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
+    "YAZELIX_TERMINAL_GRAPHICS_WRAPPER",
+    "YAZELIX_TERMINAL_RENDER_STRATEGY",
+];
+
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
 const TIOCSWINSZ: libc::c_ulong = 0x5414;
 #[cfg(all(target_os = "linux", target_env = "musl"))]
@@ -84,6 +101,104 @@ fn default_shell_command(shell: &str) {
             command_pointer,
             vec![command_pointer, std::ptr::null()].as_ptr(),
         );
+    }
+}
+
+fn should_sanitize_yazelix_terminal_child_env() -> bool {
+    std::env::var_os(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE).is_some()
+        || std::env::var_os(YAZELIX_TERMINAL_CONFIG).is_some()
+        || std::env::var_os(YAZELIX_TERMINAL_HOST).is_some()
+}
+
+fn apply_yazelix_terminal_child_ld_library_path(command: &mut Command) {
+    if let Some(host_ld_library_path) =
+        std::env::var_os(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH)
+    {
+        if host_ld_library_path.is_empty() {
+            command.env_remove("LD_LIBRARY_PATH");
+        } else {
+            command.env("LD_LIBRARY_PATH", host_ld_library_path);
+        }
+        return;
+    }
+
+    let Some(prefix) = std::env::var_os(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX) else {
+        return;
+    };
+    let Some(current) = std::env::var_os("LD_LIBRARY_PATH") else {
+        return;
+    };
+    let sanitized = strip_path_prefix(current, prefix);
+    if let Some(value) = sanitized.filter(|value| !value.is_empty()) {
+        command.env("LD_LIBRARY_PATH", value);
+    } else {
+        command.env_remove("LD_LIBRARY_PATH");
+    }
+}
+
+fn apply_yazelix_terminal_process_ld_library_path() {
+    if let Some(host_ld_library_path) =
+        std::env::var_os(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH)
+    {
+        if host_ld_library_path.is_empty() {
+            std::env::remove_var("LD_LIBRARY_PATH");
+        } else {
+            std::env::set_var("LD_LIBRARY_PATH", host_ld_library_path);
+        }
+        return;
+    }
+
+    let Some(prefix) = std::env::var_os(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX) else {
+        return;
+    };
+    let Some(current) = std::env::var_os("LD_LIBRARY_PATH") else {
+        return;
+    };
+    if let Some(value) =
+        strip_path_prefix(current, prefix).filter(|value| !value.is_empty())
+    {
+        std::env::set_var("LD_LIBRARY_PATH", value);
+    } else {
+        std::env::remove_var("LD_LIBRARY_PATH");
+    }
+}
+
+fn strip_path_prefix(
+    current: std::ffi::OsString,
+    prefix: std::ffi::OsString,
+) -> Option<std::ffi::OsString> {
+    let prefix_paths = std::env::split_paths(&prefix).collect::<Vec<_>>();
+    if prefix_paths.is_empty() {
+        return Some(current);
+    }
+
+    let current_paths = std::env::split_paths(&current).collect::<Vec<_>>();
+    if !current_paths.starts_with(&prefix_paths) {
+        return Some(current);
+    }
+
+    std::env::join_paths(&current_paths[prefix_paths.len()..]).ok()
+}
+
+fn sanitize_yazelix_terminal_child_command(command: &mut Command) {
+    if !should_sanitize_yazelix_terminal_child_env() {
+        return;
+    }
+
+    apply_yazelix_terminal_child_ld_library_path(command);
+    for name in YAZELIX_TERMINAL_LAUNCH_ONLY_ENV {
+        command.env_remove(name);
+    }
+}
+
+fn sanitize_yazelix_terminal_child_process_env() {
+    if !should_sanitize_yazelix_terminal_child_env() {
+        return;
+    }
+
+    apply_yazelix_terminal_process_ld_library_path();
+    for name in YAZELIX_TERMINAL_LAUNCH_ONLY_ENV {
+        std::env::remove_var(name);
     }
 }
 
@@ -542,6 +657,7 @@ pub fn create_pty_with_spawn(
 
     builder.env("USER", user.user);
     builder.env("HOME", user.home);
+    sanitize_yazelix_terminal_child_command(&mut builder);
 
     unsafe {
         builder.pre_exec(move || {
@@ -657,6 +773,7 @@ pub fn create_pty_with_fork(shell: &str, columns: u16, rows: u16) -> Result<Pty,
         )
     } {
         0 => {
+            sanitize_yazelix_terminal_child_process_env();
             default_shell_command(shell_program);
             Err(Error::other(format!(
                 "forkpty has reach unreachable with {shell_program}"
@@ -979,6 +1096,7 @@ where
     if let Ok(cwd) = foreground_process_path(main_fd, shell_pid) {
         command.current_dir(cwd);
     }
+    sanitize_yazelix_terminal_child_command(&mut command);
     unsafe {
         command
             .pre_exec(|| {
@@ -997,5 +1115,110 @@ where
             .spawn()?
             .wait()
             .map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::{OsStr, OsString};
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn yazelix_child_command_removes_private_rio_config_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LD_LIBRARY_PATH",
+            "RIO_CONFIG_HOME",
+            YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
+            YAZELIX_TERMINAL_CONFIG,
+            YAZELIX_TERMINAL_HOST,
+            YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
+            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
+        ]);
+
+        std::env::set_var(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE, "1");
+        std::env::set_var("RIO_CONFIG_HOME", "/tmp/yazelix-terminal-config");
+        std::env::set_var(YAZELIX_TERMINAL_CONFIG, "/tmp/yazelix-terminal-config");
+        std::env::set_var(
+            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
+            "/nix/lib-a:/nix/lib-b",
+        );
+        std::env::set_var("LD_LIBRARY_PATH", "/nix/lib-a:/nix/lib-b:/host/lib");
+
+        let mut command = Command::new("env");
+        sanitize_yazelix_terminal_child_command(&mut command);
+
+        assert_env_removed(&command, "RIO_CONFIG_HOME");
+        assert_env_removed(&command, YAZELIX_TERMINAL_CONFIG);
+        assert_env_removed(&command, YAZELIX_TERMINAL_CHILD_ENV_SANITIZE);
+        assert_eq!(
+            command_env_override(&command, "LD_LIBRARY_PATH"),
+            Some(Some(OsString::from("/host/lib")))
+        );
+    }
+
+    #[test]
+    fn yazelix_child_command_restores_host_loader_path_snapshot() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LD_LIBRARY_PATH",
+            YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
+            YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
+            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
+        ]);
+
+        std::env::set_var(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE, "1");
+        std::env::set_var(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH, "/host/original");
+        std::env::set_var(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX, "/nix/lib");
+        std::env::set_var("LD_LIBRARY_PATH", "/nix/lib:/graphics/lib:/host/original");
+
+        let mut command = Command::new("env");
+        sanitize_yazelix_terminal_child_command(&mut command);
+
+        assert_eq!(
+            command_env_override(&command, "LD_LIBRARY_PATH"),
+            Some(Some(OsString::from("/host/original")))
+        );
+        assert_env_removed(&command, YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH);
+        assert_env_removed(&command, YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX);
+    }
+
+    fn command_env_override(command: &Command, name: &str) -> Option<Option<OsString>> {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new(name))
+            .map(|(_, value)| value.map(OsString::from))
+    }
+
+    fn assert_env_removed(command: &Command, name: &str) {
+        assert_eq!(command_env_override(command, name), Some(None));
+    }
+
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn capture(names: &[&'static str]) -> Self {
+            Self(
+                names
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in self.0.drain(..) {
+                if let Some(value) = value {
+                    std::env::set_var(name, value);
+                } else {
+                    std::env::remove_var(name);
+                }
+            }
+        }
     }
 }

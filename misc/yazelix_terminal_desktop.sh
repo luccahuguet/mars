@@ -109,19 +109,17 @@ configure_rio_config() {
   if [ -n "${YAZELIX_TERMINAL_CONFIG:-}" ]; then
     if [ -d "$YAZELIX_TERMINAL_CONFIG" ] && [ -r "$YAZELIX_TERMINAL_CONFIG/config.toml" ]; then
       export RIO_CONFIG_HOME="$YAZELIX_TERMINAL_CONFIG"
+      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
       return 0
     fi
     printf 'YAZELIX_TERMINAL_CONFIG must point to a readable Rio config directory containing config.toml: %s\n' "$YAZELIX_TERMINAL_CONFIG" >&2
     exit 127
   fi
 
-  if [ -n "${RIO_CONFIG_HOME:-}" ]; then
-    return 0
-  fi
-
   case "${YAZELIX_TERMINAL_RENDER_STRATEGY:-events}" in
     events | Events | EVENTS | event | Event | EVENT | default | none | NONE | 0)
       export RIO_CONFIG_HOME="$default_config_home"
+      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
       ;;
     game | Game | GAME)
       config_parent="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/yazelix-terminal"
@@ -130,6 +128,7 @@ configure_rio_config() {
       write_game_config "$default_config_home/config.toml" "$config_home/config.toml"
       chmod 600 "$config_home/config.toml"
       export RIO_CONFIG_HOME="$config_home"
+      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
       ;;
     *)
       printf 'Unsupported YAZELIX_TERMINAL_RENDER_STRATEGY: %s\n' "$YAZELIX_TERMINAL_RENDER_STRATEGY" >&2
@@ -165,6 +164,7 @@ write_game_config() {
 }
 
 configure_rio_config
+export YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 
 if graphics_wrapper="$(find_graphics_wrapper)"; then
   exec "$graphics_wrapper" "$binary" --app-id yazelix-terminal "$@"

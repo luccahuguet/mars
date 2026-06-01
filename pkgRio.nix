@@ -60,6 +60,8 @@ in
           --replace-fail "@yazelix_terminal_shader_dir@" "$out/share/yazelix-terminal/shaders"
 
         makeWrapper "${unwrapped}/bin/rio" "$out/bin/rio" \
+          --set YAZELIX_TERMINAL_CHILD_ENV_SANITIZE 1 \
+          --set YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX "${lib.makeLibraryPath rlinkLibs}" \
           --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath rlinkLibs}"
         ln -s "$out/bin/rio" "$out/bin/yazelix-terminal"
         substitute misc/yazelix_terminal_desktop.sh "$out/bin/yazelix-terminal-desktop" \
