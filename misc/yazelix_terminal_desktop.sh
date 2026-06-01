@@ -127,7 +127,7 @@ configure_rio_config() {
       config_parent="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/yazelix-terminal"
       config_home="$config_parent/game-config"
       mkdir -p "$config_home"
-      cp "$default_config_home/config.toml" "$config_home/config.toml"
+      install -m 600 "$default_config_home/config.toml" "$config_home/config.toml"
       {
         printf '\n[renderer]\n'
         printf 'strategy = "game"\n'
