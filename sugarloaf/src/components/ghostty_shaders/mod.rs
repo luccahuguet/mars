@@ -11,6 +11,7 @@ const TEXTURE_BINDING: u32 = 0;
 const SAMPLER_BINDING: u32 = 1;
 const UNIFORM_BINDING: u32 = 2;
 const SHADER_ANIMATION_WINDOW: Duration = Duration::from_millis(650);
+const CURSOR_TRAIL_WARP_MAX_CELLS: f32 = 8.0;
 
 const FULLSCREEN_VERTEX: &str = r#"
 @vertex
@@ -401,8 +402,17 @@ impl GhosttyShaderBrush {
             let cursor_changed = self.uniforms.current_cursor != cursor.rect
                 || self.uniforms.current_cursor_color != cursor.color;
             if cursor_changed {
-                self.uniforms.previous_cursor = self.uniforms.current_cursor;
-                self.uniforms.previous_cursor_color = self.uniforms.current_cursor_color;
+                if cursor_transition_should_snap(
+                    self.uniforms.current_cursor,
+                    cursor.rect,
+                ) {
+                    self.uniforms.previous_cursor = cursor.rect;
+                    self.uniforms.previous_cursor_color = cursor.color;
+                } else {
+                    self.uniforms.previous_cursor = self.uniforms.current_cursor;
+                    self.uniforms.previous_cursor_color =
+                        self.uniforms.current_cursor_color;
+                }
                 self.uniforms.current_cursor = cursor.rect;
                 self.uniforms.current_cursor_color = cursor.color;
                 self.uniforms.cursor_change_time = time;
@@ -423,6 +433,20 @@ impl GhosttyShaderBrush {
             }
         }
     }
+}
+
+fn cursor_transition_should_snap(previous: [f32; 4], current: [f32; 4]) -> bool {
+    if previous[2] <= 0.0 || previous[3] <= 0.0 || current[2] <= 0.0 || current[3] <= 0.0
+    {
+        return true;
+    }
+
+    let cell_width = previous[2].max(current[2]).max(1.0);
+    let cell_height = previous[3].max(current[3]).max(1.0);
+    let jump_x = (current[0] - previous[0]).abs() / cell_width;
+    let jump_y = (current[1] - previous[1]).abs() / cell_height;
+
+    jump_x.hypot(jump_y) > CURSOR_TRAIL_WARP_MAX_CELLS
 }
 
 fn build_shadertoy_glsl(source: &str) -> String {
@@ -741,6 +765,77 @@ mod tests {
         brush.update_frame_state(state);
 
         assert!(brush.needs_redraw());
+    }
+
+    #[test]
+    fn first_cursor_frame_seeds_previous_cursor_to_current() {
+        // Defends: the shader trail does not start at window origin.
+        let mut brush = GhosttyShaderBrush::default();
+        let cursor = GhosttyShaderCursor {
+            rect: [10.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        };
+        let mut state = GhosttyShaderFrameState::default();
+        state.cursor = Some(cursor);
+
+        brush.update_frame_state(state);
+        brush.update_uniforms(800.0, 600.0);
+
+        assert_eq!(brush.uniforms.previous_cursor, cursor.rect);
+        assert_eq!(brush.uniforms.current_cursor, cursor.rect);
+    }
+
+    #[test]
+    fn nearby_cursor_move_preserves_shader_trail_transition() {
+        let mut brush = GhosttyShaderBrush::default();
+        let first = GhosttyShaderCursor {
+            rect: [10.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        };
+        let second = GhosttyShaderCursor {
+            rect: [10.0, 36.0, 8.0, 16.0],
+            ..first
+        };
+
+        let mut state = GhosttyShaderFrameState::default();
+        state.cursor = Some(first);
+        brush.update_frame_state(state.clone());
+        brush.update_uniforms(800.0, 600.0);
+
+        state.cursor = Some(second);
+        brush.update_frame_state(state);
+        brush.update_uniforms(800.0, 600.0);
+
+        assert_eq!(brush.uniforms.previous_cursor, first.rect);
+        assert_eq!(brush.uniforms.current_cursor, second.rect);
+    }
+
+    #[test]
+    fn large_cursor_jump_snaps_shader_previous_cursor() {
+        let mut brush = GhosttyShaderBrush::default();
+        let first = GhosttyShaderCursor {
+            rect: [10.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        };
+        let second = GhosttyShaderCursor {
+            rect: [260.0, 420.0, 8.0, 16.0],
+            ..first
+        };
+
+        let mut state = GhosttyShaderFrameState::default();
+        state.cursor = Some(first);
+        brush.update_frame_state(state.clone());
+        brush.update_uniforms(800.0, 600.0);
+
+        state.cursor = Some(second);
+        brush.update_frame_state(state);
+        brush.update_uniforms(800.0, 600.0);
+
+        assert_eq!(brush.uniforms.previous_cursor, second.rect);
+        assert_eq!(brush.uniforms.current_cursor, second.rect);
     }
 
     #[test]

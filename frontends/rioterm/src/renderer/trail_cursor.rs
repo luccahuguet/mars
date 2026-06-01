@@ -9,6 +9,15 @@ const ANIMATION_LENGTH: f32 = 0.15;
 /// Animation duration for short (≤2 cell horizontal) movements.
 const SHORT_ANIMATION_LENGTH: f32 = 0.04;
 
+/// Cursor jumps above this cell distance are treated as redraw warps.
+/// Full-screen TUIs often move the terminal cursor between distant paint
+/// regions while scrolling; animating those jumps draws huge trail quads.
+const WARP_MOVE_MAX_CELLS: f32 = 8.0;
+
+/// Nearby terminal-cursor movement should stay visually responsive. This
+/// includes editor/file-manager vertical `j`/`k` movement, not only typing.
+const SHORT_MOVE_MAX_CELLS: f32 = 2.001;
+
 /// Trail size 0.0–1.0.
 /// 1.0 = max stretch (leading edge jumps instantly,
 /// trailing edge lags most).
@@ -197,6 +206,8 @@ pub struct TrailCursor {
     jump_from_cy: f32,
     /// One-shot flag: set when destination changes, consumed in `animate`.
     jumped: bool,
+    /// One-shot flag: snap the next jump instead of drawing a trail.
+    snap_next_jump: bool,
     /// True until the first real destination is set — first frame teleports.
     first_frame: bool,
     animating: bool,
@@ -219,6 +230,7 @@ impl TrailCursor {
             jump_from_cx: -1e6,
             jump_from_cy: -1e6,
             jumped: false,
+            snap_next_jump: false,
             first_frame: true,
             animating: false,
         }
@@ -245,6 +257,14 @@ impl TrailCursor {
         {
             self.jump_from_cx = self.prev_dest_cx;
             self.jump_from_cy = self.prev_dest_cy;
+            self.snap_next_jump = cursor_jump_should_snap(
+                self.jump_from_cx,
+                self.jump_from_cy,
+                cx,
+                cy,
+                cell_width,
+                cell_height,
+            );
             self.prev_dest_cx = cx;
             self.prev_dest_cy = cy;
             self.jumped = true;
@@ -265,10 +285,11 @@ impl TrailCursor {
 
         // First frame: teleport all corners to destination without
         // animation (matches neovide's `immediate_movement`).
-        let immediate = self.first_frame;
+        let immediate = self.first_frame || self.snap_next_jump;
         if self.first_frame {
             self.first_frame = false;
         }
+        self.snap_next_jump = false;
 
         // On jump: compute ranking and set animation lengths (one-shot).
         if self.jumped && !immediate {
@@ -303,7 +324,7 @@ impl TrailCursor {
         } else {
             0.0
         };
-        let is_short = jump_x <= 2.001 && jump_y < 0.001;
+        let is_short = cursor_jump_distance_cells(jump_x, jump_y) <= SHORT_MOVE_MAX_CELLS;
 
         if is_short {
             let t = ANIMATION_LENGTH.min(SHORT_ANIMATION_LENGTH);
@@ -418,5 +439,86 @@ impl TrailCursor {
     #[inline]
     pub fn is_animating(&self) -> bool {
         self.animating
+    }
+}
+
+#[inline]
+fn cursor_jump_distance_cells(jump_x: f32, jump_y: f32) -> f32 {
+    jump_x.hypot(jump_y)
+}
+
+#[inline]
+fn cursor_jump_should_snap(
+    from_cx: f32,
+    from_cy: f32,
+    to_cx: f32,
+    to_cy: f32,
+    cell_width: f32,
+    cell_height: f32,
+) -> bool {
+    if from_cx < -999_999.0 || from_cy < -999_999.0 {
+        return true;
+    }
+
+    let jump_x = if cell_width > 0.0 {
+        ((to_cx - from_cx) / cell_width).abs()
+    } else {
+        0.0
+    };
+    let jump_y = if cell_height > 0.0 {
+        ((to_cy - from_cy) / cell_height).abs()
+    } else {
+        0.0
+    };
+
+    cursor_jump_distance_cells(jump_x, jump_y) > WARP_MOVE_MAX_CELLS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seed_cursor(cursor: &mut TrailCursor, cell_width: f32, cell_height: f32) {
+        cursor.set_destination(0.0, 0.0, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
+    }
+
+    #[test]
+    fn one_row_vertical_move_uses_short_animation() {
+        let cell_width = 10.0;
+        let cell_height = 20.0;
+        let mut cursor = TrailCursor::new();
+        seed_cursor(&mut cursor, cell_width, cell_height);
+
+        cursor.set_destination(0.0, cell_height, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
+
+        for corner in &cursor.corners {
+            assert_eq!(corner.anim_length, SHORT_ANIMATION_LENGTH);
+        }
+        assert!(cursor.is_animating());
+    }
+
+    #[test]
+    fn large_cursor_jump_snaps_without_trail_animation() {
+        let cell_width = 10.0;
+        let cell_height = 20.0;
+        let mut cursor = TrailCursor::new();
+        seed_cursor(&mut cursor, cell_width, cell_height);
+
+        cursor.set_destination(0.0, cell_height * 20.0, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
+
+        assert!(!cursor.is_animating());
+        assert_eq!(cursor.corners[0].x, 0.0);
+        assert_eq!(cursor.corners[0].y, cell_height * 20.0);
+        assert_eq!(cursor.corners[2].x, cell_width);
+        assert_eq!(cursor.corners[2].y, cell_height * 21.0);
+    }
+
+    #[test]
+    fn diagonal_redraw_jump_exceeds_snap_threshold() {
+        assert!(cursor_jump_should_snap(5.0, 10.0, 205.0, 410.0, 10.0, 20.0));
+        assert!(!cursor_jump_should_snap(5.0, 10.0, 5.0, 30.0, 10.0, 20.0));
     }
 }
