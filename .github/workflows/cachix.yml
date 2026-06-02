@@ -40,12 +40,18 @@ jobs:
         with:
           name: luccahuguet-yazelix-terminal
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          skipPush: true
           pushFilter: '(-source$|\.drv$)'
       - name: Build terminal packages
         run: |
           nix build \
             .#packages.x86_64-linux.yazelix-terminal \
             .#packages.x86_64-linux.yazelix-terminal-fast \
+            --no-link \
+            --print-out-paths \
             --max-jobs auto \
             --build-max-jobs auto \
-            --print-build-logs
+            | tee "$RUNNER_TEMP/yazelix-terminal-paths"
+      - name: Push terminal packages
+        run: |
+          xargs -r cachix push luccahuguet-yazelix-terminal < "$RUNNER_TEMP/yazelix-terminal-paths"

@@ -29,7 +29,8 @@ Create the cache on Cachix if it does not exist:
 4. Use Cachix-managed signing unless there is a specific reason to own the
    signing key locally.
 
-Create a per-cache write token:
+Create a per-cache write token. A read token or a token for another cache will
+let the workflow start but will fail when it tries to upload packages.
 
 1. Open the cache settings.
 2. Open access tokens.
@@ -111,6 +112,7 @@ Expected result: Nix downloads the `yazelix-terminal` and
 
 If Nix still builds locally, check:
 
+- the GitHub secret is a write token for `luccahuguet-yazelix-terminal`
 - the CI workflow completed for the same commit and system
 - the cache is public or the read token is configured
 - the trusted public key matches Cachix
