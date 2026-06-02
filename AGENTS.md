@@ -24,6 +24,7 @@ Use Beads Rust (`br`) in this repository.
 
 - Do not push unless the maintainer explicitly asks or a pushed experiment branch is useful for preserving/shareable work.
 - Prefer small, evidence-backed commits.
+- For maintainer dogfooding/runtime updates, prefer pushing the terminal commit and running the normal Home Manager switch when the branch state is shareable. A local `home-manager switch --override-input yazelix/yazelixTerminal path:...` can rebuild the full terminal package and package checks from scratch, so it is much slower and should be reserved for unpushed local experiments.
 - If a feature is unexpectedly hard, document source paths, failure evidence, rejected approaches, and the next viable pivot, then move to another bead.
 - For visual behavior, prefer screenshots or captured artifacts over log-only claims.
 - Preserve Rio, Ghostty, WezTerm, and other upstream license notices when code is copied or ported.
