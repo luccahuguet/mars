@@ -28,6 +28,16 @@ const SHORT_MOVE_MAX_CELLS: f32 = 2.001;
 const TRAIL_SIZE: f32 = 1.0;
 const DEPTH: f32 = 0.0;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrailCursorSnapshot {
+    /// Animated cursor top-left in physical pixels.
+    pub x: f32,
+    /// Animated cursor top-left in physical pixels.
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Clone)]
 struct Spring {
     position: f32,
@@ -444,6 +454,43 @@ impl TrailCursor {
     pub fn is_animating(&self) -> bool {
         self.animating
     }
+
+    #[inline]
+    pub fn animated_rect(&self) -> Option<TrailCursorSnapshot> {
+        if self.first_frame {
+            return None;
+        }
+
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for corner in &self.corners {
+            min_x = min_x.min(corner.x);
+            min_y = min_y.min(corner.y);
+            max_x = max_x.max(corner.x);
+            max_y = max_y.max(corner.y);
+        }
+
+        let width = max_x - min_x;
+        let height = max_y - min_y;
+        if !min_x.is_finite()
+            || !min_y.is_finite()
+            || !width.is_finite()
+            || !height.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+        {
+            return None;
+        }
+
+        Some(TrailCursorSnapshot {
+            x: min_x,
+            y: min_y,
+            width,
+            height,
+        })
+    }
 }
 
 #[inline]
@@ -489,6 +536,26 @@ mod tests {
     fn seed_cursor(cursor: &mut TrailCursor, cell_width: f32, cell_height: f32) {
         cursor.set_destination(0.0, 0.0, cell_width, cell_height);
         cursor.animate(cell_width, cell_height);
+    }
+
+    #[test]
+    fn first_frame_snapshot_matches_destination() {
+        let cell_width = 10.0;
+        let cell_height = 20.0;
+        let mut cursor = TrailCursor::new();
+
+        cursor.set_destination(30.0, 40.0, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
+
+        assert_eq!(
+            cursor.animated_rect(),
+            Some(TrailCursorSnapshot {
+                x: 30.0,
+                y: 40.0,
+                width: cell_width,
+                height: cell_height,
+            })
+        );
     }
 
     #[test]

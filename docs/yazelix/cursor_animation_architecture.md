@@ -10,9 +10,13 @@ Rio's native `trail-cursor` is the primary Yazelix Terminal cursor animation.
 It stays enabled in the packaged `full`/`default` profile.
 
 Ghostty-compatible `custom-shader` cursor presets remain supported, packaged,
-and tested, but they are opt-in through the `shaders` profile. They are not part
-of the default dogfooding profile because they add a second cursor-animation
-owner on top of Rio's trail.
+and tested, but they are opt-in through the `shaders` profile.
+
+When the shader profile is used with `trail-cursor = true`, Rio's trail cursor
+is still the cursor motion owner. The Ghostty shader uniform path consumes the
+Rio trail's animated cursor rectangle and marks that cursor motion as externally
+animated, so shader cursor movement does not open a separate redraw window or
+compute an independent cursor transition.
 
 ## Evidence
 
@@ -26,14 +30,17 @@ owner on top of Rio's trail.
   generated `yzxterm` config while `trail-cursor = true` stayed enabled. The
   bug later reproduced without custom shaders, so shader stacking is not the
   proven root cause.
-- Local code has two independent animation paths:
+- Before `yzt-unify-rio-trail-shader-cursor-cho`, local code had two
+  independent animation paths:
   - `frontends/rioterm/src/renderer/trail_cursor.rs` owns Rio's spring trail.
   - `sugarloaf/src/components/ghostty_shaders/mod.rs` owns shader time,
     previous/current cursor uniforms, and shader animation invalidation.
 
-That combination is useful for compatibility testing, but it is not an elegant
-default cursor architecture. The default should have one cursor motion owner,
-even though the remaining focus catch-up bug still needs separate investigation.
+That combination was useful for compatibility testing, but it was not an
+elegant cursor architecture. The current path keeps one cursor motion owner:
+Rio trail drives motion, while the shader runtime remains responsible for
+postprocess time, colors, palette, focus, extra cursors, and shader-only cursor
+motion when `trail-cursor` is disabled.
 
 ## Profiles
 
@@ -48,8 +55,20 @@ diagnostic. It composes with each profile, but it does not imply shader use.
 
 ## Integration Policy
 
-Future shader work should build on top of Rio trail instead of replacing it.
-That means one of these designs:
+Shader work should build on top of Rio trail instead of replacing it.
+The implemented integration is:
+
+- `TrailCursor::animated_rect()` exposes the Rio trail's animated cursor
+  rectangle in drawable pixels.
+- `screen::render` feeds that rectangle into `GhosttyShaderFrameState.cursor`
+  for the active one-cell cursor when `trail-cursor` is enabled.
+- `GhosttyShaderFrameState.cursor_externally_animated` tells the shader runtime
+  to ignore cursor-rect motion for redraw rearming and to keep
+  `iPreviousCursor == iCurrentCursor` for externally animated cursor motion.
+- Wider OSC 66 cursor extents and shader-only configurations keep the existing
+  Ghostty previous/current cursor transition behavior.
+
+Acceptable future designs:
 
 - non-cursor postprocess shaders that treat the already-rendered Rio trail in
   `iChannel0` as part of the terminal frame
@@ -58,8 +77,8 @@ That means one of these designs:
 - an explicit compatibility mode that intentionally stacks Ghostty cursor
   shaders over Rio trail for parity investigations
 
-The default profile must not compute an independent Ghostty cursor trail while
-Rio's trail is already active.
+The default profile must not enable `custom-shader`, and the shader profile must
+not compute an independent Ghostty cursor trail while Rio's trail is active.
 
 ## Validation Matrix
 

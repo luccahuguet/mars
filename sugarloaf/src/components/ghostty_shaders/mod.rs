@@ -115,6 +115,7 @@ pub struct GhosttyShaderCursor {
 pub struct GhosttyShaderFrameState {
     pub cursor: Option<GhosttyShaderCursor>,
     pub extra_cursors: Vec<GhosttyShaderCursor>,
+    pub cursor_externally_animated: bool,
     pub cursor_visible: bool,
     pub focus: bool,
     pub palette: [[f32; 4]; 256],
@@ -131,6 +132,7 @@ impl Default for GhosttyShaderFrameState {
         Self {
             cursor: None,
             extra_cursors: Vec::new(),
+            cursor_externally_animated: false,
             cursor_visible: false,
             focus: false,
             palette: [[0.0; 4]; 256],
@@ -406,23 +408,35 @@ impl GhosttyShaderBrush {
         }
 
         if let Some(cursor) = self.frame_state.cursor {
-            let cursor_changed = self.uniforms.current_cursor != cursor.rect
-                || self.uniforms.current_cursor_color != cursor.color;
-            if cursor_changed {
-                if cursor_transition_should_snap(
-                    self.uniforms.current_cursor,
-                    cursor.rect,
-                ) {
-                    self.uniforms.previous_cursor = cursor.rect;
-                    self.uniforms.previous_cursor_color = cursor.color;
-                } else {
-                    self.uniforms.previous_cursor = self.uniforms.current_cursor;
-                    self.uniforms.previous_cursor_color =
-                        self.uniforms.current_cursor_color;
-                }
+            if self.frame_state.cursor_externally_animated {
+                let cursor_changed = self.uniforms.current_cursor != cursor.rect
+                    || self.uniforms.current_cursor_color != cursor.color;
+                self.uniforms.previous_cursor = cursor.rect;
+                self.uniforms.previous_cursor_color = cursor.color;
                 self.uniforms.current_cursor = cursor.rect;
                 self.uniforms.current_cursor_color = cursor.color;
-                self.uniforms.cursor_change_time = time;
+                if cursor_changed {
+                    self.uniforms.cursor_change_time = time;
+                }
+            } else {
+                let cursor_changed = self.uniforms.current_cursor != cursor.rect
+                    || self.uniforms.current_cursor_color != cursor.color;
+                if cursor_changed {
+                    if cursor_transition_should_snap(
+                        self.uniforms.current_cursor,
+                        cursor.rect,
+                    ) {
+                        self.uniforms.previous_cursor = cursor.rect;
+                        self.uniforms.previous_cursor_color = cursor.color;
+                    } else {
+                        self.uniforms.previous_cursor = self.uniforms.current_cursor;
+                        self.uniforms.previous_cursor_color =
+                            self.uniforms.current_cursor_color;
+                    }
+                    self.uniforms.current_cursor = cursor.rect;
+                    self.uniforms.current_cursor_color = cursor.color;
+                    self.uniforms.cursor_change_time = time;
+                }
             }
 
             let style = cursor.style.as_uniform_value();
@@ -469,15 +483,22 @@ fn shader_animation_inputs_changed(
         return current.cursor.is_some() || !current.extra_cursors.is_empty();
     }
 
-    cursor_pair_changed(previous.cursor, current.cursor)
-        || extra_cursor_pair_changed(&previous.extra_cursors, &current.extra_cursors)
+    cursor_pair_changed(
+        previous.cursor,
+        current.cursor,
+        previous.cursor_externally_animated && current.cursor_externally_animated,
+    ) || extra_cursor_pair_changed(&previous.extra_cursors, &current.extra_cursors)
 }
 
 fn cursor_pair_changed(
     previous: Option<GhosttyShaderCursor>,
     current: Option<GhosttyShaderCursor>,
+    externally_animated: bool,
 ) -> bool {
     match (previous, current) {
+        (Some(previous), Some(current)) if externally_animated => {
+            previous.color != current.color || previous.style != current.style
+        }
         (Some(previous), Some(current)) => previous != current,
         _ => false,
     }
@@ -836,6 +857,62 @@ mod tests {
         brush.update_frame_state(state);
 
         assert!(brush.needs_redraw());
+    }
+
+    #[test]
+    fn externally_animated_cursor_move_does_not_request_redraw_window() {
+        let mut brush = GhosttyShaderBrush::default();
+        let first = GhosttyShaderCursor {
+            rect: [10.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        };
+        let second = GhosttyShaderCursor {
+            rect: [18.0, 20.0, 8.0, 16.0],
+            ..first
+        };
+        let mut state = GhosttyShaderFrameState {
+            cursor: Some(first),
+            cursor_visible: true,
+            cursor_externally_animated: true,
+            ..GhosttyShaderFrameState::default()
+        };
+        brush.update_frame_state(state.clone());
+        brush.animation_until = None;
+
+        state.cursor = Some(second);
+        brush.update_frame_state(state);
+
+        assert!(!brush.needs_redraw());
+    }
+
+    #[test]
+    fn externally_animated_cursor_uniforms_do_not_add_shader_transition() {
+        let mut brush = GhosttyShaderBrush::default();
+        let first = GhosttyShaderCursor {
+            rect: [10.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        };
+        let second = GhosttyShaderCursor {
+            rect: [18.0, 20.0, 8.0, 16.0],
+            ..first
+        };
+        let mut state = GhosttyShaderFrameState {
+            cursor: Some(first),
+            cursor_visible: true,
+            cursor_externally_animated: true,
+            ..GhosttyShaderFrameState::default()
+        };
+        brush.update_frame_state(state.clone());
+        brush.update_uniforms(800.0, 600.0);
+
+        state.cursor = Some(second);
+        brush.update_frame_state(state);
+        brush.update_uniforms(800.0, 600.0);
+
+        assert_eq!(brush.uniforms.previous_cursor, second.rect);
+        assert_eq!(brush.uniforms.current_cursor, second.rect);
     }
 
     #[test]

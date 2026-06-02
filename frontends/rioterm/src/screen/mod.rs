@@ -108,6 +108,31 @@ fn ghostty_cursor_rect(
     }
 }
 
+#[cfg(feature = "wgpu")]
+fn ghostty_cursor_rect_from_trail(
+    style: crate::grid_emit::CursorRenderStyle,
+    snapshot: crate::renderer::trail_cursor::TrailCursorSnapshot,
+    cell_h: f32,
+) -> [f32; 4] {
+    let x = snapshot.x;
+    let bottom = snapshot.y + snapshot.height;
+    let thickness =
+        crate::grid_emit::cursor_thickness(cell_h.round().max(1.0) as u32) as f32;
+
+    match style {
+        crate::grid_emit::CursorRenderStyle::Block
+        | crate::grid_emit::CursorRenderStyle::BlockHollow => {
+            [x, bottom, snapshot.width, snapshot.height]
+        }
+        crate::grid_emit::CursorRenderStyle::Bar => {
+            [x, bottom, thickness, snapshot.height]
+        }
+        crate::grid_emit::CursorRenderStyle::Underline => {
+            [x, bottom, snapshot.width, thickness]
+        }
+    }
+}
+
 fn cursor_color_u8(color: rio_backend::config::colors::ColorArray) -> [u8; 4] {
     [
         (color[0].clamp(0.0, 1.0) * 255.0) as u8,
@@ -3682,6 +3707,9 @@ impl Screen<'_> {
             );
         }
 
+        #[cfg(feature = "wgpu")]
+        let mut rio_trail_cursor_snapshot = None;
+
         if self.renderer.trail_cursor_enabled {
             let current_grid = self.context_manager.current_grid();
             let scaled_margin = current_grid.get_scaled_margin();
@@ -3720,6 +3748,12 @@ impl Screen<'_> {
                     scale_factor,
                     cursor_color,
                 );
+
+                #[cfg(feature = "wgpu")]
+                {
+                    rio_trail_cursor_snapshot =
+                        self.renderer.trail_cursor.animated_rect();
+                }
             }
         }
 
@@ -4358,16 +4392,31 @@ impl Screen<'_> {
                     let palette = std::array::from_fn(|idx| {
                         renderer_ref.color(idx, &p.term_colors)
                     });
+                    let cursor_can_use_rio_trail = p.cursor_extent.width <= 1
+                        && p.cursor_extent.height <= 1
+                        && rio_trail_cursor_snapshot.is_some();
                     let cursor = render_style.map(|style| {
+                        let rect = ghostty_cursor_rect(
+                            style,
+                            p.cursor_extent,
+                            panel_left,
+                            panel_top,
+                            p.cell_w,
+                            p.cell_h,
+                        );
+                        let rect = if cursor_can_use_rio_trail {
+                            rio_trail_cursor_snapshot
+                                .map(|snapshot| {
+                                    ghostty_cursor_rect_from_trail(
+                                        style, snapshot, p.cell_h,
+                                    )
+                                })
+                                .unwrap_or(rect)
+                        } else {
+                            rect
+                        };
                         rio_backend::sugarloaf::GhosttyShaderCursor {
-                            rect: ghostty_cursor_rect(
-                                style,
-                                p.cursor_extent,
-                                panel_left,
-                                panel_top,
-                                p.cell_w,
-                                p.cell_h,
-                            ),
+                            rect,
                             color: p.cursor_color,
                             style: ghostty_cursor_style(style),
                         }
@@ -4418,6 +4467,8 @@ impl Screen<'_> {
                         Some(rio_backend::sugarloaf::GhosttyShaderFrameState {
                             cursor,
                             extra_cursors,
+                            cursor_externally_animated: cursor_can_use_rio_trail
+                                && cursor.is_some(),
                             cursor_visible: cursor.is_some(),
                             focus: self.is_focused,
                             palette,
@@ -5082,6 +5133,35 @@ mod tests {
                 18.0,
             ),
             [34.0, 74.0, 8.0, thickness]
+        );
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn ghostty_cursor_rect_can_follow_rio_trail_snapshot() {
+        let snapshot = crate::renderer::trail_cursor::TrailCursorSnapshot {
+            x: 30.0,
+            y: 40.0,
+            width: 10.0,
+            height: 20.0,
+        };
+        let thickness = crate::grid_emit::cursor_thickness(20) as f32;
+
+        assert_eq!(
+            ghostty_cursor_rect_from_trail(
+                crate::grid_emit::CursorRenderStyle::Block,
+                snapshot,
+                20.0,
+            ),
+            [30.0, 60.0, 10.0, 20.0]
+        );
+        assert_eq!(
+            ghostty_cursor_rect_from_trail(
+                crate::grid_emit::CursorRenderStyle::Underline,
+                snapshot,
+                20.0,
+            ),
+            [30.0, 60.0, 10.0, thickness]
         );
     }
 
