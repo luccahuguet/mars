@@ -39,10 +39,15 @@ separate redraw window or compute an independent cursor transition.
   pipeline and generated `yzxterm` configuration load in fresh windows: a
   full-screen diagnostic shader tints the terminal, config reloads swap the
   diagnostic color, and fresh packaged windows can see
-  `YAZELIX_TERMINAL_RIO_TRAIL`. The same session shows
-  `iYazelixRioTrailActive` can remain false in launches where the shader branch
-  is otherwise live; the next fix target is the renderer-side gate that
-  populates `GhosttyShaderFrameState.rio_trail`.
+  `YAZELIX_TERMINAL_RIO_TRAIL`.
+- Follow-up probes on 2026-06-03 isolated the shader visibility failure to
+  uniform placement, not config or frame-state collection: a macro probe
+  rendered cyan, a base `iCursorVisible` probe rendered green, and an
+  `iYazelixRioTrailActive` probe rendered blue while
+  `YAZELIX_TERMINAL_SHADER_STATE_LOG` simultaneously reported
+  `rio_trail_active=true`. The Rio trail extension fields were therefore moved
+  before the large extra-cursor arrays in the std140 block and covered with
+  layout/order tests.
 
 That combination was useful for compatibility testing, but it was not an
 elegant cursor architecture. The current path keeps one cursor motion owner:
@@ -71,6 +76,7 @@ including:
 - the active cursor render style and blink visibility
 - the cursor visual extent width/height
 - whether Rio trail cursor state was available
+- the Rio trail snapshot stage and sampled cell size
 - the Rio trail gate reason: `active`, `no_rio_trail_snapshot`,
   `cursor_extent`, or `cursor_not_rendered`
 - whether the shader cursor is externally animated by Rio
@@ -100,7 +106,8 @@ The implemented integration is:
 ## Rio Trail Shader ABI
 
 The Ghostty-compatible uniforms keep their original meaning. The Yazelix
-extension is appended to the std140 uniform block:
+extension is declared in the same std140 uniform block before the large
+extra-cursor arrays:
 
 | Uniform | Meaning |
 | --- | --- |

@@ -59,16 +59,15 @@ layout(set = 0, binding = 2, std140) uniform Globals {
     vec3  iSelectionForegroundColor;
     vec3  iSelectionBackgroundColor;
     int   iYazelixExtraCursorCount;
-    vec4  iYazelixExtraCursors[256];
-    vec4  iYazelixExtraCursorColors[256];
-    ivec4 iYazelixExtraCursorStyles[256];
     int   iYazelixRioTrailActive;
     int   iYazelixRioTrailAnimating;
     int   iYazelixRioTrailPad0;
-    int   iYazelixRioTrailPad1;
     vec4  iYazelixRioTrailDestinationCursor;
     vec4  iYazelixRioTrailAnimatedCursor;
     vec4  iYazelixRioTrailCorners[4];
+    vec4  iYazelixExtraCursors[256];
+    vec4  iYazelixExtraCursorColors[256];
+    ivec4 iYazelixExtraCursorStyles[256];
 };
 
 #define CURSORSTYLE_BLOCK        0
@@ -205,16 +204,15 @@ struct GhosttyShaderUniforms {
     selection_foreground_color: [f32; 4],
     selection_background_color: [f32; 4],
     yazelix_extra_cursor_count: i32,
-    _pad_yazelix_extra_cursor_count: [i32; 3],
-    yazelix_extra_cursors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
-    yazelix_extra_cursor_colors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
-    yazelix_extra_cursor_styles: [[i32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
     yazelix_rio_trail_active: i32,
     yazelix_rio_trail_animating: i32,
-    _pad_yazelix_rio_trail_flags: [i32; 2],
+    _pad_yazelix_rio_trail_flags: i32,
     yazelix_rio_trail_destination_cursor: [f32; 4],
     yazelix_rio_trail_animated_cursor: [f32; 4],
     yazelix_rio_trail_corners: [[f32; 4]; 4],
+    yazelix_extra_cursors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
+    yazelix_extra_cursor_colors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
+    yazelix_extra_cursor_styles: [[i32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
 }
 
 impl Default for GhosttyShaderUniforms {
@@ -801,7 +799,7 @@ mod tests {
     #[test]
     fn ghostty_uniform_layout_matches_std140_offsets() {
         // Defends: Ghostty cursor shader files depend on these std140 offsets.
-        assert_eq!(std::mem::size_of::<GhosttyShaderUniforms>(), 16912);
+        assert_eq!(std::mem::size_of::<GhosttyShaderUniforms>(), 16896);
         assert_eq!(bytemuck::offset_of!(GhosttyShaderUniforms, resolution), 0);
         assert_eq!(bytemuck::offset_of!(GhosttyShaderUniforms, time), 12);
         assert_eq!(
@@ -827,14 +825,18 @@ mod tests {
         );
         assert_eq!(
             bytemuck::offset_of!(GhosttyShaderUniforms, yazelix_rio_trail_active),
-            16800
+            4500
         );
         assert_eq!(
             bytemuck::offset_of!(
                 GhosttyShaderUniforms,
                 yazelix_rio_trail_destination_cursor
             ),
-            16816
+            4512
+        );
+        assert_eq!(
+            bytemuck::offset_of!(GhosttyShaderUniforms, yazelix_extra_cursors),
+            4608
         );
     }
 
@@ -917,6 +919,24 @@ void mainImage(out vec4 color, in vec2 fragCoord) {
 
         validate_shadertoy_fragment_glsl(&source)
             .expect("Rio trail extension uniforms should validate as user shader reads");
+    }
+
+    #[test]
+    fn rio_trail_extension_uniforms_precede_extra_cursor_arrays() {
+        // Defends: drivers/Naga paths observed during dogfooding failed to
+        // read the Rio extension when it lived after the large extra-cursor
+        // arrays at the tail of the std140 block.
+        let active = SHADERTOY_PREFIX
+            .find("iYazelixRioTrailActive")
+            .expect("Rio trail active uniform should exist");
+        let extra_cursors = SHADERTOY_PREFIX
+            .find("iYazelixExtraCursors")
+            .expect("extra cursor array uniform should exist");
+
+        assert!(
+            active < extra_cursors,
+            "Rio trail uniforms must be declared before extra cursor arrays"
+        );
     }
 
     #[test]

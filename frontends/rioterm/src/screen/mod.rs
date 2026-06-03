@@ -3763,6 +3763,16 @@ impl Screen<'_> {
 
         #[cfg(feature = "wgpu")]
         let mut rio_trail_cursor_state = None;
+        #[cfg(feature = "wgpu")]
+        let mut rio_trail_snapshot_stage = if self.renderer.trail_cursor_enabled {
+            "enabled_not_sampled"
+        } else {
+            "trail_disabled"
+        };
+        #[cfg(feature = "wgpu")]
+        let mut rio_trail_cell_width_px = 0;
+        #[cfg(feature = "wgpu")]
+        let mut rio_trail_cell_height_px = 0;
 
         if self.renderer.trail_cursor_enabled {
             let current_grid = self.context_manager.current_grid();
@@ -3774,6 +3784,11 @@ impl Screen<'_> {
                 // shader uses; line_height is already baked in.
                 let cell_width = layout.cell.cell_width as f32;
                 let cell_height = layout.cell.cell_height as f32;
+                #[cfg(feature = "wgpu")]
+                {
+                    rio_trail_cell_width_px = layout.cell.cell_width;
+                    rio_trail_cell_height_px = layout.cell.cell_height;
+                }
                 let scale_factor = self.sugarloaf.scale_factor();
 
                 let panel_rect = current_item.layout_rect;
@@ -3809,6 +3824,16 @@ impl Screen<'_> {
                         .renderer
                         .trail_cursor
                         .shader_state(cell_width, cell_height);
+                    rio_trail_snapshot_stage = if rio_trail_cursor_state.is_some() {
+                        "snapshot"
+                    } else {
+                        "shader_state_none"
+                    };
+                }
+            } else {
+                #[cfg(feature = "wgpu")]
+                {
+                    rio_trail_snapshot_stage = "no_current_item";
                 }
             }
         }
@@ -4531,6 +4556,9 @@ impl Screen<'_> {
                             cursor_extent_height: p.cursor_extent.height,
                             render_style: ghostty_shader_render_style_label(render_style),
                             rio_trail_snapshot_present,
+                            rio_trail_snapshot_stage,
+                            rio_trail_cell_width_px,
+                            rio_trail_cell_height_px,
                             rio_trail_gate: ghostty_rio_trail_gate_label(
                                 render_style,
                                 p.cursor_extent,

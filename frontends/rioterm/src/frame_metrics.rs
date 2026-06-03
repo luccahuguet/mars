@@ -40,6 +40,9 @@ pub(crate) struct ShaderStateMetrics {
     pub(crate) cursor_extent_height: u16,
     pub(crate) render_style: &'static str,
     pub(crate) rio_trail_snapshot_present: bool,
+    pub(crate) rio_trail_snapshot_stage: &'static str,
+    pub(crate) rio_trail_cell_width_px: u32,
+    pub(crate) rio_trail_cell_height_px: u32,
     pub(crate) rio_trail_gate: &'static str,
     pub(crate) rio_trail_active: bool,
     pub(crate) rio_trail_animating: bool,
@@ -261,12 +264,19 @@ impl ShaderStateLogger {
             "rio_trail_gate",
             metrics.rio_trail_gate,
         )?;
+        write_json_string_field(
+            &mut self.file,
+            "rio_trail_snapshot_stage",
+            metrics.rio_trail_snapshot_stage,
+        )?;
         writeln!(
             self.file,
             "\"route_id\":{},\"focused\":{},\"cursor_visible\":{},\
              \"cursor_blinking\":{},\"cursor_blink_visible\":{},\
              \"cursor_extent_width\":{},\"cursor_extent_height\":{},\
-             \"rio_trail_snapshot_present\":{},\"rio_trail_active\":{},\
+             \"rio_trail_snapshot_present\":{},\
+             \"rio_trail_cell_width_px\":{},\"rio_trail_cell_height_px\":{},\
+             \"rio_trail_active\":{},\
              \"rio_trail_animating\":{},\"cursor_shader_present\":{},\
              \"cursor_externally_animated\":{},\"extra_cursor_count\":{}}}",
             metrics.route_id,
@@ -277,6 +287,8 @@ impl ShaderStateLogger {
             metrics.cursor_extent_width,
             metrics.cursor_extent_height,
             metrics.rio_trail_snapshot_present,
+            metrics.rio_trail_cell_width_px,
+            metrics.rio_trail_cell_height_px,
             metrics.rio_trail_active,
             metrics.rio_trail_animating,
             metrics.cursor_shader_present,
