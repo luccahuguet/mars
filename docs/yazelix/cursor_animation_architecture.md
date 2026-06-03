@@ -35,6 +35,13 @@ separate redraw window or compute an independent cursor transition.
   - `frontends/rioterm/src/renderer/trail_cursor.rs` owns Rio's spring trail.
   - `sugarloaf/src/components/ghostty_shaders/mod.rs` owns shader time,
     previous/current cursor uniforms, and shader animation invalidation.
+- Runtime diagnostics on 2026-06-03 show that the WebGPU `custom-shader`
+  pipeline and generated `yzxterm` configuration load in fresh windows: a
+  full-screen diagnostic shader tints the terminal, and config reloads swap the
+  diagnostic color. The same session shows that the guarded Rio-trail shader
+  branch is not visible in packaged launches yet; the next fix target is the
+  shader wrapper ABI that exposes `YAZELIX_TERMINAL_RIO_TRAIL` and
+  `iYazelixRioTrail*` uniforms to user shader text.
 
 That combination was useful for compatibility testing, but it was not an
 elegant cursor architecture. The current path keeps one cursor motion owner:

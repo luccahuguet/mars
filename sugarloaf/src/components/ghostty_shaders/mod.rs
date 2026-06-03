@@ -28,6 +28,8 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32
 
 const SHADERTOY_PREFIX: &str = r#"#version 450
 
+#define YAZELIX_TERMINAL_RIO_TRAIL 1
+
 layout(set = 0, binding = 2, std140) uniform Globals {
     vec3  iResolution;
     float iTime;
@@ -68,8 +70,6 @@ layout(set = 0, binding = 2, std140) uniform Globals {
     vec4  iYazelixRioTrailAnimatedCursor;
     vec4  iYazelixRioTrailCorners[4];
 };
-
-#define YAZELIX_TERMINAL_RIO_TRAIL 1
 
 #define CURSORSTYLE_BLOCK        0
 #define CURSORSTYLE_BLOCK_HOLLOW 1
@@ -874,6 +874,49 @@ mod tests {
 
         validate_shadertoy_fragment_glsl(&source)
             .expect("Ghostty cursor probe should validate as WGPU GLSL");
+    }
+
+    #[test]
+    fn rio_trail_extension_macro_selects_yazelix_branch() {
+        // Defends: user shader source can guard Rio-specific reads behind the
+        // Yazelix Terminal extension macro.
+        let source = build_shadertoy_glsl(
+            r#"
+void mainImage(out vec4 color, in vec2 fragCoord) {
+#ifndef YAZELIX_TERMINAL_RIO_TRAIL
+    color = vec4(YAZELIX_TERMINAL_RIO_TRAIL_MISSING);
+#else
+    vec2 cursor = iYazelixRioTrailDestinationCursor.xy / max(iResolution.xy, vec2(1.0));
+    color = vec4(cursor, float(iYazelixRioTrailActive), 1.0);
+#endif
+}
+"#,
+        );
+
+        validate_shadertoy_fragment_glsl(&source)
+            .expect("Rio trail extension macro should expose Yazelix branch");
+    }
+
+    #[test]
+    fn rio_trail_extension_uniforms_validate_as_user_shader_reads() {
+        // Defends: direct reads from the Rio trail extension are part of the
+        // custom-shader ABI, not only strings in the generated prefix.
+        let source = build_shadertoy_glsl(
+            r#"
+void mainImage(out vec4 color, in vec2 fragCoord) {
+    vec2 pixel = fragCoord / max(iResolution.xy, vec2(1.0));
+    float active = float(iYazelixRioTrailActive);
+    float animating = float(iYazelixRioTrailAnimating);
+    vec2 destination = iYazelixRioTrailDestinationCursor.xy / max(iResolution.xy, vec2(1.0));
+    vec2 animated = iYazelixRioTrailAnimatedCursor.xy / max(iResolution.xy, vec2(1.0));
+    vec2 corner = iYazelixRioTrailCorners[0].xy / max(iResolution.xy, vec2(1.0));
+    color = vec4(pixel.x + destination.x + animated.x, pixel.y + corner.y, active, animating);
+}
+"#,
+        );
+
+        validate_shadertoy_fragment_glsl(&source)
+            .expect("Rio trail extension uniforms should validate as user shader reads");
     }
 
     #[test]
