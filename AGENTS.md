@@ -26,6 +26,7 @@ Use Beads Rust (`br`) in this repository.
 - Prefer small, evidence-backed commits.
 - For maintainer dogfooding/runtime updates, prefer pushing the terminal commit and running the normal Home Manager switch when the branch state is shareable. A local `home-manager switch --override-input yazelix/yazelixTerminal path:...` can rebuild the full terminal package and package checks from scratch, so it is much slower and should be reserved for unpushed local experiments.
 - Do not run yzxterm-related compile-heavy commands (`cargo`, `nix build`, or Home Manager switch) again until the rebuild-speed optimization beads are addressed, unless the maintainer explicitly overrides this gate for a specific command.
+- After the rebuild-speed gate is addressed, use the main Yazelix repo's explicit fast outputs `#runtime_yzxterm_fast` and `#yzxterm_fast` for maintainer dogfooding; keep the normal checked `#runtime_yzxterm` path as release evidence.
 - If a feature is unexpectedly hard, document source paths, failure evidence, rejected approaches, and the next viable pivot, then move to another bead.
 - For visual behavior, prefer screenshots or captured artifacts over log-only claims.
 - Preserve Rio, Ghostty, WezTerm, and other upstream license notices when code is copied or ported.

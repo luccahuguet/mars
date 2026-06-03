@@ -61,6 +61,18 @@ and sets `doCheck = false`. The fast profile disables LTO, avoids packed full
 debug info, uses many codegen units, and keeps only modest `opt-level = 1`
 optimization. It is for maintainer smoke testing, not release evidence.
 
+When dogfooding through the main Yazelix runtime, use the main repo's explicit
+fast outputs instead of overriding the child input into the normal release
+runtime:
+
+```sh
+nix build .#runtime_yzxterm_fast --no-link --no-write-lock-file
+nix run .#yzxterm_fast -- launch
+```
+
+The normal main-repo `#runtime_yzxterm` and Home Manager default path still use
+the checked `yazelix-terminal` package and remain the release gate.
+
 Wrapper-only changes should rebuild only the cheap `yazelix-terminal` wrapper
 derivation. The Rust compile lives in `yazelix-terminal-unwrapped`, while the
 desktop file, icon, terminfo, app-id wrapper, and graphics-wrapper launcher live
