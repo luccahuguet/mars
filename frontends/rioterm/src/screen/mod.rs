@@ -133,6 +133,30 @@ fn ghostty_cursor_rect_from_trail(
     }
 }
 
+#[cfg(feature = "wgpu")]
+fn ghostty_rio_trail_state(
+    style: crate::grid_emit::CursorRenderStyle,
+    state: crate::renderer::trail_cursor::TrailCursorShaderState,
+    cell_h: f32,
+) -> rio_backend::sugarloaf::GhosttyShaderRioTrail {
+    rio_backend::sugarloaf::GhosttyShaderRioTrail {
+        destination_cursor: ghostty_cursor_rect_from_trail(
+            style,
+            state.destination_rect,
+            cell_h,
+        ),
+        animated_cursor: ghostty_cursor_rect_from_trail(
+            style,
+            state.animated_rect,
+            cell_h,
+        ),
+        corners: std::array::from_fn(|idx| {
+            [state.corners[idx][0], state.corners[idx][1], 0.0, 0.0]
+        }),
+        animating: state.animating,
+    }
+}
+
 fn cursor_color_u8(color: rio_backend::config::colors::ColorArray) -> [u8; 4] {
     [
         (color[0].clamp(0.0, 1.0) * 255.0) as u8,
@@ -3708,7 +3732,7 @@ impl Screen<'_> {
         }
 
         #[cfg(feature = "wgpu")]
-        let mut rio_trail_cursor_snapshot = None;
+        let mut rio_trail_cursor_state = None;
 
         if self.renderer.trail_cursor_enabled {
             let current_grid = self.context_manager.current_grid();
@@ -3751,8 +3775,10 @@ impl Screen<'_> {
 
                 #[cfg(feature = "wgpu")]
                 {
-                    rio_trail_cursor_snapshot =
-                        self.renderer.trail_cursor.animated_rect();
+                    rio_trail_cursor_state = self
+                        .renderer
+                        .trail_cursor
+                        .shader_state(cell_width, cell_height);
                 }
             }
         }
@@ -4394,7 +4420,7 @@ impl Screen<'_> {
                     });
                     let cursor_can_use_rio_trail = p.cursor_extent.width <= 1
                         && p.cursor_extent.height <= 1
-                        && rio_trail_cursor_snapshot.is_some();
+                        && rio_trail_cursor_state.is_some();
                     let cursor = render_style.map(|style| {
                         let rect = ghostty_cursor_rect(
                             style,
@@ -4404,23 +4430,21 @@ impl Screen<'_> {
                             p.cell_w,
                             p.cell_h,
                         );
-                        let rect = if cursor_can_use_rio_trail {
-                            rio_trail_cursor_snapshot
-                                .map(|snapshot| {
-                                    ghostty_cursor_rect_from_trail(
-                                        style, snapshot, p.cell_h,
-                                    )
-                                })
-                                .unwrap_or(rect)
-                        } else {
-                            rect
-                        };
                         rio_backend::sugarloaf::GhosttyShaderCursor {
                             rect,
                             color: p.cursor_color,
                             style: ghostty_cursor_style(style),
                         }
                     });
+                    let rio_trail = if cursor_can_use_rio_trail {
+                        render_style.and_then(|style| {
+                            rio_trail_cursor_state.map(|state| {
+                                ghostty_rio_trail_state(style, state, p.cell_h)
+                            })
+                        })
+                    } else {
+                        None
+                    };
                     let extra_cursors = p
                         .extra_cursors
                         .iter()
@@ -4467,6 +4491,7 @@ impl Screen<'_> {
                         Some(rio_backend::sugarloaf::GhosttyShaderFrameState {
                             cursor,
                             extra_cursors,
+                            rio_trail,
                             cursor_externally_animated: cursor_can_use_rio_trail
                                 && cursor.is_some(),
                             cursor_visible: cursor.is_some(),
@@ -5163,6 +5188,46 @@ mod tests {
             ),
             [30.0, 60.0, 10.0, thickness]
         );
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn ghostty_rio_trail_state_exposes_destination_and_corners() {
+        let state = crate::renderer::trail_cursor::TrailCursorShaderState {
+            destination_rect: crate::renderer::trail_cursor::TrailCursorSnapshot {
+                x: 10.0,
+                y: 20.0,
+                width: 8.0,
+                height: 16.0,
+            },
+            animated_rect: crate::renderer::trail_cursor::TrailCursorSnapshot {
+                x: 6.0,
+                y: 20.0,
+                width: 12.0,
+                height: 16.0,
+            },
+            corners: [[6.0, 20.0], [18.0, 20.0], [18.0, 36.0], [6.0, 36.0]],
+            animating: true,
+        };
+
+        let rio_state = ghostty_rio_trail_state(
+            crate::grid_emit::CursorRenderStyle::Block,
+            state,
+            16.0,
+        );
+
+        assert_eq!(rio_state.destination_cursor, [10.0, 36.0, 8.0, 16.0]);
+        assert_eq!(rio_state.animated_cursor, [6.0, 36.0, 12.0, 16.0]);
+        assert_eq!(
+            rio_state.corners,
+            [
+                [6.0, 20.0, 0.0, 0.0],
+                [18.0, 20.0, 0.0, 0.0],
+                [18.0, 36.0, 0.0, 0.0],
+                [6.0, 36.0, 0.0, 0.0],
+            ]
+        );
+        assert!(rio_state.animating);
     }
 
     #[test]

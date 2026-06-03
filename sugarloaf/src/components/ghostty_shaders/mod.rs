@@ -60,7 +60,16 @@ layout(set = 0, binding = 2, std140) uniform Globals {
     vec4  iYazelixExtraCursors[256];
     vec4  iYazelixExtraCursorColors[256];
     ivec4 iYazelixExtraCursorStyles[256];
+    int   iYazelixRioTrailActive;
+    int   iYazelixRioTrailAnimating;
+    int   iYazelixRioTrailPad0;
+    int   iYazelixRioTrailPad1;
+    vec4  iYazelixRioTrailDestinationCursor;
+    vec4  iYazelixRioTrailAnimatedCursor;
+    vec4  iYazelixRioTrailCorners[4];
 };
+
+#define YAZELIX_TERMINAL_RIO_TRAIL 1
 
 #define CURSORSTYLE_BLOCK        0
 #define CURSORSTYLE_BLOCK_HOLLOW 1
@@ -111,10 +120,25 @@ pub struct GhosttyShaderCursor {
     pub style: GhosttyCursorStyle,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GhosttyShaderRioTrail {
+    /// Terminal cursor destination rectangle in Ghostty cursor-uniform
+    /// coordinates: x, bottom_y, width, height.
+    pub destination_cursor: [f32; 4],
+    /// Bounding rectangle of Rio's animated trail in Ghostty
+    /// cursor-uniform coordinates: x, bottom_y, width, height.
+    pub animated_cursor: [f32; 4],
+    /// Animated Rio trail corners in drawable-pixel coordinates,
+    /// ordered top-left, top-right, bottom-right, bottom-left.
+    pub corners: [[f32; 4]; 4],
+    pub animating: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct GhosttyShaderFrameState {
     pub cursor: Option<GhosttyShaderCursor>,
     pub extra_cursors: Vec<GhosttyShaderCursor>,
+    pub rio_trail: Option<GhosttyShaderRioTrail>,
     pub cursor_externally_animated: bool,
     pub cursor_visible: bool,
     pub focus: bool,
@@ -132,6 +156,7 @@ impl Default for GhosttyShaderFrameState {
         Self {
             cursor: None,
             extra_cursors: Vec::new(),
+            rio_trail: None,
             cursor_externally_animated: false,
             cursor_visible: false,
             focus: false,
@@ -184,6 +209,12 @@ struct GhosttyShaderUniforms {
     yazelix_extra_cursors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
     yazelix_extra_cursor_colors: [[f32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
     yazelix_extra_cursor_styles: [[i32; 4]; MAX_GHOSTTY_SHADER_EXTRA_CURSORS],
+    yazelix_rio_trail_active: i32,
+    yazelix_rio_trail_animating: i32,
+    _pad_yazelix_rio_trail_flags: [i32; 2],
+    yazelix_rio_trail_destination_cursor: [f32; 4],
+    yazelix_rio_trail_animated_cursor: [f32; 4],
+    yazelix_rio_trail_corners: [[f32; 4]; 4],
 }
 
 impl Default for GhosttyShaderUniforms {
@@ -405,6 +436,21 @@ impl GhosttyShaderBrush {
             self.uniforms.yazelix_extra_cursor_colors[idx] = cursor.color;
             self.uniforms.yazelix_extra_cursor_styles[idx][0] =
                 cursor.style.as_uniform_value();
+        }
+
+        if let Some(rio_trail) = self.frame_state.rio_trail {
+            self.uniforms.yazelix_rio_trail_active = 1;
+            self.uniforms.yazelix_rio_trail_animating = i32::from(rio_trail.animating);
+            self.uniforms.yazelix_rio_trail_destination_cursor =
+                rio_trail.destination_cursor;
+            self.uniforms.yazelix_rio_trail_animated_cursor = rio_trail.animated_cursor;
+            self.uniforms.yazelix_rio_trail_corners = rio_trail.corners;
+        } else {
+            self.uniforms.yazelix_rio_trail_active = 0;
+            self.uniforms.yazelix_rio_trail_animating = 0;
+            self.uniforms.yazelix_rio_trail_destination_cursor = [0.0; 4];
+            self.uniforms.yazelix_rio_trail_animated_cursor = [0.0; 4];
+            self.uniforms.yazelix_rio_trail_corners = [[0.0; 4]; 4];
         }
 
         if let Some(cursor) = self.frame_state.cursor {
@@ -755,7 +801,7 @@ mod tests {
     #[test]
     fn ghostty_uniform_layout_matches_std140_offsets() {
         // Defends: Ghostty cursor shader files depend on these std140 offsets.
-        assert_eq!(std::mem::size_of::<GhosttyShaderUniforms>(), 16800);
+        assert_eq!(std::mem::size_of::<GhosttyShaderUniforms>(), 16912);
         assert_eq!(bytemuck::offset_of!(GhosttyShaderUniforms, resolution), 0);
         assert_eq!(bytemuck::offset_of!(GhosttyShaderUniforms, time), 12);
         assert_eq!(
@@ -779,6 +825,17 @@ mod tests {
             bytemuck::offset_of!(GhosttyShaderUniforms, yazelix_extra_cursor_count),
             4496
         );
+        assert_eq!(
+            bytemuck::offset_of!(GhosttyShaderUniforms, yazelix_rio_trail_active),
+            16800
+        );
+        assert_eq!(
+            bytemuck::offset_of!(
+                GhosttyShaderUniforms,
+                yazelix_rio_trail_destination_cursor
+            ),
+            16816
+        );
     }
 
     #[test]
@@ -799,6 +856,9 @@ mod tests {
             "CURSORSTYLE_BLOCK",
             "iYazelixExtraCursorCount",
             "iYazelixExtraCursors",
+            "iYazelixRioTrailActive",
+            "iYazelixRioTrailDestinationCursor",
+            "YAZELIX_TERMINAL_RIO_TRAIL",
             "void main()",
         ] {
             assert!(source.contains(required), "missing {required}");
@@ -913,6 +973,74 @@ mod tests {
 
         assert_eq!(brush.uniforms.previous_cursor, second.rect);
         assert_eq!(brush.uniforms.current_cursor, second.rect);
+    }
+
+    #[test]
+    fn rio_trail_uniforms_are_zero_without_rio_trail_state() {
+        let mut brush = GhosttyShaderBrush::default();
+        let mut state = GhosttyShaderFrameState::default();
+        state.cursor = Some(GhosttyShaderCursor {
+            rect: [10.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        });
+
+        brush.update_frame_state(state);
+        brush.update_uniforms(800.0, 600.0);
+
+        assert_eq!(brush.uniforms.yazelix_rio_trail_active, 0);
+        assert_eq!(brush.uniforms.yazelix_rio_trail_animating, 0);
+        assert_eq!(
+            brush.uniforms.yazelix_rio_trail_destination_cursor,
+            [0.0; 4]
+        );
+        assert_eq!(brush.uniforms.yazelix_rio_trail_animated_cursor, [0.0; 4]);
+        assert_eq!(brush.uniforms.yazelix_rio_trail_corners, [[0.0; 4]; 4]);
+    }
+
+    #[test]
+    fn rio_trail_uniforms_expose_externally_animated_cursor_geometry() {
+        let mut brush = GhosttyShaderBrush::default();
+        let cursor = GhosttyShaderCursor {
+            rect: [18.0, 20.0, 8.0, 16.0],
+            color: [1.0, 0.0, 1.0, 1.0],
+            style: GhosttyCursorStyle::Block,
+        };
+        let rio_trail = GhosttyShaderRioTrail {
+            destination_cursor: cursor.rect,
+            animated_cursor: [10.0, 20.0, 16.0, 16.0],
+            corners: [
+                [10.0, 4.0, 0.0, 0.0],
+                [26.0, 4.0, 0.0, 0.0],
+                [26.0, 20.0, 0.0, 0.0],
+                [10.0, 20.0, 0.0, 0.0],
+            ],
+            animating: true,
+        };
+        let state = GhosttyShaderFrameState {
+            cursor: Some(cursor),
+            cursor_visible: true,
+            cursor_externally_animated: true,
+            rio_trail: Some(rio_trail),
+            ..GhosttyShaderFrameState::default()
+        };
+
+        brush.update_frame_state(state);
+        brush.update_uniforms(800.0, 600.0);
+
+        assert_eq!(brush.uniforms.current_cursor, cursor.rect);
+        assert_eq!(brush.uniforms.previous_cursor, cursor.rect);
+        assert_eq!(brush.uniforms.yazelix_rio_trail_active, 1);
+        assert_eq!(brush.uniforms.yazelix_rio_trail_animating, 1);
+        assert_eq!(
+            brush.uniforms.yazelix_rio_trail_destination_cursor,
+            rio_trail.destination_cursor
+        );
+        assert_eq!(
+            brush.uniforms.yazelix_rio_trail_animated_cursor,
+            rio_trail.animated_cursor
+        );
+        assert_eq!(brush.uniforms.yazelix_rio_trail_corners, rio_trail.corners);
     }
 
     #[test]

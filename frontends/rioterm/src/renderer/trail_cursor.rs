@@ -38,6 +38,18 @@ pub struct TrailCursorSnapshot {
     pub height: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TrailCursorShaderState {
+    /// Terminal cursor destination in physical pixels, top-left origin.
+    pub destination_rect: TrailCursorSnapshot,
+    /// Bounding box of the animated Rio trail corners in physical pixels.
+    pub animated_rect: TrailCursorSnapshot,
+    /// Animated trail corners in physical pixels, ordered top-left,
+    /// top-right, bottom-right, bottom-left.
+    pub corners: [[f32; 2]; 4],
+    pub animating: bool,
+}
+
 #[derive(Clone)]
 struct Spring {
     position: f32,
@@ -456,11 +468,34 @@ impl TrailCursor {
     }
 
     #[inline]
-    pub fn animated_rect(&self) -> Option<TrailCursorSnapshot> {
-        if self.first_frame {
+    pub fn shader_state(
+        &self,
+        cell_width: f32,
+        cell_height: f32,
+    ) -> Option<TrailCursorShaderState> {
+        if self.first_frame || cell_width <= 0.0 || cell_height <= 0.0 {
             return None;
         }
 
+        let animated_rect = self.animated_rect_from_corners()?;
+        let destination_rect = TrailCursorSnapshot {
+            x: self.dest_cx - cell_width * 0.5,
+            y: self.dest_cy - cell_height * 0.5,
+            width: cell_width,
+            height: cell_height,
+        };
+        let corners =
+            std::array::from_fn(|idx| [self.corners[idx].x, self.corners[idx].y]);
+
+        Some(TrailCursorShaderState {
+            destination_rect,
+            animated_rect,
+            corners,
+            animating: self.animating,
+        })
+    }
+
+    fn animated_rect_from_corners(&self) -> Option<TrailCursorSnapshot> {
         let mut min_x = f32::INFINITY;
         let mut min_y = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -539,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn first_frame_snapshot_matches_destination() {
+    fn shader_state_exposes_destination_rect_and_ordered_corners() {
         let cell_width = 10.0;
         let cell_height = 20.0;
         let mut cursor = TrailCursor::new();
@@ -548,12 +583,22 @@ mod tests {
         cursor.animate(cell_width, cell_height);
 
         assert_eq!(
-            cursor.animated_rect(),
-            Some(TrailCursorSnapshot {
-                x: 30.0,
-                y: 40.0,
-                width: cell_width,
-                height: cell_height,
+            cursor.shader_state(cell_width, cell_height),
+            Some(TrailCursorShaderState {
+                destination_rect: TrailCursorSnapshot {
+                    x: 30.0,
+                    y: 40.0,
+                    width: cell_width,
+                    height: cell_height,
+                },
+                animated_rect: TrailCursorSnapshot {
+                    x: 30.0,
+                    y: 40.0,
+                    width: cell_width,
+                    height: cell_height,
+                },
+                corners: [[30.0, 40.0], [40.0, 40.0], [40.0, 60.0], [30.0, 60.0],],
+                animating: false,
             })
         );
     }

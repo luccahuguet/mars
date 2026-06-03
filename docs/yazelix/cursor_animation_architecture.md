@@ -14,9 +14,9 @@ and tested, but they are opt-in through the `shaders` profile.
 
 When the shader profile is used with `trail-cursor = true`, Rio's trail cursor
 is still the cursor motion owner. The Ghostty shader uniform path consumes the
-Rio trail's animated cursor rectangle and marks that cursor motion as externally
-animated, so shader cursor movement does not open a separate redraw window or
-compute an independent cursor transition.
+Rio trail's animation state through additive Yazelix uniforms and marks cursor
+motion as externally animated, so shader cursor movement does not open a
+separate redraw window or compute an independent cursor transition.
 
 ## Evidence
 
@@ -58,22 +58,45 @@ diagnostic. It composes with each profile, but it does not imply shader use.
 Shader work should build on top of Rio trail instead of replacing it.
 The implemented integration is:
 
-- `TrailCursor::animated_rect()` exposes the Rio trail's animated cursor
-  rectangle in drawable pixels.
-- `screen::render` feeds that rectangle into `GhosttyShaderFrameState.cursor`
-  for the active one-cell cursor when `trail-cursor` is enabled.
+- `TrailCursor::shader_state()` exposes the terminal destination rectangle, the
+  animated trail bounding rectangle, the four animated trail corners, and the
+  animation-active bit.
+- `screen::render` keeps standard Ghostty cursor uniforms on the terminal
+  cursor destination, then feeds Rio trail geometry into
+  `GhosttyShaderFrameState.rio_trail` for the active one-cell cursor when
+  `trail-cursor` is enabled.
 - `GhosttyShaderFrameState.cursor_externally_animated` tells the shader runtime
-  to ignore cursor-rect motion for redraw rearming and to keep
+  to ignore cursor-rect motion for redraw rearming and to keep Ghostty
   `iPreviousCursor == iCurrentCursor` for externally animated cursor motion.
 - Wider OSC 66 cursor extents and shader-only configurations keep the existing
   Ghostty previous/current cursor transition behavior.
+- `YAZELIX_TERMINAL_RIO_TRAIL` is defined only by the Yazelix Terminal shader
+  wrapper. Yazelix cursor shaders must guard all Rio-specific uniform reads with
+  `#if defined(YAZELIX_TERMINAL_RIO_TRAIL)` so the same generated shader files
+  remain valid in Ghostty.
+
+## Rio Trail Shader ABI
+
+The Ghostty-compatible uniforms keep their original meaning. The Yazelix
+extension is appended to the std140 uniform block:
+
+| Uniform | Meaning |
+| --- | --- |
+| `iYazelixRioTrailActive` | non-zero when the active cursor is a one-cell cursor using Rio trail state |
+| `iYazelixRioTrailAnimating` | non-zero while Rio's trail spring is still visibly moving |
+| `iYazelixRioTrailDestinationCursor` | destination cursor rectangle as `x, bottom_y, width, height`, matching Ghostty cursor-uniform coordinates |
+| `iYazelixRioTrailAnimatedCursor` | bounding rectangle of Rio's animated trail as `x, bottom_y, width, height` |
+| `iYazelixRioTrailCorners[4]` | animated Rio trail corners as `x, y, 0, 0` in drawable pixels, top-left coordinate space, ordered top-left, top-right, bottom-right, bottom-left |
+
+Yazelix-owned cursor shaders use this extension to apply spread, glow, edge,
+and core masks over Rio's actual trail geometry. Third-party Ghostty shaders
+continue to read only the standard Ghostty uniforms unless they explicitly opt
+into the Yazelix extension.
 
 Acceptable future designs:
 
 - non-cursor postprocess shaders that treat the already-rendered Rio trail in
   `iChannel0` as part of the terminal frame
-- a Yazelix-specific shader uniform extension that exposes Rio's animated trail
-  state, so shader effects can decorate the same cursor animation
 - an explicit compatibility mode that intentionally stacks Ghostty cursor
   shaders over Rio trail for parity investigations
 
