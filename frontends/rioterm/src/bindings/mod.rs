@@ -92,11 +92,14 @@ impl<T: Eq> Binding<T> {
         mods: ModifiersState,
         input: &T,
     ) -> bool {
+        let binding_mods = local_binding_modifiers(self.mods);
+        let input_mods = local_binding_modifiers(mods);
+
         // Check input first since bindings are stored in one big list. This is
         // the most likely item to fail so prioritizing it here allows more
         // checks to be short circuited.
         self.trigger == *input
-            && self.mods == mods
+            && binding_mods == input_mods
             && mode.contains(self.mode.clone())
             && !mode.intersects(self.notmode.clone())
     }
@@ -133,6 +136,10 @@ impl<T: Eq> Binding<T> {
 
         true
     }
+}
+
+fn local_binding_modifiers(mods: ModifiersState) -> ModifiersState {
+    mods & !(ModifiersState::CAPS_LOCK | ModifiersState::NUM_LOCK)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -1280,6 +1287,39 @@ mod tests {
 
         assert!(!superset_mods.triggers_match(&subset_mods));
         assert!(!subset_mods.triggers_match(&superset_mods));
+    }
+
+    // Regression: NumLock must not make plain Backspace miss the local DEL binding and fall through as Ctrl-H.
+    #[test]
+    fn local_binding_matching_ignores_lock_state_modifiers() {
+        let binding = MockBinding::default();
+        let trigger = binding.trigger;
+
+        assert!(binding.is_triggered_by(
+            BindingMode::empty(),
+            ModifiersState::NUM_LOCK,
+            &trigger
+        ));
+        assert!(binding.is_triggered_by(
+            BindingMode::empty(),
+            ModifiersState::CAPS_LOCK | ModifiersState::NUM_LOCK,
+            &trigger
+        ));
+
+        let alt_binding = MockBinding {
+            mods: ModifiersState::ALT,
+            ..MockBinding::default()
+        };
+        assert!(alt_binding.is_triggered_by(
+            BindingMode::empty(),
+            ModifiersState::ALT | ModifiersState::NUM_LOCK,
+            &trigger
+        ));
+        assert!(!alt_binding.is_triggered_by(
+            BindingMode::empty(),
+            ModifiersState::SHIFT | ModifiersState::NUM_LOCK,
+            &trigger
+        ));
     }
 
     #[test]
