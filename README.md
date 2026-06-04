@@ -7,6 +7,8 @@ evidence live in
 Build-speed guidance lives in
 [`docs/yazelix/build_speed_workflow.md`](docs/yazelix/build_speed_workflow.md).
 Cachix setup lives in [`docs/yazelix/cachix.md`](docs/yazelix/cachix.md).
+Yazelix Terminal shader/profile ownership lives in
+[`docs/yazelix/shader_profile_ownership.md`](docs/yazelix/shader_profile_ownership.md).
 For visual source edits, run the cargo-built terminal with the Yazelix config
 shape through `tools/yazelix_terminal_local.sh` before paying for a Nix package
 or Home Manager rebuild.
@@ -51,6 +53,9 @@ renderer strategy with WebGPU and Rio's native trail cursor effect.
 WebGPU baseline without custom shaders or trail cursor effects for performance
 comparisons. `YAZELIX_TERMINAL_PROFILE=shaders` selects the packaged
 Ghostty-compatible cursor shader stack for compatibility and visual diagnostics.
+Yazelix Terminal owns these profile assets and Rio-aware shader details; main
+Yazelix should select stable profile names rather than generate or inspect
+Rio-specific shader config.
 `YAZELIX_TERMINAL_RENDER_STRATEGY=game` is kept as an explicit diagnostic
 override and composes with each profile.
 
