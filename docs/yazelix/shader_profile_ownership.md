@@ -65,6 +65,8 @@ main Yazelix runtime.
 The custom shader runtime remains Ghostty-compatible for standard cursor
 uniforms. Yzxterm-specific reads are guarded by
 `#if defined(YAZELIX_TERMINAL_RIO_TRAIL)` and must have a valid fallback path.
+The full yzxterm shader uniform contract is documented in
+[`shader_abi.md`](shader_abi.md).
 
 The default profile intentionally does not enable `custom-shader`. The shader
 profile is opt-in because it is a compatibility and visual-diagnostic surface,

@@ -105,6 +105,10 @@ The implemented integration is:
 
 ## Rio Trail Shader ABI
 
+The canonical yzxterm shader ABI is documented in
+[`shader_abi.md`](shader_abi.md). This section summarizes the Rio trail pieces
+that drive cursor animation.
+
 The Ghostty-compatible uniforms keep their original meaning. The Yazelix
 extension is declared in the same std140 uniform block before the large
 extra-cursor arrays:

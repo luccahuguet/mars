@@ -200,9 +200,42 @@ def command_verify(_: argparse.Namespace) -> int:
         if required not in shader_text:
             raise SystemExit(f"shader probe missing {required}")
     print(f"ok {shader.relative_to(ROOT)}")
+    validate_yazelix_shader_assets()
     validate_keyboard_manifest()
     print(f"ok {KEYBOARD_MANIFEST.relative_to(ROOT)}")
     return 0
+
+
+def validate_yazelix_shader_assets() -> None:
+    shader_root = ROOT / "misc" / "yazelix_terminal_shaders"
+    cursor_trail = shader_root / "cursor_trail_dusk.glsl"
+    cursor_trail_text = cursor_trail.read_text(encoding="utf-8")
+    for required in (
+        "YAZELIX_TRAIL_GLOW_STRENGTH",
+        "YAZELIX_TRAIL_GLOW_WIDTH_SCALE",
+        "trailGlowMask",
+        "trailEdgeMask",
+        "trailCoreMask",
+        "cursorGlowMask",
+        "cursorEdgeMask",
+        "yazelixRioTrailSdf",
+        "#if defined(YAZELIX_TERMINAL_RIO_TRAIL)",
+    ):
+        if required not in cursor_trail_text:
+            raise SystemExit(f"{cursor_trail.relative_to(ROOT)} missing {required}")
+
+    generated_effects = [
+        shader_root / "generated_effects" / "sweep.glsl",
+        shader_root / "generated_effects" / "rectangle_boom.glsl",
+    ]
+    for effect in generated_effects:
+        text = effect.read_text(encoding="utf-8")
+        for required in ("mainImage", "iCurrentCursor", "iPreviousCursor"):
+            if required not in text:
+                raise SystemExit(f"{effect.relative_to(ROOT)} missing {required}")
+    print(f"ok {cursor_trail.relative_to(ROOT)}")
+    for effect in generated_effects:
+        print(f"ok {effect.relative_to(ROOT)}")
 
 
 def command_keyboard_list(_: argparse.Namespace) -> int:

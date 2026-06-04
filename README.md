@@ -9,6 +9,8 @@ Build-speed guidance lives in
 Cachix setup lives in [`docs/yazelix/cachix.md`](docs/yazelix/cachix.md).
 Yazelix Terminal shader/profile ownership lives in
 [`docs/yazelix/shader_profile_ownership.md`](docs/yazelix/shader_profile_ownership.md).
+The yzxterm shader ABI lives in
+[`docs/yazelix/shader_abi.md`](docs/yazelix/shader_abi.md).
 For visual source edits, run the cargo-built terminal with the Yazelix config
 shape through `tools/yazelix_terminal_local.sh` before paying for a Nix package
 or Home Manager rebuild.
