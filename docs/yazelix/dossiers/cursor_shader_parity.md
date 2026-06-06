@@ -237,3 +237,90 @@ The architecture policy is therefore:
   of independently computing another cursor trail in the default profile.
 - The remaining focus catch-up bug should be investigated separately from this
   profile/default architecture cleanup.
+
+## 2026-06-06 Dogfooding State
+
+Fresh Yazelix `yzxterm` windows are launching through the yzxterm-specific
+runtime and launch-scoped config, even when Home Manager's active Yazelix
+runtime is `ratty`. Runtime selection is therefore not the current shader
+visibility blocker. A representative fresh yzxterm launch used:
+
+- `YAZELIX_TERMINAL=yzxterm`
+- `YAZELIX_TERMINAL_PROFILE=shaders`
+- `RIO_CONFIG_HOME=$YAZELIX_STATE_DIR/terminal_launches/.../configs/terminal_emulators/yzxterm`
+- `[renderer] backend = "Webgpu"`
+- `[renderer] custom-shader = [".../cursor_trail_magma.glsl"]`
+- `[effects] trail-cursor = true`
+
+Old running yzxterm windows can keep showing older glow behavior after a
+runtime update because every desktop launch copies a shader snapshot into its
+own `terminal_launches/<id>/...` directory. Those windows are useful evidence
+that the terminal shader engine still works, but they do not reflect the newly
+generated shader policy.
+
+The current pushed state is:
+
+- `yazelix-cursors` `99569c7`: generated shaders use
+  `iYazelixRioTrailAnimating` to decide when to replace the normal
+  Ghostty-style trail SDF with Rio's exported animated trail geometry.
+- `yazelix` `153cd551`: main runtime pins that cursor package and enables
+  Rio's native trail cursor in the packaged Rio runtime config.
+- Fresh yzxterm windows show Rio's native cursor animation and the shader's
+  split cursor fill. This confirms the shader is loading and the split cursor
+  path is no longer completely hidden by Rio's native single-color cursor.
+
+The remaining visible gap is movement glow spread. During movement, the native
+Rio cursor animation looks good, but the shader's wider glow/aura contribution
+is not yet visibly spreading around the moving cursor. The next tuning should
+start in `yazelix-cursors`, by making the movement-only aura/glow layer stronger
+while keeping idle glow small. The terminal fork should only be changed if
+evidence shows Rio's native cursor pass or shader composition order is
+overwriting the shader output.
+
+Vanilla Rio is now the intended comparison baseline. The Home Manager Rio
+config was missing native trail animation, so
+`~/.config/home-manager/modules/rio.nix` now includes:
+
+```toml
+[effects]
+trail-cursor = true
+```
+
+Testing vanilla Rio without that setting does not compare against yzxterm's
+native Rio trail behavior.
+
+Follow-up observation from comparing fresh windows on the same host: plain Rio
+and packaged Yazelix Rio resolve to the same `rioterm 0.4.6` binary, so the
+visible animation difference is not explained by a Rio version mismatch. The
+important config difference is that packaged Yazelix Rio and yzxterm both
+force:
+
+```toml
+[renderer]
+backend = "Webgpu"
+```
+
+while the plain Rio Home Manager config does not set an explicit renderer
+backend. This was validated by launching plain Rio with an isolated temp config
+that added only `backend = "Webgpu"` to the otherwise working host Rio config.
+That window switched from the default edge-style trail to the same filled
+block/rectangle trail seen in packaged Yazelix Rio and yzxterm.
+
+Conclusion: Rio's native trail cursor has different visual behavior between the
+default renderer path and the wgpu renderer path selected by
+`backend = "Webgpu"`. Plain Rio with the default renderer looks more like an
+edge trail. Plain Rio with `backend = "Webgpu"`, packaged Yazelix Rio, and
+yzxterm look more like a filled rectangle stretched from source to destination
+and then retracted toward the final cursor position. Do not treat that
+block/retract animation as yzxterm-specific unless a future probe finds a
+separate fork-local difference.
+
+Source inspection of the installed Rio `0.4.6` package shows this is not two
+separate cursor algorithms. `TrailCursor::draw` always emits one convex quad as
+two `sugarloaf.triangle(...)` calls. On Linux, Rio's implicit default is native
+Vulkan, while `backend = "Webgpu"` selects Sugarloaf's wgpu renderer. Both
+renderers have a triangle-list geometry path, but the same animated trail
+geometry is perceived differently through those backend paths. yzxterm's fork
+adds large-jump snapping, short vertical-move handling, and shader-state export;
+those changes affect when the trail is drawn and how shaders can follow it, but
+they do not explain the packaged Rio vs plain Rio animation-shape difference.
