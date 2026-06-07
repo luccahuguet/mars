@@ -906,12 +906,29 @@ impl Screen<'_> {
     }
 
     #[inline]
+    fn key_can_be_composed_text(key: &rio_window::event::KeyEvent) -> bool {
+        matches!(key.logical_key.as_ref(), Key::Character(_))
+            || key
+                .text_with_all_modifiers()
+                .is_some_and(|text| !text.is_empty())
+    }
+
+    #[inline]
     pub fn process_key_event(
         &mut self,
         key: &rio_window::event::KeyEvent,
         clipboard: &mut Clipboard,
     ) {
         if self.context_manager.current().ime.preedit().is_some() {
+            return;
+        }
+
+        if self
+            .context_manager
+            .current_mut()
+            .ime
+            .should_suppress_key_after_preedit_clear(Self::key_can_be_composed_text(key))
+        {
             return;
         }
 
@@ -3498,6 +3515,29 @@ impl Screen<'_> {
 
         self.mouse.accumulated_scroll.x %= width;
         self.mouse.accumulated_scroll.y %= height;
+    }
+
+    #[inline]
+    pub fn process_ime_commit(&mut self, text: &str) {
+        self.context_manager.current_mut().ime.finish_commit();
+
+        if self.search_active() {
+            for character in text.chars() {
+                self.search_input(character);
+            }
+            return;
+        }
+
+        if text.is_empty() {
+            return;
+        }
+
+        self.scroll_bottom_when_cursor_not_visible();
+        self.clear_selection();
+        self.ctx_mut()
+            .current_mut()
+            .messenger
+            .send_write(text.as_bytes().to_vec());
     }
 
     #[inline]

@@ -6,6 +6,14 @@ pub struct Ime {
 
     /// Current IME preedit.
     preedit: Option<Preedit>,
+
+    /// Whether a cleared preedit may still be followed by its commit.
+    ///
+    /// Some platforms clear the visible preedit before delivering
+    /// `Ime::Commit`. A keyboard event for the composing key can arrive in that
+    /// gap; it belongs to the IME transaction and must not be sent to the PTY or
+    /// encoded by the Kitty keyboard path.
+    suppress_key_after_preedit_clear: bool,
 }
 
 impl Ime {
@@ -31,12 +39,33 @@ impl Ime {
 
     #[inline]
     pub fn set_preedit(&mut self, preedit: Option<Preedit>) {
+        let had_preedit = self.preedit.is_some();
+        self.suppress_key_after_preedit_clear = had_preedit && preedit.is_none();
         self.preedit = preedit;
     }
 
     #[inline]
     pub fn preedit(&self) -> Option<&Preedit> {
         self.preedit.as_ref()
+    }
+
+    #[inline]
+    pub fn finish_commit(&mut self) {
+        self.preedit = None;
+        self.suppress_key_after_preedit_clear = false;
+    }
+
+    #[inline]
+    pub fn should_suppress_key_after_preedit_clear(
+        &mut self,
+        key_can_be_composed_text: bool,
+    ) -> bool {
+        if !self.suppress_key_after_preedit_clear {
+            return false;
+        }
+
+        self.suppress_key_after_preedit_clear = false;
+        key_can_be_composed_text
     }
 }
 
@@ -52,6 +81,74 @@ pub struct Preedit {
 
     /// The cursor offset from the end of the preedit in char width.
     pub cursor_end_offset: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Ime, Preedit};
+
+    // Test lane: default
+
+    fn preedit(text: &str) -> Preedit {
+        Preedit::new(text.to_owned(), None)
+    }
+
+    #[test]
+    fn cleared_preedit_suppresses_one_composed_text_key() {
+        // Defends: a dead-key compose key must not leak as raw text or Kitty CSI-u before commit.
+        let mut ime = Ime::new();
+
+        ime.set_preedit(Some(preedit("´")));
+        ime.set_preedit(None);
+
+        assert!(ime.should_suppress_key_after_preedit_clear(true));
+        assert!(!ime.should_suppress_key_after_preedit_clear(true));
+    }
+
+    #[test]
+    fn non_text_key_clears_preedit_suppression_without_suppressing() {
+        // Defends: canceled IME state cannot stale-suppress the next ordinary text key.
+        let mut ime = Ime::new();
+
+        ime.set_preedit(Some(preedit("´")));
+        ime.set_preedit(None);
+
+        assert!(!ime.should_suppress_key_after_preedit_clear(false));
+        assert!(!ime.should_suppress_key_after_preedit_clear(true));
+    }
+
+    #[test]
+    fn commit_clears_preedit_suppression() {
+        // Defends: committed IME text is the only PTY input after a normal compose transaction.
+        let mut ime = Ime::new();
+
+        ime.set_preedit(Some(preedit("´")));
+        ime.set_preedit(None);
+        ime.finish_commit();
+
+        assert!(!ime.should_suppress_key_after_preedit_clear(true));
+    }
+
+    #[test]
+    fn disabled_ime_clears_preedit_suppression() {
+        // Defends: canceled IME state cannot suppress later ordinary shortcuts or text.
+        let mut ime = Ime::new();
+
+        ime.set_enabled(true);
+        ime.set_preedit(Some(preedit("´")));
+        ime.set_preedit(None);
+        ime.set_enabled(false);
+
+        assert!(!ime.should_suppress_key_after_preedit_clear(true));
+    }
+
+    #[test]
+    fn ordinary_keys_are_not_suppressed_without_preedit() {
+        // Defends: normal Kitty keyboard chords such as Ctrl+Alt+H stay visible.
+        let mut ime = Ime::new();
+
+        assert!(!ime.should_suppress_key_after_preedit_clear(true));
+    }
 }
 
 impl Preedit {

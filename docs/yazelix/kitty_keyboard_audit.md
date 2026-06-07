@@ -48,6 +48,8 @@ stack resets all flags, and a push into a full stack evicts the oldest entry.
 - Main and alternate screens swap independent keyboard stacks during alt-screen
   switching
 - `DISAMBIGUATE_ESC_CODES` routes ambiguous keys to CSI-u when needed
+- IME/dead-key commits are kept out of the Kitty keyboard encoder and written
+  as committed text input
 - `REPORT_EVENT_TYPES` emits repeat and release subfields, while preserving
   Kitty's Enter/Tab/Backspace exception unless report-all is active
 - `REPORT_ALL_KEYS_AS_ESC` sends text-producing keys as escape sequences and
@@ -115,6 +117,19 @@ private-use keys Rio can observe. Known holes from the local source audit:
 
 Rio exposes and encodes `KP_SEPARATOR` (`57416`), `KP_BEGIN` (`57427~`), and ISO
 level 3 shift through `NamedKey::AltGraph` (`57453`).
+
+### IME And Dead Keys
+
+Enhanced keyboard mode must not turn text composition into key reporting. When a
+platform clears visible preedit before delivering `Ime::Commit`, Rio suppresses
+the matching text-producing keyboard event and writes the committed text to the
+PTY as typed input. That keeps dead-key composition aligned with Ghostty while
+still allowing disambiguated chords such as `Ctrl+Alt+H` and `Ctrl+Alt+J` to use
+the Kitty keyboard path.
+
+The black-box matrix includes dead acute followed by `e` in disambiguate mode.
+The expected payload is only UTF-8 `é`; a leaked `e`, bracketed paste wrapper, or
+CSI-u encoded composing key is a failure.
 
 ## Compatibility Impact
 

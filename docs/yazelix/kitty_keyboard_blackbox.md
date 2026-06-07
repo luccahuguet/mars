@@ -18,6 +18,7 @@ It covers:
 - `Ctrl+C` in disambiguate mode
 - `Ctrl+Shift+I` in disambiguate mode
 - `Alt+[` in disambiguate mode
+- dead acute then `e` in disambiguate mode
 - keypad Left in disambiguate mode
 - keypad `+` in disambiguate mode
 - repeat events with associated text
@@ -26,8 +27,8 @@ It covers:
 - standalone Left Control press/release events
 
 These are the combinations most likely to matter for Helix, Yazi, Nushell, and
-Zellij because they exercise ambiguous legacy keys, keypad identity, event
-types, associated text, and standalone modifier reporting.
+Zellij because they exercise ambiguous legacy keys, dead-key composition, keypad
+identity, event types, associated text, and standalone modifier reporting.
 
 List the checked-in expectations:
 

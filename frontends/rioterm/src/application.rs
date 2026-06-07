@@ -1872,8 +1872,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                 match ime {
                     Ime::Commit(text) => {
-                        // Don't use bracketed paste for single char input.
-                        route.window.screen.paste(&text, text.chars().count() > 1);
+                        route.window.screen.process_ime_commit(&text);
                     }
                     Ime::Preedit(text, cursor_offset) => {
                         let preedit = if text.is_empty() {

@@ -52,6 +52,18 @@
       "source": "Kitty keyboard protocol calls out Alt+[ as a CSI ambiguity fixed by the disambiguate flag."
     },
     {
+      "id": "dead_acute_e_disambiguate",
+      "tier": "must",
+      "keys": "Dead acute then E",
+      "workflow": "Dead-key composition remains text input while Zellij enables enhanced keyboard disambiguation",
+      "setup_hex": "1b5b3e3175",
+      "expect": {
+        "mode": "exact",
+        "hex": "c3a9"
+      },
+      "source": "IME/dead-key commits are text input transactions; the composing key must not be emitted separately or encoded as a Kitty keyboard event."
+    },
+    {
       "id": "kp_left_disambiguate",
       "tier": "must",
       "keys": "Keypad Left",
