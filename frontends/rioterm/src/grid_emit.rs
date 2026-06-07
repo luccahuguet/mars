@@ -1251,6 +1251,10 @@ pub struct GridGlyphRasterizer {
     /// shaped glyphs back to the cell they belong to.
     #[cfg(target_os = "macos")]
     run_cell_starts: Vec<u32>,
+    /// On non-macOS, `run_byte_starts[i]` is the UTF-8 byte offset
+    /// where cell `i` of the run begins inside `run_str_scratch`.
+    #[cfg(not(target_os = "macos"))]
+    run_byte_starts: Vec<u32>,
     /// `run_cell_columns[i]` is the absolute grid column for the
     /// `i`-th appended cell in the run. Decouples the cell-index-
     /// within-run from the grid column so wide-char spacer cells can
@@ -1303,6 +1307,8 @@ impl GridGlyphRasterizer {
             run_cell_columns: Vec::new(),
             #[cfg(not(target_os = "macos"))]
             run_str_scratch: String::new(),
+            #[cfg(not(target_os = "macos"))]
+            run_byte_starts: Vec::new(),
             #[cfg(target_os = "macos")]
             handle_cache: FxHashMap::default(),
             #[cfg(not(target_os = "macos"))]
@@ -1385,31 +1391,67 @@ fn span_style_for_flags(style_flags: u8) -> rio_backend::sugarloaf::SpanStyle {
     s
 }
 
-/// Hash the cell's zero-width combining codepoints into the per-run
-/// hasher. Each combining codepoint is stamped as `(cp, cluster)` with
-/// the same cluster as the base cell. Variation Selectors (VS-15 /
-/// VS-16) only steer presentation form, not glyph identity, so they're
-/// skipped to keep the cache key stable across presentation toggles.
 #[inline]
-fn hash_combining(
+fn zerowidth_for_cell<'a>(extras_table: &'a ExtrasMap, sq: Square) -> &'a [char] {
+    if !sq.has_grapheme() {
+        return &[];
+    }
+    let Some(id) = sq.extras_id() else {
+        return &[];
+    };
+    extras_table
+        .get(&id)
+        .map_or(&[], |extras| extras.zerowidth.as_slice())
+}
+
+/// Append one grid cell to the platform shaper input and hash it into
+/// the run-cache key. Zero-width extras stay in the same logical
+/// cluster as the base cell but must be present in the shaped string:
+/// VS16, ZWJ, and combining sequences are otherwise budgeted by the
+/// terminal model but invisible to CoreText/Swash.
+#[inline]
+fn push_shape_cell(
     rasterizer: &mut GridGlyphRasterizer,
     extras_table: &ExtrasMap,
     sq: Square,
+    shape_ch: char,
+    grid_col: u16,
     cluster: u32,
 ) {
-    if !sq.has_grapheme() {
-        return;
-    }
-    let Some(id) = sq.extras_id() else {
-        return;
-    };
-    let Some(extras) = extras_table.get(&id) else {
-        return;
-    };
-    for &cp in &extras.zerowidth {
-        if cp == '\u{FE0E}' || cp == '\u{FE0F}' {
-            continue;
+    let zerowidth = zerowidth_for_cell(extras_table, sq);
+
+    #[cfg(target_os = "macos")]
+    {
+        rasterizer
+            .run_cell_starts
+            .push(rasterizer.run_utf16_scratch.len() as u32);
+        let mut buf = [0u16; 2];
+        rasterizer
+            .run_utf16_scratch
+            .extend_from_slice(shape_ch.encode_utf16(&mut buf));
+        for &cp in zerowidth {
+            let mut buf = [0u16; 2];
+            rasterizer
+                .run_utf16_scratch
+                .extend_from_slice(cp.encode_utf16(&mut buf));
         }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        rasterizer
+            .run_byte_starts
+            .push(rasterizer.run_str_scratch.len() as u32);
+        rasterizer.run_str_scratch.push(shape_ch);
+        for &cp in zerowidth {
+            rasterizer.run_str_scratch.push(cp);
+        }
+    }
+
+    rasterizer.run_cell_columns.push(grid_col);
+    rasterizer.run_hasher.write_u32(shape_ch as u32);
+    rasterizer.run_hasher.write_u32(cluster);
+    for &cp in zerowidth {
         rasterizer.run_hasher.write_u32(cp as u32);
         rasterizer.run_hasher.write_u32(cluster);
     }
@@ -2101,32 +2143,18 @@ pub fn build_row_fg(
         {
             rasterizer.run_utf16_scratch.clear();
             rasterizer.run_cell_starts.clear();
-            rasterizer
-                .run_cell_starts
-                .push(rasterizer.run_utf16_scratch.len() as u32);
-            let mut buf = [0u16; 2];
-            rasterizer
-                .run_utf16_scratch
-                .extend_from_slice(shape_ch.encode_utf16(&mut buf));
         }
         #[cfg(not(target_os = "macos"))]
         {
             rasterizer.run_str_scratch.clear();
-            rasterizer.run_str_scratch.push(shape_ch);
+            rasterizer.run_byte_starts.clear();
         }
         rasterizer.run_cell_columns.clear();
-        rasterizer.run_cell_columns.push(x as u16);
         // Reset the per-run hasher and stamp the run-start cell as
         // `(codepoint, cluster=0)`. Subsequent cells append themselves
         // in the run-extension loop below.
         rasterizer.run_hasher = rapidhash::fast::RapidHasher::default();
-        rasterizer.run_hasher.write_u32(shape_ch as u32);
-        rasterizer.run_hasher.write_u32(0);
-        // Hash the cell's zero-width combining codepoints too — without
-        // this, `(e, U+0301)` and `(e, U+0302)` would alias in the run
-        // cache. Variation Selectors (VS-15 / VS-16) don't change the
-        // glyph identity, so skip them.
-        hash_combining(rasterizer, extras_table, sq, 0);
+        push_shape_cell(rasterizer, extras_table, sq, shape_ch, x as u16, 0);
 
         // Extend the run while (font_id, style_flags) match.
         let mut end = x + 1;
@@ -2222,28 +2250,19 @@ pub fn build_row_fg(
             } else {
                 ch2
             };
-            #[cfg(target_os = "macos")]
-            {
-                rasterizer
-                    .run_cell_starts
-                    .push(rasterizer.run_utf16_scratch.len() as u32);
-                let mut buf = [0u16; 2];
-                rasterizer
-                    .run_utf16_scratch
-                    .extend_from_slice(shape_ch2.encode_utf16(&mut buf));
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                rasterizer.run_str_scratch.push(shape_ch2);
-            }
             // Stamp the cell into the per-run hasher with its relative
-            // cluster offset (`end - run_start`, captured *before* the
-            // increment below).
-            let cluster = (end - run_start) as u32;
-            rasterizer.run_hasher.write_u32(shape_ch2 as u32);
-            rasterizer.run_hasher.write_u32(cluster);
-            hash_combining(rasterizer, extras_table, sq2, cluster);
-            rasterizer.run_cell_columns.push(end as u16);
+            // appended-cell offset. Skipped wide-char spacers are not
+            // appended, so `run_cell_columns.len()` is the shape-cell
+            // cluster here rather than `end - run_start`.
+            let cluster = rasterizer.run_cell_columns.len() as u32;
+            push_shape_cell(
+                rasterizer,
+                extras_table,
+                sq2,
+                shape_ch2,
+                end as u16,
+                cluster,
+            );
             end += 1;
         }
 
@@ -2252,7 +2271,7 @@ pub fn build_row_fg(
         // because `font_id` already varies with style (`resolve_font`
         // factors style_flags into the resolution key); adding them
         // a second time would just be redundant work.
-        let cell_count = (end - run_start) as u32;
+        let cell_count = rasterizer.run_cell_columns.len() as u32;
         rasterizer.run_hasher.write_u32(cell_count);
         rasterizer.run_hasher.write_u32(font_id);
         rasterizer.run_hasher.write_u16(run_size_bucket);
@@ -2327,14 +2346,11 @@ pub fn build_row_fg(
             }
             #[cfg(not(target_os = "macos"))]
             {
-                let mut char_cursor =
-                    rasterizer.run_str_scratch.char_indices().peekable();
+                let cell_starts = &rasterizer.run_byte_starts;
                 for g in glyphs {
-                    while let Some(&(byte_offset, _)) = char_cursor.peek() {
-                        if (byte_offset as u32) >= g.cluster {
-                            break;
-                        }
-                        char_cursor.next();
+                    while (cell_idx_in_run as usize + 1) < cell_starts.len()
+                        && cell_starts[cell_idx_in_run as usize + 1] <= g.cluster
+                    {
                         cell_idx_in_run = cell_idx_in_run.saturating_add(1);
                     }
                     glyph_emits.push((g.id, cell_idx_in_run));
@@ -2859,6 +2875,7 @@ fn font_library_hinting(_r: &GridGlyphRasterizer) -> bool {
 mod tests {
     // Test lane: default
     use super::*;
+    use core::hash::Hasher;
     use rio_backend::crosswords::square::CellFlags;
     use std::sync::Arc;
 
@@ -2957,6 +2974,90 @@ mod tests {
         assert_eq!(grid_glyph_font_size(18.0, 22.0, 28.0, true), 22);
         assert_eq!(grid_glyph_font_size(18.0, 40.0, 26.0, true), 26);
         assert_eq!(grid_glyph_font_size(30.0, 22.0, 26.0, true), 30);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    // Defends: Linux/Windows shaping sees VS16 and other zero-width extras attached to a cell.
+    fn shape_cell_appends_zero_width_extras_to_swash_input() {
+        let mut rasterizer = GridGlyphRasterizer::new();
+        let mut sq = Square::from_char('\u{2601}');
+        sq.set_extras_id(Some(7));
+        sq.insert_cell_flag(CellFlags::GRAPHEME);
+
+        let mut extras = ExtrasMap::default();
+        extras.insert(
+            7,
+            Extras {
+                zerowidth: vec!['\u{FE0F}'],
+                ..Default::default()
+            },
+        );
+
+        rasterizer.run_hasher = rapidhash::fast::RapidHasher::default();
+        push_shape_cell(&mut rasterizer, &extras, sq, sq.c(), 2, 0);
+
+        assert_eq!(rasterizer.run_str_scratch, "\u{2601}\u{FE0F}");
+        assert_eq!(rasterizer.run_byte_starts, vec![0]);
+        assert_eq!(rasterizer.run_cell_columns, vec![2]);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    // Defends: a shaping cluster that lands inside a zero-width sequence maps back to the base cell.
+    fn shape_cell_starts_skip_zero_width_extras() {
+        let mut rasterizer = GridGlyphRasterizer::new();
+        let mut sq = Square::from_char('\u{2601}');
+        sq.set_extras_id(Some(7));
+        sq.insert_cell_flag(CellFlags::GRAPHEME);
+
+        let mut extras = ExtrasMap::default();
+        extras.insert(
+            7,
+            Extras {
+                zerowidth: vec!['\u{FE0F}'],
+                ..Default::default()
+            },
+        );
+
+        rasterizer.run_hasher = rapidhash::fast::RapidHasher::default();
+        push_shape_cell(&mut rasterizer, &extras, sq, sq.c(), 2, 0);
+        push_shape_cell(&mut rasterizer, &extras, Square::from_char('x'), 'x', 4, 1);
+
+        assert_eq!(rasterizer.run_str_scratch, "\u{2601}\u{FE0F}x");
+        assert_eq!(
+            rasterizer.run_byte_starts,
+            vec![0, "\u{2601}\u{FE0F}".len() as u32]
+        );
+        assert_eq!(rasterizer.run_cell_columns, vec![2, 4]);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    // Defends: plain text and emoji-presentation text do not alias in the shaped-run cache.
+    fn shape_cell_hash_includes_zero_width_extras() {
+        fn hash_for(sq: Square, extras: &ExtrasMap) -> u64 {
+            let mut rasterizer = GridGlyphRasterizer::new();
+            rasterizer.run_hasher = rapidhash::fast::RapidHasher::default();
+            push_shape_cell(&mut rasterizer, extras, sq, sq.c(), 0, 0);
+            rasterizer.run_hasher.finish()
+        }
+
+        let plain = Square::from_char('\u{2601}');
+        let mut emoji = plain;
+        emoji.set_extras_id(Some(7));
+        emoji.insert_cell_flag(CellFlags::GRAPHEME);
+
+        let mut extras = ExtrasMap::default();
+        extras.insert(
+            7,
+            Extras {
+                zerowidth: vec!['\u{FE0F}'],
+                ..Default::default()
+            },
+        );
+
+        assert_ne!(hash_for(plain, &extras), hash_for(emoji, &extras));
     }
 
     #[test]
