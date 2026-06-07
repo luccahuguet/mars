@@ -1473,6 +1473,34 @@ fn text_sizing_font_multiplier(sizing: &TextSizingExtra) -> f32 {
 }
 
 #[inline]
+fn font_size_u16(size_px: f32) -> u16 {
+    size_px.round().clamp(1.0, u16::MAX as f32) as u16
+}
+
+#[inline]
+fn size_bucket_for(size_px: f32) -> u16 {
+    (size_px * 4.0).round().clamp(0.0, u16::MAX as f32) as u16
+}
+
+#[inline]
+fn grid_glyph_font_size(
+    base_size_px: f32,
+    max_w: f32,
+    max_h: f32,
+    is_emoji: bool,
+) -> u16 {
+    if is_emoji {
+        // Emoji are laid out as wide glyphs, so give color fonts the
+        // reserved two-cell/sized-text box instead of rasterizing them
+        // at the smaller text point size. Keep the result bounded by
+        // the visual box so it does not bleed into following cells.
+        font_size_u16(max_w.min(max_h).max(base_size_px))
+    } else {
+        font_size_u16(base_size_px)
+    }
+}
+
+#[inline]
 fn text_sizing_align_offset(space_px: f32, align: TextSizingAlignment) -> f32 {
     match align {
         TextSizingAlignment::Start => 0.0,
@@ -1538,11 +1566,12 @@ fn emit_sized_text(
     let (font_id, is_emoji) =
         rasterizer.resolve_font(first_ch, run_style_flags, font_library, route_id);
 
-    let scaled_size_px = (size_px * text_sizing_font_multiplier(sizing))
-        .round()
-        .clamp(1.0, u16::MAX as f32);
-    let size_bucket = (scaled_size_px * 4.0).round().clamp(0.0, u16::MAX as f32) as u16;
-    let size_u16 = scaled_size_px.clamp(1.0, u16::MAX as f32) as u16;
+    let scaled_size_px = size_px * text_sizing_font_multiplier(sizing);
+    let fraction = text_sizing_fraction(sizing);
+    let block_w = cell_w * sizing.occupied_width.max(1) as f32;
+    let block_h = cell_h * sizing.scale.max(1) as f32;
+    let size_u16 = grid_glyph_font_size(scaled_size_px, block_w, block_h, is_emoji);
+    let size_bucket = size_bucket_for(size_u16 as f32);
 
     #[cfg(target_os = "macos")]
     {
@@ -1582,9 +1611,6 @@ fn emit_sized_text(
         row_hints,
     );
 
-    let fraction = text_sizing_fraction(sizing);
-    let block_w = cell_w * sizing.occupied_width.max(1) as f32;
-    let block_h = cell_h * sizing.scale.max(1) as f32;
     let align_x =
         text_sizing_align_offset(block_w * (1.0 - fraction), sizing.horizontal_align);
     let align_y =
@@ -1816,8 +1842,8 @@ pub fn build_row_fg(
 ) {
     fg_scratch.clear();
 
-    let size_bucket = (size_px * 4.0).round().clamp(0.0, u16::MAX as f32) as u16;
-    let size_u16 = size_px.round().clamp(1.0, u16::MAX as f32) as u16;
+    let size_bucket = size_bucket_for(size_px);
+    let size_u16 = font_size_u16(size_px);
 
     let cell_w_u32 = cell_w.round().clamp(1.0, u32::MAX as f32) as u32;
     let cell_h_u32 = cell_h.round().clamp(1.0, u32::MAX as f32) as u32;
@@ -1914,6 +1940,8 @@ pub fn build_row_fg(
             (resolve_style(style_table, sq).flags.bits() & SHAPING_FLAG_MASK) as u8;
         let (font_id, is_emoji) =
             rasterizer.resolve_font(ch, run_style_flags, font_library, route_id);
+        let run_size_u16 = grid_glyph_font_size(size_px, cell_w * 2.0, cell_h, is_emoji);
+        let run_size_bucket = size_bucket_for(run_size_u16 as f32);
 
         // Glyph Protocol short-circuit: registered codepoints render
         // directly from the registry without shaping, run-extension,
@@ -2227,7 +2255,7 @@ pub fn build_row_fg(
         let cell_count = (end - run_start) as u32;
         rasterizer.run_hasher.write_u32(cell_count);
         rasterizer.run_hasher.write_u32(font_id);
-        rasterizer.run_hasher.write_u16(size_bucket);
+        rasterizer.run_hasher.write_u16(run_size_bucket);
         let hash = rasterizer.run_hasher.finish();
 
         // Shape (cached) and capture ascent for this (font_id, size).
@@ -2235,16 +2263,26 @@ pub fn build_row_fg(
             // Cache hit — ascent already stored.
             rasterizer
                 .ascent_cache
-                .get(&(font_id, size_bucket))
+                .get(&(font_id, run_size_bucket))
                 .copied()
                 .unwrap_or(0)
         } else {
             #[cfg(target_os = "macos")]
-            let shaped_opt =
-                shape_run_ct(rasterizer, font_id, size_u16, size_bucket, font_library);
+            let shaped_opt = shape_run_ct(
+                rasterizer,
+                font_id,
+                run_size_u16,
+                run_size_bucket,
+                font_library,
+            );
             #[cfg(not(target_os = "macos"))]
-            let shaped_opt =
-                shape_run_swash(rasterizer, font_id, size_u16, size_bucket, font_library);
+            let shaped_opt = shape_run_swash(
+                rasterizer,
+                font_id,
+                run_size_u16,
+                run_size_bucket,
+                font_library,
+            );
             let Some((glyphs, ascent_px)) = shaped_opt else {
                 x = end;
                 continue;
@@ -2324,8 +2362,8 @@ pub fn build_row_fg(
                 grid,
                 font_id,
                 glyph_id,
-                size_bucket,
-                size_u16,
+                run_size_bucket,
+                run_size_u16,
                 cell_h,
                 ascent_px,
                 is_emoji,
@@ -2910,6 +2948,15 @@ mod tests {
             cursor_sprite_cell_size(CursorRenderStyle::Bar, extent, 8, 18),
             (8, 54)
         );
+    }
+
+    #[test]
+    // Defends: color emoji get the wide-cell pixel budget instead of the smaller text point size.
+    fn emoji_grid_font_size_uses_reserved_visual_box() {
+        assert_eq!(grid_glyph_font_size(18.0, 22.0, 28.0, false), 18);
+        assert_eq!(grid_glyph_font_size(18.0, 22.0, 28.0, true), 22);
+        assert_eq!(grid_glyph_font_size(18.0, 40.0, 26.0, true), 26);
+        assert_eq!(grid_glyph_font_size(30.0, 22.0, 26.0, true), 30);
     }
 
     #[test]
