@@ -35,6 +35,7 @@ Related docs:
 - `docs/yazelix/dossiers/cursor_shader_parity.md`
 - `docs/yazelix/performance_and_graphics_benchmark.md`
 - `docs/yazelix/stack_validation.md`
+- `docs/yazelix/release_closeout_2026_06.md`
 
 ## Common Gates
 

@@ -236,6 +236,10 @@ Current local performance and graphics evidence:
 
 - `docs/yazelix/performance_and_graphics_benchmark.md`
 
+Current experimental release closeout:
+
+- `docs/yazelix/release_closeout_2026_06.md`
+
 The exact acceptance standard is behavior, not API shape. If Rio implements a
 feature differently from Ghostty but the user-visible Yazelix behavior is equal
 or better, that satisfies parity.
