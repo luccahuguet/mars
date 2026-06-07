@@ -3,7 +3,7 @@
   stdenv,
   makeWrapper,
   ncurses,
-  noto-fonts-color-emoji,
+  noto-fonts-monochrome-emoji,
   unwrapped,
   pname ? "yazelix-terminal",
   packageProfile ? "release",
@@ -108,7 +108,7 @@ in
 
           substitute "$tmp_with_fonts" "$tmp_resolved_fonts" \
             --replace-fail "@yazelix_terminal_font_dir@" "$out/share/yazelix-terminal/fonts" \
-            --replace-fail "@yazelix_terminal_emoji_font_dir@" "${noto-fonts-color-emoji}/share/fonts"
+            --replace-fail "@yazelix_terminal_emoji_font_dir@" "${noto-fonts-monochrome-emoji}/share/fonts"
 
           if grep -q "@yazelix_terminal_shader_dir@" "$tmp_resolved_fonts"; then
             substitute "$tmp_resolved_fonts" "$dst" \

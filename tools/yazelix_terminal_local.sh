@@ -136,7 +136,7 @@ find_emoji_font_dir() {
   fi
 
   if command -v fc-match >/dev/null 2>&1; then
-    emoji_font_file="$(fc-match -f '%{file}\n' 'Noto Color Emoji' 2>/dev/null | sed -n '1p')"
+    emoji_font_file="$(fc-match -f '%{file}\n' 'Noto Emoji:color=false:outline=true' 2>/dev/null | sed -n '1p')"
     if [ -n "$emoji_font_file" ] && [ -r "$emoji_font_file" ]; then
       dirname -- "$emoji_font_file"
       return 0

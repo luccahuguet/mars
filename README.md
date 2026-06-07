@@ -70,7 +70,7 @@ The packaged config disables confirm-before-quit, disables native window
 decorations, sets the terminal font size to `18.0`, and uses the default event
 renderer strategy with WebGPU and Rio's native trail cursor effect. It also
 maps private-use icon glyphs to `Symbols Nerd Font Mono` and common emoji/status
-symbol ranges to `Noto Color Emoji` from the package closure.
+symbol ranges to scalable `Noto Emoji` from the package closure.
 `YAZELIX_TERMINAL_PROFILE=baseline` selects the same packaged font, window, and
 WebGPU baseline without custom shaders or trail cursor effects for performance
 comparisons. `YAZELIX_TERMINAL_PROFILE=shaders` selects the packaged

@@ -1331,7 +1331,7 @@ impl FontData {
 
         let stretch = attributes.stretch();
         let synth = attributes.synthesize(attributes);
-        let is_emoji = has_color_tables(&font);
+        let is_emoji = is_emoji_font(&font, &data);
         let postscript_name = parse_postscript_name(&data);
 
         let data = (!evictable).then_some(data);
@@ -1488,7 +1488,7 @@ impl FontData {
         };
         let stretch = attributes.stretch();
         let synth = attributes.synthesize(attributes);
-        let is_emoji = has_color_tables(&font);
+        let is_emoji = is_emoji_font(&font, data);
         let postscript_name = parse_postscript_name(data);
 
         #[cfg(target_os = "macos")]
@@ -1537,7 +1537,7 @@ impl FontData {
         let weight = attributes.weight();
         let stretch = attributes.stretch();
         let synth = attributes.synthesize(attributes);
-        let is_emoji = has_color_tables(&font);
+        let is_emoji = is_emoji_font(&font, data);
 
         let postscript_name = parse_postscript_name(data);
         Ok(Self {
@@ -1594,7 +1594,7 @@ impl FontData {
         let weight = attributes.weight();
         let stretch = attributes.stretch();
         let synth = attributes.synthesize(attributes);
-        let is_emoji = has_color_tables(&font);
+        let is_emoji = is_emoji_font(&font, &data);
         let postscript_name = parse_postscript_name(&data);
 
         Ok(Self {
@@ -1636,10 +1636,34 @@ fn parse_postscript_name(data: &[u8]) -> Option<String> {
         })
 }
 
-/// Auto-detect emoji-ness from SFNT color tables (COLR, CBDT, CBLC, SBIX).
-/// Used to guard against Nerd Font families being mis-flagged as emoji,
-/// so a real emoji font gets the wide-cell/color-atlas treatment while
-/// icon fonts stay single-cell.
+/// Auto-detect emoji-ness from SFNT color tables or explicit emoji font names.
+/// Used to guard against Nerd Font families being mis-flagged as emoji, so a
+/// real emoji font gets wide-cell sizing while icon fonts stay single-cell.
+fn is_emoji_font(font: &FontRef<'_>, data: &[u8]) -> bool {
+    has_color_tables(font) || has_emoji_name(data)
+}
+
+/// Color emoji fonts are obvious from SFNT color tables, but scalable
+/// monochrome emoji fonts such as `Noto Emoji` intentionally have no color
+/// tables. They still need emoji sizing and fallback behavior.
+fn has_emoji_name(data: &[u8]) -> bool {
+    let Ok(face) = ttf_parser::Face::parse(data, 0) else {
+        return false;
+    };
+    face.names().into_iter().any(|name| {
+        matches!(
+            name.name_id,
+            ttf_parser::name_id::FAMILY
+                | ttf_parser::name_id::FULL_NAME
+                | ttf_parser::name_id::POST_SCRIPT_NAME
+        ) && name
+            .to_string()
+            .is_some_and(|value| value.to_ascii_lowercase().contains("emoji"))
+    })
+}
+
+/// Auto-detect color glyph raster sources from SFNT color tables (COLR, CBDT,
+/// CBLC, SBIX).
 fn has_color_tables(font: &FontRef<'_>) -> bool {
     font.table(tag_from_bytes(b"COLR")).is_some()
         || font.table(tag_from_bytes(b"CBDT")).is_some()
