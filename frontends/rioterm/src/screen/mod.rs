@@ -1072,23 +1072,41 @@ impl Screen<'_> {
         mode: Mode,
         mods: ModifiersState,
     ) -> bool {
+        Self::should_build_sequence_for_input(
+            &key.logical_key,
+            key.location,
+            text,
+            mode,
+            mods,
+        )
+    }
+
+    fn should_build_sequence_for_input(
+        logical_key: &Key,
+        location: KeyLocation,
+        text: &str,
+        mode: Mode,
+        mods: ModifiersState,
+    ) -> bool {
         if mode.contains(Mode::REPORT_ALL_KEYS_AS_ESC) {
             return true;
         }
 
+        let mods_without_locks =
+            mods & !(ModifiersState::CAPS_LOCK | ModifiersState::NUM_LOCK);
         let disambiguate = mode.contains(Mode::DISAMBIGUATE_ESC_CODES)
-            && (key.logical_key == Key::Named(NamedKey::Escape)
-                || key.location == KeyLocation::Numpad
-                || (!mods.is_empty()
-                    && (mods != ModifiersState::SHIFT
+            && (*logical_key == Key::Named(NamedKey::Escape)
+                || location == KeyLocation::Numpad
+                || (!mods_without_locks.is_empty()
+                    && (mods_without_locks != ModifiersState::SHIFT
                         || matches!(
-                            key.logical_key,
+                            logical_key,
                             Key::Named(NamedKey::Tab)
                                 | Key::Named(NamedKey::Enter)
                                 | Key::Named(NamedKey::Backspace)
                         ))));
 
-        match key.logical_key {
+        match logical_key {
             _ if disambiguate => true,
             // Exclude all the named keys unless they have textual representation.
             Key::Named(named) => named.to_text().is_none(),
@@ -5235,7 +5253,61 @@ fn post_process_hyperlink_uri(uri: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    // Test lane: default
+
     use super::*;
+
+    #[test]
+    fn kitty_disambiguation_keeps_shift_numlock_printable_text_raw() {
+        // Regression: active NumLock must not turn shifted text such as `?`
+        // into CSI-u when only disambiguate mode is active.
+        assert!(!Screen::should_build_sequence_for_input(
+            &Key::Character("?".into()),
+            KeyLocation::Standard,
+            "?",
+            Mode::DISAMBIGUATE_ESC_CODES,
+            ModifiersState::SHIFT | ModifiersState::NUM_LOCK,
+        ));
+    }
+
+    #[test]
+    fn kitty_disambiguation_ignores_lock_only_printable_text() {
+        // Regression: lock-state bits are reportable when a key is encoded,
+        // but lock-only printable text should remain UTF-8 text.
+        assert!(!Screen::should_build_sequence_for_input(
+            &Key::Character("a".into()),
+            KeyLocation::Standard,
+            "a",
+            Mode::DISAMBIGUATE_ESC_CODES,
+            ModifiersState::CAPS_LOCK | ModifiersState::NUM_LOCK,
+        ));
+    }
+
+    #[test]
+    fn kitty_disambiguation_still_reports_ctrl_alt_character() {
+        // Defends: Ctrl+Alt application chords still need disambiguated CSI-u
+        // even when lock state is active.
+        assert!(Screen::should_build_sequence_for_input(
+            &Key::Character("h".into()),
+            KeyLocation::Standard,
+            "h",
+            Mode::DISAMBIGUATE_ESC_CODES,
+            ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::NUM_LOCK,
+        ));
+    }
+
+    #[test]
+    fn kitty_report_all_still_encodes_shift_numlock_printable_text() {
+        // Defends: report-all mode remains the opt-in path that encodes
+        // ordinary text-producing keys, including active lock modifiers.
+        assert!(Screen::should_build_sequence_for_input(
+            &Key::Character("?".into()),
+            KeyLocation::Standard,
+            "?",
+            Mode::REPORT_ALL_KEYS_AS_ESC,
+            ModifiersState::SHIFT | ModifiersState::NUM_LOCK,
+        ));
+    }
 
     #[cfg(feature = "wgpu")]
     #[test]
