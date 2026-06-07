@@ -35,3 +35,6 @@ sugarloaf/src/**/*.spv
 # Frame logs can be large for long-running shader/game-loop benchmarks. Commit
 # summaries and sampled CSV evidence instead.
 artifacts/benchmarks/frame_time/**/frame_log.jsonl
+
+# bv (beads viewer) local config and caches
+.bv/
