@@ -1,32 +1,27 @@
 # Agent Guidelines
 
-This repository is the experimental Rio-derived `yazelix-terminal` workspace.
+Shared Yazelix agent workflow and release policy live in the main repo:
 
-## Scope
+- https://github.com/luccahuguet/yazelix/blob/main/AGENTS.md
+- In sibling local checkouts, read `../yazelix/AGENTS.md` first
 
-- Keep main Yazelix integration out of this repository until local evidence proves the terminal path is viable.
+Only Yazelix Terminal-specific guidance belongs here.
+
+## Local Scope
+
+- This repository is the experimental Rio-derived `yazelix-terminal` workspace.
 - Use Rio upstream as the implementation base and keep the fork delta reviewable.
 - Treat Ghostty as the primary behavior and quality target.
 - Treat WezTerm as a mature terminal-engine comparison target.
 - Treat Kitty implementation code as GPL-owned reference material: use official specs and black-box behavior unless a licensing decision explicitly allows more.
 
-## Beads
+## Local Commands
 
-Use Beads Rust (`br`) in this repository.
+- For visual source edits, prefer `tools/yazelix_terminal_local.sh` before paying for a Nix package or Home Manager rebuild.
+- Do not run yzxterm-related compile-heavy commands again until the rebuild-speed optimization beads are addressed, unless the maintainer explicitly overrides that gate.
+- After the rebuild-speed gate is addressed, use the main Yazelix repo's fast outputs `#runtime_yzxterm_fast` and `#yzxterm_fast` for maintainer dogfooding.
+- Keep the normal checked `#runtime_yzxterm` path as release evidence.
 
-- Run `br ready` and `br show <id>` before selecting work.
-- Use `br update <id> --status in_progress --claim` before implementation.
-- Close completed beads with `br close <id> --reason "..."`
-- Run `br sync --flush-only` before committing Beads changes.
-- Commit after each completed bead.
+## Integration Notes
 
-## Working Rules
-
-- Do not push unless the maintainer explicitly asks or a pushed experiment branch is useful for preserving/shareable work.
-- Prefer small, evidence-backed commits.
-- For maintainer dogfooding/runtime updates, prefer pushing the terminal commit and running the normal Home Manager switch when the branch state is shareable. A local `home-manager switch --override-input yazelix/yazelixTerminal path:...` can rebuild the full terminal package and package checks from scratch, so it is much slower and should be reserved for unpushed local experiments.
-- Do not run yzxterm-related compile-heavy commands (`cargo`, `nix build`, or Home Manager switch) again until the rebuild-speed optimization beads are addressed, unless the maintainer explicitly overrides this gate for a specific command.
-- After the rebuild-speed gate is addressed, use the main Yazelix repo's explicit fast outputs `#runtime_yzxterm_fast` and `#yzxterm_fast` for maintainer dogfooding; keep the normal checked `#runtime_yzxterm` path as release evidence.
-- If a feature is unexpectedly hard, document source paths, failure evidence, rejected approaches, and the next viable pivot, then move to another bead.
-- For visual behavior, prefer screenshots or captured artifacts over log-only claims.
-- Preserve Rio, Ghostty, WezTerm, and other upstream license notices when code is copied or ported.
+This repo has its own Beads database for terminal-local planning. Main Yazelix owns integrated runtime selection, Home Manager switching, and release transaction policy.

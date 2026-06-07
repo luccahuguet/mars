@@ -1,8 +1,22 @@
-## Yazelix Terminal Fork
+# Yazelix Terminal Fork
 
-This branch is the Rio-derived `yazelix-terminal` experiment for Ghostty-grade
-Yazelix terminal behavior. The fork status, feature ledger, and verification
-evidence live in
+Yazelix Terminal is an experimental active Yazelix fork of Rio for dogfooding a
+first-party Rust terminal path with Yazelix-controlled package metadata,
+profiles, protocols, notifications, Kitty graphics, and cursor-shader
+boundaries.
+
+| Field | Value |
+| --- | --- |
+| Upstream project | Rio |
+| Fork category | Experimental active fork |
+| Why this fork exists | Yazelix needs a Rust terminal it can evolve as a first-party runtime, with protocol coverage and runtime integration that Ghostty cannot expose to Yazelix directly |
+| Current Yazelix delta | `yazelix-terminal` and `yzxterm` package/profile names, desktop wrapper, package metadata passthru, generated profile templates, Rio trail defaults, `yazelix-cursors` shader support, BELL/terminal notification behavior, Kitty graphics support, and Ghostty-compatible shader ABI |
+| Non-goals | This fork does not own the full Yazelix workspace, Zellij/Yazi/Helix integration policy, or compatibility shims in the main repo |
+| Standalone support | Supported for experimental users through the flake package and app outputs; normal Yazelix users consume it through main-repo runtime outputs |
+| Upstream sync cadence | Monthly while dogfooding, and before any yzxterm release-gate decision |
+| Promotion/removal gate | Promote only after release-profile validation proves real user value; upstream or delete local terminal deltas that become Rio-owned |
+
+The fork status, feature ledger, and verification evidence live in
 [`docs/yazelix/fork_feature_verification.md`](docs/yazelix/fork_feature_verification.md).
 Build-speed guidance lives in
 [`docs/yazelix/build_speed_workflow.md`](docs/yazelix/build_speed_workflow.md).
@@ -11,6 +25,9 @@ Yazelix Terminal shader/profile ownership lives in
 [`docs/yazelix/shader_profile_ownership.md`](docs/yazelix/shader_profile_ownership.md).
 The yzxterm shader ABI lives in
 [`docs/yazelix/shader_abi.md`](docs/yazelix/shader_abi.md).
+Main Yazelix fork policy lives in
+[Fork and child-repo maintenance](https://github.com/luccahuguet/yazelix/blob/main/docs/contracts/fork_child_repo_maintenance.md).
+
 For visual source edits, run the cargo-built terminal with the Yazelix config
 shape through `tools/yazelix_terminal_local.sh` before paying for a Nix package
 or Home Manager rebuild.
