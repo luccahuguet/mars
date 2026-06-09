@@ -201,6 +201,7 @@ def command_verify(_: argparse.Namespace) -> int:
             raise SystemExit(f"shader probe missing {required}")
     print(f"ok {shader.relative_to(ROOT)}")
     validate_yazelix_shader_assets()
+    validate_yazelix_profile_configs()
     validate_yazelix_font_config()
     validate_package_metadata_sources()
     validate_keyboard_manifest()
@@ -238,6 +239,33 @@ def validate_yazelix_shader_assets() -> None:
     print(f"ok {cursor_trail.relative_to(ROOT)}")
     for effect in generated_effects:
         print(f"ok {effect.relative_to(ROOT)}")
+
+
+def validate_yazelix_profile_configs() -> None:
+    profile_configs = {
+        "full": ROOT / "misc" / "yazelix_terminal_config.toml",
+        "baseline": ROOT / "misc" / "yazelix_terminal_config_baseline.toml",
+        "shaders": ROOT / "misc" / "yazelix_terminal_config_shaders.toml",
+    }
+    for profile, path in profile_configs.items():
+        text = path.read_text(encoding="utf-8")
+        for required in ("[cursor]", "blinking = true", "blinking-interval = 650"):
+            if required not in text:
+                raise SystemExit(f"{path.relative_to(ROOT)} missing {required}")
+        if profile == "baseline":
+            if "trail-cursor" in text or "custom-shader" in text:
+                raise SystemExit(
+                    f"{path.relative_to(ROOT)} must stay a no-effects profile"
+                )
+        elif "trail-cursor = true" not in text:
+            raise SystemExit(
+                f"{path.relative_to(ROOT)} must keep Rio trail enabled"
+            )
+        if profile == "shaders" and "custom-shader" not in text:
+            raise SystemExit(
+                f"{path.relative_to(ROOT)} must keep custom shader profile"
+            )
+        print(f"ok {path.relative_to(ROOT)} {profile} profile")
 
 
 def validate_yazelix_font_config() -> None:

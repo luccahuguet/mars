@@ -68,6 +68,11 @@ Ghostty-compatible cursor and terminal-state names:
 Yzxterm keeps these standard names available so Ghostty-style shader source can
 compile and render without knowing about Rio trail internals.
 
+`iCursorVisible` follows the renderer's effective cursor visibility, not just
+the terminal's logical cursor-visible state. Blink-off frames export no normal
+cursor rectangle, set `iCursorVisible` to zero, and suppress Rio trail extension
+state so shader glow and native cursor blinking do not fight each other.
+
 ## Yzxterm Extension Surface
 
 The yzxterm shader wrapper defines:

@@ -11,6 +11,10 @@ custom-shader = [
 [window]
 decorations = "Disabled"
 
+[cursor]
+blinking = true
+blinking-interval = 650
+
 [effects]
 trail-cursor = true
 

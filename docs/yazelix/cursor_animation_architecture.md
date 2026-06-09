@@ -57,11 +57,11 @@ motion when `trail-cursor` is disabled.
 
 ## Profiles
 
-| Profile | Renderer | Rio Trail | Ghostty Shaders | Purpose |
-| --- | --- | --- | --- | --- |
-| `full`, `default`, `effects` | WebGPU | enabled | disabled | Dogfooding profile with Rio's native trail |
-| `baseline`, `no-effects`, `none` | WebGPU | disabled | disabled | No-effects comparison profile |
-| `shaders`, `cursor-shaders`, `ghostty-shaders` | WebGPU | enabled | enabled | Compatibility and visual-effect diagnostics |
+| Profile | Renderer | Rio Trail | Ghostty Shaders | Cursor Blink | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| `full`, `default`, `effects` | WebGPU | enabled | disabled | enabled, 650 ms | Dogfooding profile with Rio's native trail |
+| `baseline`, `no-effects`, `none` | WebGPU | disabled | disabled | enabled, 650 ms | No-effects comparison profile |
+| `shaders`, `cursor-shaders`, `ghostty-shaders` | WebGPU | enabled | enabled | enabled, 650 ms | Compatibility and visual-effect diagnostics |
 
 `YAZELIX_TERMINAL_RENDER_STRATEGY=game` remains a renderer scheduling
 diagnostic. It composes with each profile, but it does not imply shader use.

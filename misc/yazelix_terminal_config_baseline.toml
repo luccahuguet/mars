@@ -6,4 +6,8 @@ backend = "Webgpu"
 [window]
 decorations = "Disabled"
 
+[cursor]
+blinking = true
+blinking-interval = 650
+
 @yazelix_terminal_fonts@
