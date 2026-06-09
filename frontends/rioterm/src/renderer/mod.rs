@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 const VISUAL_BELL_DURATION: Duration = Duration::from_millis(180);
 const VISUAL_BELL_MAX_ALPHA: f32 = 0.28;
 const VISUAL_BELL_ORDER: u8 = 10;
+const CURSOR_BLINK_TYPING_DEBOUNCE: Duration = Duration::from_millis(120);
 
 /// The window-bg clear alpha that flows into sugarloaf's
 /// `set_background_color`. Stored on the renderer and re-applied on
@@ -51,6 +52,15 @@ fn window_bg_alpha(config: &Config) -> f32 {
 #[inline]
 fn effective_cursor_blinking(config_blinking: bool, terminal_blinking: bool) -> bool {
     config_blinking || terminal_blinking
+}
+
+#[inline]
+fn cursor_blink_paused_for_typing(last_typing: Option<Instant>, now: Instant) -> bool {
+    last_typing
+        .map(|last_typing| {
+            now.saturating_duration_since(last_typing) < CURSOR_BLINK_TYPING_DEBOUNCE
+        })
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -90,6 +100,19 @@ mod tests {
     fn terminal_cursor_blink_state_can_enable_effective_blinking() {
         assert!(effective_cursor_blinking(false, true));
         assert!(!effective_cursor_blinking(false, false));
+    }
+
+    #[test]
+    // Defends: idle cursor blinking resumes promptly after keyboard activity.
+    fn cursor_blink_typing_pause_is_short() {
+        let now = Instant::now();
+        assert!(cursor_blink_paused_for_typing(Some(now), now));
+
+        let idle_since = now
+            .checked_sub(CURSOR_BLINK_TYPING_DEBOUNCE + Duration::from_millis(1))
+            .unwrap();
+        assert!(!cursor_blink_paused_for_typing(Some(idle_since), now));
+        assert!(!cursor_blink_paused_for_typing(None, now));
     }
 }
 
@@ -611,17 +634,13 @@ impl Renderer {
             if context.renderable_content.has_blinking_enabled {
                 let has_selection = context.renderable_content.selection_range.is_some();
                 if !has_selection {
-                    let mut should_blink = true;
-                    if let Some(last_typing_time) = context.renderable_content.last_typing
-                    {
-                        if last_typing_time.elapsed() < std::time::Duration::from_secs(1)
-                        {
-                            should_blink = false;
-                        }
-                    }
+                    let now = Instant::now();
+                    let should_blink = !cursor_blink_paused_for_typing(
+                        context.renderable_content.last_typing,
+                        now,
+                    );
 
                     if should_blink {
-                        let now = std::time::Instant::now();
                         let should_toggle = if let Some(last_blink) =
                             context.renderable_content.last_blink_toggle
                         {
@@ -642,8 +661,12 @@ impl Renderer {
                     } else {
                         // When not blinking (e.g., during typing), ensure cursor is visible
                         context.renderable_content.is_blinking_cursor_visible = true;
-                        // Reset blink timing when not blinking so it starts fresh when blinking resumes
-                        context.renderable_content.last_blink_toggle = None;
+                        // Keep the blink timer armed while typing, so the
+                        // next idle blink frame can toggle immediately.
+                        let blink_interval =
+                            Duration::from_millis(self.config_blinking_interval);
+                        context.renderable_content.last_blink_toggle =
+                            now.checked_sub(blink_interval).or(Some(now));
                     }
                 } else {
                     // When there's a selection, keep cursor visible and reset blink timing
