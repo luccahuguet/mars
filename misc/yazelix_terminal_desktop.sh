@@ -120,19 +120,59 @@ configure_rio_config() {
   fi
 
   selected_config_home="$(select_default_config_home)"
-  case "${YAZELIX_TERMINAL_RENDER_STRATEGY:-events}" in
-    events | Events | EVENTS | event | Event | EVENT | default | none | NONE | 0)
+  appearance_mode="$(select_appearance_mode)"
+  render_strategy="$(select_render_strategy)"
+
+  case "$appearance_mode:$render_strategy" in
+    auto:events)
       export RIO_CONFIG_HOME="$selected_config_home"
-      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
       ;;
-    game | Game | GAME)
+    *)
       config_parent="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/yazelix-terminal"
-      config_home="$config_parent/game-config"
+      config_home="$config_parent/effective-config-$$"
       mkdir -p "$config_home"
-      write_game_config "$selected_config_home/config.toml" "$config_home/config.toml"
+      write_effective_config \
+        "$selected_config_home/config.toml" \
+        "$config_home/config.toml" \
+        "$appearance_mode" \
+        "$render_strategy"
+      if [ -d "$selected_config_home/themes" ]; then
+        rm -rf "$config_home/themes"
+        ln -s "$selected_config_home/themes" "$config_home/themes"
+      fi
       chmod 600 "$config_home/config.toml"
       export RIO_CONFIG_HOME="$config_home"
-      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
+      ;;
+  esac
+  export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
+}
+
+select_appearance_mode() {
+  case "${YAZELIX_TERMINAL_APPEARANCE:-dark}" in
+    "" | dark | Dark | DARK | default | Default | DEFAULT)
+      printf '%s\n' "dark"
+      ;;
+    light | Light | LIGHT)
+      printf '%s\n' "light"
+      ;;
+    auto | Auto | AUTO | system | System | SYSTEM | adaptive | Adaptive | ADAPTIVE)
+      printf '%s\n' "auto"
+      ;;
+    *)
+      printf 'Unsupported YAZELIX_TERMINAL_APPEARANCE: %s\n' "${YAZELIX_TERMINAL_APPEARANCE:-}" >&2
+      printf 'Use dark, light, auto, system, adaptive, or default.\n' >&2
+      exit 64
+      ;;
+  esac
+}
+
+select_render_strategy() {
+  case "${YAZELIX_TERMINAL_RENDER_STRATEGY:-events}" in
+    events | Events | EVENTS | event | Event | EVENT | default | none | NONE | 0)
+      printf '%s\n' "events"
+      ;;
+    game | Game | GAME)
+      printf '%s\n' "game"
       ;;
     *)
       printf 'Unsupported YAZELIX_TERMINAL_RENDER_STRATEGY: %s\n' "$YAZELIX_TERMINAL_RENDER_STRATEGY" >&2
@@ -203,23 +243,33 @@ select_default_config_home() {
   esac
 }
 
-write_game_config() {
+write_effective_config() {
   src="$1"
   dst="$2"
-  awk '
+  appearance_mode="$3"
+  render_strategy="$4"
+  awk -v appearance_mode="$appearance_mode" -v render_strategy="$render_strategy" '
     BEGIN { inserted = 0; in_renderer = 0 }
+    BEGIN {
+      if (appearance_mode != "auto") {
+        print "force-theme = \"" appearance_mode "\""
+      }
+    }
+    /^[[:space:]]*force-theme[[:space:]]*=/ { next }
     /^[[:space:]]*\[renderer\][[:space:]]*$/ {
       print
-      print "strategy = \"game\""
-      inserted = 1
+      if (render_strategy == "game") {
+        print "strategy = \"game\""
+        inserted = 1
+      }
       in_renderer = 1
       next
     }
     /^[[:space:]]*\[/ { in_renderer = 0 }
-    in_renderer && /^[[:space:]]*strategy[[:space:]]*=/ { next }
+    in_renderer && render_strategy == "game" && /^[[:space:]]*strategy[[:space:]]*=/ { next }
     { print }
     END {
-      if (!inserted) {
+      if (render_strategy == "game" && !inserted) {
         print ""
         print "[renderer]"
         print "strategy = \"game\""

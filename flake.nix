@@ -132,6 +132,27 @@
         };
         checks = {
           package = self'.packages."yazelix-terminal";
+          package_layout = pkgs.runCommand "yazelix-terminal-package-layout" {} ''
+            package=${self'.packages."yazelix-terminal"}
+            for path in \
+              share/yazelix-terminal/config.toml \
+              share/yazelix-terminal/baseline/config.toml \
+              share/yazelix-terminal/profiles/shaders/config.toml \
+              share/yazelix-terminal/emoji/twitter/config.toml \
+              share/yazelix-terminal/emoji/twitter/baseline/config.toml \
+              share/yazelix-terminal/emoji/twitter/profiles/shaders/config.toml \
+              share/yazelix-terminal/emoji/serenityos/config.toml \
+              share/yazelix-terminal/emoji/serenityos/baseline/config.toml \
+              share/yazelix-terminal/emoji/serenityos/profiles/shaders/config.toml \
+              share/yazelix-terminal/package-metadata.json
+            do
+              if [ ! -f "$package/$path" ]; then
+                echo "missing package layout file: $path" >&2
+                exit 1
+              fi
+            done
+            touch "$out"
+          '';
           conformance = pkgs.runCommand "yazelix-terminal-conformance" {nativeBuildInputs = [pkgs.python3];} ''
             cd ${./.}
             python3 tools/yazelix_conformance.py verify

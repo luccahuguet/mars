@@ -3,170 +3,212 @@
   "fixtures": [
     {
       "id": "osc8_hyperlink",
+      "kind": "protocol",
+      "source": "iterm2",
       "tier": "must",
       "protocol": "OSC 8",
       "description": "Open a hyperlink span, write linked text, close the span, then write plain text.",
-      "source": "Common OSC 8 behavior, cross-checked against Rio hyperlink tests.",
+      "reference": "Common OSC 8 behavior, cross-checked against Rio hyperlink tests.",
       "hex": "706c61696e201b5d383b69643d79747a3b68747470733a2f2f6578616d706c652e636f6d076c696e6b1b5d383b3b07646f6e650d0a"
     },
     {
       "id": "osc52_clipboard_query",
+      "kind": "protocol",
+      "source": "de-facto",
       "tier": "must",
       "protocol": "OSC 52",
       "description": "Query the clipboard using the c clipboard designator.",
-      "source": "OSC 52 clipboard query syntax.",
+      "reference": "OSC 52 clipboard query syntax.",
       "hex": "1b5d35323b633b3f07"
     },
     {
       "id": "osc5522_rich_clipboard_text_plain",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty OSC 5522",
       "description": "Read text/plain, begin a text/plain write, alias it to text/plain;charset=utf-8, send UTF-8 text/plain data, then finish the write.",
-      "source": "Kitty rich clipboard protocol uses OSC 5522 metadata and base64 payload packets.",
+      "reference": "Kitty rich clipboard protocol uses OSC 5522 metadata and base64 payload packets.",
       "hex": "1b5d353532323b747970653d726561643b64475634644339776247467062673d3d1b5c1b5d353532323b747970653d77726974651b5c1b5d353532323b747970653d77616c6961733a6d696d653d64475634644339776247467062673d3d3b644756346443397762474670626a746a6147467963325630505856305a6930341b5c1b5d353532323b747970653d77646174613a6d696d653d644756346443397762474670626a746a6147467963325630505856305a6930343b614756736247383d1b5c1b5d353532323b747970653d77646174611b5c"
     },
     {
       "id": "osc21_kitty_color_control",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty OSC 21",
       "description": "Query foreground, set background, reset cursor, query selection background, set visual bell color, and query the second transparent background color.",
-      "source": "Kitty keyed color protocol and Ghostty OSC 21 parser behavior.",
+      "reference": "Kitty keyed color protocol and Ghostty OSC 21 parser behavior.",
       "hex": "1b5d32313b666f726567726f756e643d3f3b6261636b67726f756e643d233031303230333b637572736f723b73656c656374696f6e5f6261636b67726f756e643d3f3b76697375616c5f62656c6c3d236666666666663b7365636f6e645f7472616e73706172656e745f6261636b67726f756e643d3f07"
     },
     {
       "id": "osc22_pointer_shapes",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty OSC 22",
       "description": "Set a pointer shape, push two shapes, then query support for one valid and one invalid shape.",
-      "source": "Kitty pointer shapes protocol.",
+      "reference": "Kitty pointer shapes protocol.",
       "hex": "1b5d32323b706f696e746572071b5d32323b3e776169742c63726f7373686169721b5c1b5d32323b3f706f696e7465722c6e6f2d737563682d6e616d651b5c"
     },
     {
       "id": "osc133_semantic_prompt",
+      "kind": "protocol",
+      "source": "ghostty-behavior",
       "tier": "must",
       "protocol": "OSC 133",
       "description": "Mark prompt start, input start, output start, and command end.",
-      "source": "Ghostty semantic_prompt parser supports A, B, C, D command markers.",
+      "reference": "Ghostty semantic_prompt parser supports A, B, C, D command markers.",
       "hex": "1b5d3133333b410770726f6d707424201b5d3133333b42076563686f206f6b1b5d3133333b43076f6b0d0a1b5d3133333b443b3007"
     },
     {
       "id": "osc66_text_sizing",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty OSC 66",
       "description": "Render URL-safe UTF-8 text at scale 2.",
-      "source": "Ghostty kitty_text_sizing parser test accepts 66;s=2;<payload>.",
+      "reference": "Ghostty kitty_text_sizing parser test accepts 66;s=2;<payload>.",
       "hex": "1b5d36363b733d323b626967207465787407"
     },
     {
       "id": "osc99_notification",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty OSC 99",
       "description": "Display a simple Kitty desktop notification with no metadata.",
-      "source": "Kitty desktop notification protocol uses OSC 99 metadata and payload.",
+      "reference": "Kitty desktop notification protocol uses OSC 99 metadata and payload.",
       "hex": "1b5d39393b3b48656c6c6f20776f726c641b5c"
     },
     {
       "id": "kitty_keyboard_query",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "protocol": "Kitty keyboard",
       "description": "Query current Kitty keyboard protocol mode.",
-      "source": "Rio handler dispatches CSI ? u to report_keyboard_mode.",
+      "reference": "Rio handler dispatches CSI ? u to report_keyboard_mode.",
       "hex": "1b5b3f75"
     },
     {
       "id": "kitty_keyboard_all_flags_query",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "protocol": "Kitty keyboard",
       "description": "Set all Kitty keyboard progressive enhancement flags, then query the active flags.",
-      "source": "Kitty keyboard protocol progressive enhancement uses CSI = flags ; mode u and CSI ? u.",
+      "reference": "Kitty keyboard protocol progressive enhancement uses CSI = flags ; mode u and CSI ? u.",
       "hex": "1b5b3d33313b31751b5b3f75"
     },
     {
       "id": "kitty_keyboard_stack_restore",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "protocol": "Kitty keyboard",
       "description": "Push disambiguation mode, union report-all-keys, query, pop one stack entry, then query again.",
-      "source": "Kitty keyboard protocol stack management uses CSI > flags u and CSI < number u.",
+      "reference": "Kitty keyboard protocol stack management uses CSI > flags u and CSI < number u.",
       "hex": "1b5b3e31751b5b3d383b32751b5b3f751b5b3c751b5b3f75"
     },
     {
       "id": "kitty_unscroll_three_lines",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty unscroll",
       "description": "Request three lines of Kitty unscrolling with CSI 3 + T.",
-      "source": "Kitty unscrolling protocol uses CSI n + T to pan down while filling from scrollback.",
+      "reference": "Kitty unscrolling protocol uses CSI n + T to pan down while filling from scrollback.",
       "hex": "1b5b332b54"
     },
     {
       "id": "kitty_multiple_cursors_query_set_clear",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty multiple cursors",
       "description": "Query support, set a follow-main cursor, query cursor state, set extra cursor colors, query colors, then clear all extra cursors.",
-      "source": "Kitty multiple cursors protocol uses CSI > ... SP q with shape, coordinate, color, support, state, and color query operations.",
+      "reference": "Kitty multiple cursors protocol uses CSI > ... SP q with shape, coordinate, color, support, state, and color query operations.",
       "hex": "1b5b3e20711b5b3e32393b323a343a3520711b5b3e31303020711b5b3e33303b323a313a323a3320711b5b3e34303b353a343220711b5b3e31303120711b5b3e303b342071"
     },
     {
       "id": "kitty_deccara_all_sgr",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "protocol": "Kitty DECCARA",
       "description": "Write two short rows, enable rectangular attribute changes, then apply RGB foreground, indexed background, and bold SGR to a 2x3 rectangle.",
-      "source": "Kitty DECCARA extension uses CSI top;left;bottom;right;SGR... $ r and commonly brackets the operation with DECSACE CSI 2 * x / CSI * x.",
+      "reference": "Kitty DECCARA extension uses CSI top;left;bottom;right;SGR... $ r and commonly brackets the operation with DECSACE CSI 2 * x / CSI * x.",
       "hex": "1b5b322a786162630d0a6465661b5b313b313b323b333b33383a323a313a323a333b34383b353b343b3124721b5b2a78"
     },
     {
       "id": "kitty_file_transfer_send_start",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "cool",
       "protocol": "Kitty file transfer",
       "description": "Start an OSC 5113 send session that must request approval before filesystem access.",
-      "source": "Kitty file transfer commands use OSC 5113 ; key=value ... ST, with ac=send starting remote-to-terminal transfer sessions.",
+      "reference": "Kitty file transfer commands use OSC 5113 ; key=value ... ST, with ac=send starting remote-to-terminal transfer sessions.",
       "hex": "1b5d353131333b61633d73656e643b69643d73657373696f6e2d311b5c"
     },
     {
       "id": "kitty_file_transfer_zlib_file",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "cool",
       "protocol": "Kitty file transfer",
       "description": "Declare a regular OSC 5113 file transfer entry using zlib compression metadata.",
-      "source": "Kitty file transfer supports RFC 1950 zlib compression on individual file commands with zip=zlib.",
+      "reference": "Kitty file transfer supports RFC 1950 zlib compression on individual file commands with zip=zlib.",
       "hex": "1b5d353131333b61633d66696c653b69643d73657373696f6e2d313b6669643d66696c655f313b7a69703d7a6c69623b737a3d31313b6e3d5932397463484a6c63334e6c5a4335306548513d1b5c"
     },
     {
       "id": "kitty_graphics_1x1_rgba",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "protocol": "Kitty graphics",
       "description": "Transmit and place a 1x1 RGBA red pixel image.",
-      "source": "Kitty graphics APC G transmit/place shape; behavior must be verified against real terminals.",
+      "reference": "Kitty graphics APC G transmit/place shape; behavior must be verified against real terminals.",
       "hex": "1b5f47613d742c663d33322c733d312c763d312c693d312c6d3d303b2f7741412f773d3d1b5c1b5f47613d702c693d312c633d312c723d311b5c0d0a"
     },
     {
       "id": "sixel_minimal",
+      "kind": "protocol",
+      "source": "de-facto",
       "tier": "must",
       "protocol": "Sixel",
       "description": "Minimal DCS sixel payload that exercises the sixel parser path.",
-      "source": "Sixel DCS q introducer with a tiny payload.",
+      "reference": "Sixel DCS q introducer with a tiny payload.",
       "hex": "1b5071237e1b5c0d0a"
     },
     {
       "id": "synchronized_output",
+      "kind": "protocol",
+      "source": "de-facto",
       "tier": "must",
       "protocol": "DECSET 2026",
       "description": "Begin synchronized update, write two lines, then end synchronized update.",
-      "source": "Rio parser recognizes exact CSI ? 2026 h/l sequences.",
+      "reference": "Synchronized output uses the CSI ? 2026 h/l sequences popularized by iTerm2 and adopted by modern terminals.",
       "hex": "1b5b3f32303236686672616d65206f6e650d0a6672616d652074776f1b5b3f323032366c0d0a"
     },
     {
       "id": "xtversion_query",
+      "kind": "protocol",
+      "source": "xterm",
       "tier": "must",
       "protocol": "XTVERSION",
       "description": "Query terminal version using CSI > q.",
-      "source": "Rio handler dispatches CSI > q to report_version.",
+      "reference": "Rio handler dispatches CSI > q to report_version.",
       "hex": "1b5b3e71"
     },
     {
       "id": "xtgettcap_rgb",
+      "kind": "protocol",
+      "source": "xterm",
       "tier": "must",
       "protocol": "XTGETTCAP",
       "description": "Query the RGB terminfo capability using DCS + q RGB-in-hex.",
-      "source": "Rio tests use DCS + q 524742 as the RGB XTGETTCAP request.",
+      "reference": "Rio tests use DCS + q 524742 as the RGB XTGETTCAP request.",
       "hex": "1b502b713532343734321b5c"
     }
   ]

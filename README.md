@@ -87,6 +87,8 @@ visibility follows the renderer's effective blink state, so blink-off frames do
 not keep a stale shader glow alive.
 `YAZELIX_TERMINAL_EMOJI_FONT=twitter` or `serenityos` selects the matching
 packaged profile root before launch. Invalid values fail clearly.
+`YAZELIX_TERMINAL_APPEARANCE=light` or `auto` selects the packaged light or
+adaptive dark/light pair. The default remains `dark` for continuity.
 Yazelix Terminal owns these profile assets and Rio-aware shader details; main
 Yazelix should select stable profile names rather than generate or inspect
 Rio-specific shader config.
@@ -108,6 +110,9 @@ Wrapper override knobs:
 | `YAZELIX_TERMINAL_EMOJI_FONT=noto` | Uses the default Noto Color Emoji fallback |
 | `YAZELIX_TERMINAL_EMOJI_FONT=twitter` | Uses the packaged Twitter/Twemoji color emoji fallback |
 | `YAZELIX_TERMINAL_EMOJI_FONT=serenityos` | Uses the packaged SerenityOS emoji fallback |
+| `YAZELIX_TERMINAL_APPEARANCE=dark` | Forces the packaged dark palette; this is the default |
+| `YAZELIX_TERMINAL_APPEARANCE=light` | Forces the packaged light palette |
+| `YAZELIX_TERMINAL_APPEARANCE=auto` | Uses the packaged adaptive dark/light pair and follows the platform theme |
 | `YAZELIX_TERMINAL_RENDER_STRATEGY=events` | Uses the packaged config with Rio's default event renderer strategy |
 | `YAZELIX_TERMINAL_RENDER_STRATEGY=game` | Creates a runtime copy of the packaged config with `strategy = "game"` for diagnostics |
 | `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=none` | Skips automatic nixGL/nixVulkan wrapper discovery |
@@ -148,6 +153,16 @@ nix build .#yazelix-terminal -o result_yazelix_terminal_package
 desktop-file-validate result_yazelix_terminal_package/share/applications/yazelix-terminal.desktop
 result_yazelix_terminal_package/bin/yazelix-terminal --version
 python3 tools/yazelix_conformance.py verify
+```
+
+The Python protocol conformance entrypoint delegates supported non-interactive
+commands to the Rust port when
+`tools/yazelix_protocol_conformance/target/debug/yazelix-protocol-conformance`
+or the release binary exists. Set `YAZELIX_CONFORMANCE_RS=0` to force the Python
+implementation, or run the Rust port directly:
+
+```sh
+cargo run --manifest-path tools/yazelix_protocol_conformance/Cargo.toml -- verify
 ```
 
 Focused graphics checks:

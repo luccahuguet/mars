@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small conformance harness for the Yazelix terminal experiment."""
+"""Protocol conformance harness for the Yazelix terminal experiment."""
 
 from __future__ import annotations
 
@@ -24,6 +24,54 @@ DEFAULT_SCREENSHOT_DIR = ROOT / "artifacts" / "conformance" / "screenshots"
 DEFAULT_CPU_CONFIG = ROOT / "artifacts" / "conformance" / "rio_cpu_config"
 DEFAULT_SHADER_SCREENSHOT_DIR = ROOT / "artifacts" / "shader_probe" / "screenshots"
 DEFAULT_SHADER_CONFIG = ROOT / "artifacts" / "shader_probe" / "rio_wgpu_config"
+ALLOWED_FIXTURE_KINDS = {"protocol", "visual-probe", "comparison"}
+ALLOWED_FIXTURE_SOURCES = {
+    "kitty-spec",
+    "ghostty-behavior",
+    "xterm",
+    "iterm2",
+    "de-facto",
+    "rio-implementation",
+}
+RUST_SUPPORTED_SUBCOMMANDS = {
+    "list",
+    "emit",
+    "verify",
+    "keyboard-list",
+    "keyboard-verify-capture",
+    "record-env",
+}
+
+
+def maybe_exec_rust_port(argv: list[str]) -> None:
+    if not argv or argv[0] not in RUST_SUPPORTED_SUBCOMMANDS:
+        return
+    rust_override = os.environ.get("YAZELIX_CONFORMANCE_RS", "")
+    if rust_override in {"0", "false", "False", "FALSE", "no", "No", "NO"}:
+        return
+
+    candidates: list[Path] = []
+    if rust_override and rust_override not in {"1", "true", "True", "TRUE", "yes", "Yes", "YES"}:
+        candidates.append(Path(rust_override).expanduser())
+    candidates.extend(
+        [
+            ROOT
+            / "tools"
+            / "yazelix_protocol_conformance"
+            / "target"
+            / "debug"
+            / "yazelix-protocol-conformance",
+            ROOT
+            / "tools"
+            / "yazelix_protocol_conformance"
+            / "target"
+            / "release"
+            / "yazelix-protocol-conformance",
+        ]
+    )
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            os.execv(str(candidate), [str(candidate), *argv])
 
 
 def load_manifest() -> dict[str, Any]:
@@ -109,6 +157,23 @@ def keyboard_capture_matches(case: dict[str, Any], captured: bytes) -> bool:
     return True
 
 
+def validate_fixture_metadata(fixture: dict[str, Any], context: str) -> None:
+    kind = fixture.get("kind")
+    if kind not in ALLOWED_FIXTURE_KINDS:
+        raise SystemExit(
+            f"{context} has unsupported kind {kind!r}; "
+            f"expected one of {sorted(ALLOWED_FIXTURE_KINDS)}"
+        )
+    source = fixture.get("source")
+    if source not in ALLOWED_FIXTURE_SOURCES:
+        raise SystemExit(
+            f"{context} has unsupported source {source!r}; "
+            f"expected one of {sorted(ALLOWED_FIXTURE_SOURCES)}"
+        )
+    if not fixture.get("reference"):
+        raise SystemExit(f"{context} missing reference")
+
+
 def validate_keyboard_manifest() -> None:
     manifest = load_keyboard_manifest()
     cleanup = hex_bytes(manifest.get("cleanup_hex", ""), "keyboard cleanup")
@@ -121,7 +186,8 @@ def validate_keyboard_manifest() -> None:
         if not setup:
             raise SystemExit(f"keyboard case {case['id']} setup is empty")
         expected_keyboard_fragments(case)
-        for field in ("tier", "keys", "workflow", "source"):
+        validate_fixture_metadata(case, f"keyboard case {case['id']}")
+        for field in ("tier", "keys", "workflow", "reference"):
             if not case.get(field):
                 raise SystemExit(f"keyboard case {case['id']} missing {field}")
 
@@ -184,6 +250,7 @@ def command_verify(_: argparse.Namespace) -> int:
         if fixture_id in seen:
             raise SystemExit(f"duplicate fixture id: {fixture_id}")
         seen.add(fixture_id)
+        validate_fixture_metadata(fixture, f"fixture {fixture_id}")
         data = fixture_bytes(fixture)
         if not data:
             raise SystemExit(f"fixture {fixture_id} is empty")
@@ -202,6 +269,7 @@ def command_verify(_: argparse.Namespace) -> int:
     print(f"ok {shader.relative_to(ROOT)}")
     validate_yazelix_shader_assets()
     validate_yazelix_profile_configs()
+    validate_yazelix_theme_configs()
     validate_yazelix_font_config()
     validate_package_metadata_sources()
     validate_keyboard_manifest()
@@ -249,7 +317,12 @@ def validate_yazelix_profile_configs() -> None:
     }
     for profile, path in profile_configs.items():
         text = path.read_text(encoding="utf-8")
-        for required in ("[cursor]", "blinking = true", "blinking-interval = 650"):
+        for required in (
+            'adaptive-theme = { dark = "yazelix-dark", light = "yazelix-light" }',
+            "[cursor]",
+            "blinking = true",
+            "blinking-interval = 650",
+        ):
             if required not in text:
                 raise SystemExit(f"{path.relative_to(ROOT)} missing {required}")
         if profile == "baseline":
@@ -266,6 +339,60 @@ def validate_yazelix_profile_configs() -> None:
                 f"{path.relative_to(ROOT)} must keep custom shader profile"
             )
         print(f"ok {path.relative_to(ROOT)} {profile} profile")
+
+
+def validate_yazelix_theme_configs() -> None:
+    import tomllib
+
+    theme_files = {
+        "dark": ROOT / "misc" / "yazelix_terminal_theme_dark.toml",
+        "light": ROOT / "misc" / "yazelix_terminal_theme_light.toml",
+    }
+    required_colors = (
+        "background",
+        "foreground",
+        "cursor",
+        "vi-cursor",
+        "black",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan",
+        "white",
+        "light-black",
+        "light-red",
+        "light-green",
+        "light-yellow",
+        "light-blue",
+        "light-magenta",
+        "light-cyan",
+        "light-white",
+        "tabs",
+        "tab-border",
+        "tabs-active",
+        "bar",
+        "split",
+        "split-active",
+        "selection-background",
+        "selection-foreground",
+        "search-match-background",
+        "search-match-foreground",
+        "search-focused-match-background",
+        "search-focused-match-foreground",
+        "hint-background",
+        "hint-foreground",
+    )
+    for mode, path in theme_files.items():
+        parsed = tomllib.loads(path.read_text(encoding="utf-8"))
+        colors = parsed.get("colors")
+        if not isinstance(colors, dict):
+            raise SystemExit(f"{path.relative_to(ROOT)} missing [colors]")
+        for color in required_colors:
+            if color not in colors:
+                raise SystemExit(f"{path.relative_to(ROOT)} missing {color}")
+        print(f"ok {path.relative_to(ROOT)} {mode} theme")
 
 
 def validate_yazelix_font_config() -> None:
@@ -355,8 +482,25 @@ def validate_package_metadata_sources() -> None:
             "yzxtermPackageMetadata",
             "package_profile = packageProfile",
             "checked_package = packageChecked",
+            "supported_appearance_modes",
+            '"dark"',
+            '"light"',
+            '"auto"',
+            'default_appearance_mode = "dark"',
+            'appearance = "YAZELIX_TERMINAL_APPEARANCE"',
+            "install_yazelix_themes",
+            "yazelix_terminal_theme_dark.toml",
+            "yazelix_terminal_theme_light.toml",
+            "yazelix-dark.toml",
+            "yazelix-light.toml",
             "share/yazelix-terminal/package-metadata.json",
             "passthru",
+        ],
+        ROOT / "misc" / "yazelix_terminal_desktop.sh": [
+            "select_appearance_mode",
+            "YAZELIX_TERMINAL_APPEARANCE",
+            "write_effective_config",
+            "force-theme",
         ],
         ROOT / "flake.nix": [
             'packageProfile = "release";',
@@ -628,16 +772,16 @@ def command_launch_cpu_screenshot(args: argparse.Namespace) -> int:
         "-c",
         args.rio_bin,
         "--app-id",
-        "yazelix-terminal-conformance",
+        "yazelix-terminal-protocol-conformance",
         "--title-placeholder",
-        "Yazelix Terminal Conformance",
+        "Yazelix Terminal Protocol Conformance",
         "-e",
         "bash",
         "--noprofile",
         "--norc",
         "-c",
         (
-            "printf 'yazelix-terminal conformance\\n"
+            "printf 'yazelix-terminal protocol conformance\\n"
             "CPU renderer screenshot probe\\n"
             "PID $$\\n'; "
             f"sleep {int(args.sleep_seconds)}"
@@ -779,6 +923,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    maybe_exec_rust_port(sys.argv[1:])
     parser = build_parser()
     args = parser.parse_args()
     return args.func(args)

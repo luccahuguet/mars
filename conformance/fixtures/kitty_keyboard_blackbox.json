@@ -5,6 +5,8 @@
   "cases": [
     {
       "id": "esc_disambiguate",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "keys": "Esc",
       "workflow": "Helix/Yazi escape handling without timing ambiguity",
@@ -13,10 +15,12 @@
         "mode": "exact",
         "hex": "1b5b323775"
       },
-      "source": "Kitty keyboard protocol maps Escape to CSI 27 u and the disambiguate flag sends Escape as CSI u."
+      "reference": "Kitty keyboard protocol maps Escape to CSI 27 u and the disambiguate flag sends Escape as CSI u."
     },
     {
       "id": "ctrl_c_disambiguate",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "keys": "Ctrl+C",
       "workflow": "Shell/editor interrupt keys delivered to the application event loop",
@@ -25,10 +29,12 @@
         "mode": "exact",
         "hex": "1b5b39393b3575"
       },
-      "source": "Kitty keyboard protocol uses lowercase Unicode key codes and encodes Ctrl as modifier value 5."
+      "reference": "Kitty keyboard protocol uses lowercase Unicode key codes and encodes Ctrl as modifier value 5."
     },
     {
       "id": "ctrl_shift_i_disambiguate",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "keys": "Ctrl+Shift+I",
       "workflow": "Helix/Nushell shortcuts that collide with legacy Tab/Ctrl+I",
@@ -37,10 +43,12 @@
         "mode": "exact",
         "hex": "1b5b3130353b3675"
       },
-      "source": "Kitty keyboard protocol example encodes Ctrl+Shift+I as CSI 105;6 u."
+      "reference": "Kitty keyboard protocol example encodes Ctrl+Shift+I as CSI 105;6 u."
     },
     {
       "id": "alt_left_bracket_disambiguate",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "keys": "Alt+[",
       "workflow": "Zellij/Yazi bindings that otherwise look like the start of CSI",
@@ -49,10 +57,12 @@
         "mode": "exact",
         "hex": "1b5b39313b3375"
       },
-      "source": "Kitty keyboard protocol calls out Alt+[ as a CSI ambiguity fixed by the disambiguate flag."
+      "reference": "Kitty keyboard protocol calls out Alt+[ as a CSI ambiguity fixed by the disambiguate flag."
     },
     {
       "id": "dead_acute_e_disambiguate",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "keys": "Dead acute then E",
       "workflow": "Dead-key composition remains text input while Zellij enables enhanced keyboard disambiguation",
@@ -61,10 +71,12 @@
         "mode": "exact",
         "hex": "c3a9"
       },
-      "source": "IME/dead-key commits are text input transactions; the composing key must not be emitted separately or encoded as a Kitty keyboard event."
+      "reference": "IME/dead-key commits are text input transactions; the composing key must not be emitted separately or encoded as a Kitty keyboard event."
     },
     {
       "id": "kp_left_disambiguate",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "keys": "Keypad Left",
       "workflow": "Keypad navigation remains distinguishable from cursor arrows",
@@ -73,10 +85,12 @@
         "mode": "exact",
         "hex": "1b5b353734313775"
       },
-      "source": "Kitty keyboard protocol assigns keypad left its own private key code, CSI 57417 u."
+      "reference": "Kitty keyboard protocol assigns keypad left its own private key code, CSI 57417 u."
     },
     {
       "id": "kp_add_disambiguate",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "must",
       "keys": "Keypad +",
       "workflow": "Keypad operators remain distinguishable from main-layout punctuation",
@@ -85,10 +99,12 @@
         "mode": "exact",
         "hex": "1b5b353734313375"
       },
-      "source": "Kitty keyboard protocol assigns keypad plus its own private key code, CSI 57413 u."
+      "reference": "Kitty keyboard protocol assigns keypad plus its own private key code, CSI 57413 u."
     },
     {
       "id": "a_repeat_all_keys_event_text",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "keys": "Hold A until it repeats",
       "workflow": "Games and TUIs can distinguish key repeat while still receiving text",
@@ -99,10 +115,12 @@
           "1b5b39373b313a323b393775"
         ]
       },
-      "source": "Kitty keyboard protocol reports repeat as event type 2 and associated text as code points when requested."
+      "reference": "Kitty keyboard protocol reports repeat as event type 2 and associated text as code points when requested."
     },
     {
       "id": "a_release_all_keys_event",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "keys": "Press and release A",
       "workflow": "Games and TUIs can distinguish release events",
@@ -113,10 +131,12 @@
           "1b5b39373b313a3375"
         ]
       },
-      "source": "Kitty keyboard protocol reports release as event type 3 when report-event-types and report-all-keys are enabled."
+      "reference": "Kitty keyboard protocol reports release as event type 3 when report-event-types and report-all-keys are enabled."
     },
     {
       "id": "shift_a_associated_text",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "keys": "Shift+A",
       "workflow": "Text-aware editors receive both key identity and generated text",
@@ -127,10 +147,12 @@
           "1b5b39373b323b363575"
         ]
       },
-      "source": "Kitty keyboard protocol example encodes Shift+A with associated text as CSI 97;2;65 u."
+      "reference": "Kitty keyboard protocol example encodes Shift+A with associated text as CSI 97;2;65 u."
     },
     {
       "id": "left_control_modifier_events",
+      "kind": "protocol",
+      "source": "kitty-spec",
       "tier": "should",
       "keys": "Press and release Left Control",
       "workflow": "Report-all mode exposes standalone modifier key events",
@@ -142,7 +164,7 @@
           "1b5b35373434323b313a3375"
         ]
       },
-      "source": "Kitty keyboard protocol requires modifier key events to include the modifier state after the current event."
+      "reference": "Kitty keyboard protocol requires modifier key events to include the modifier state after the current event."
     }
   ]
 }

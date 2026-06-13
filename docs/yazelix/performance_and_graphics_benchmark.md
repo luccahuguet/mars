@@ -145,9 +145,9 @@ python3 tools/yazelix_benchmark.py frame-run --config-template yzt-default --wor
 python3 tools/yazelix_benchmark.py frame-run --config-template yzt-shaders --workload helix-viewport --lines 400 --hold-seconds 1
 ```
 
-The `wgpu-shader` template enables the Ghostty cursor shader probe and Rio's
-game render strategy, which makes long-running shader animation stability
-measurable from the same frame log.
+The `wgpu-shader` template enables the Ghostty-compatible cursor shader probe
+and Rio's game render strategy, which makes long-running shader animation
+stability measurable from the same frame log.
 
 The Helix-style workloads are deterministic proxies for editor movement without
 GUI key injection:

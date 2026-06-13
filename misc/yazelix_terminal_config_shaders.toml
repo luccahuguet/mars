@@ -1,4 +1,5 @@
 confirm-before-quit = false
+adaptive-theme = { dark = "yazelix-dark", light = "yazelix-light" }
 
 [renderer]
 backend = "Webgpu"

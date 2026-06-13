@@ -69,6 +69,12 @@
     default_profile = "full";
     baseline_profile = "baseline";
     shader_profile = "shaders";
+    supported_appearance_modes = [
+      "dark"
+      "light"
+      "auto"
+    ];
+    default_appearance_mode = "dark";
     supported_emoji_fonts = supportedEmojiFonts;
     default_emoji_font = "noto";
     emoji_fonts = emojiFontMetadata;
@@ -86,6 +92,7 @@
       app_id = "YAZELIX_TERMINAL_APP_ID";
       render_strategy = "YAZELIX_TERMINAL_RENDER_STRATEGY";
       graphics_wrapper = "YAZELIX_TERMINAL_GRAPHICS_WRAPPER";
+      appearance = "YAZELIX_TERMINAL_APPEARANCE";
       emoji_font = "YAZELIX_TERMINAL_EMOJI_FONT";
     };
     main_yazelix_boundary = "Select package/profile by metadata; do not parse yzxterm configs or shader files.";
@@ -168,6 +175,16 @@ in
           fi
         }
 
+        install_yazelix_themes() {
+          theme_config_root="$1"
+
+          install -dm 755 "$theme_config_root/themes"
+          install -m 644 misc/yazelix_terminal_theme_dark.toml \
+                           "$theme_config_root/themes/yazelix-dark.toml"
+          install -m 644 misc/yazelix_terminal_theme_light.toml \
+                           "$theme_config_root/themes/yazelix-light.toml"
+        }
+
         render_yazelix_profile_set() {
           config_root="$1"
           emoji_font_dir="$2"
@@ -178,16 +195,19 @@ in
             "$config_root/config.toml" \
             "$emoji_font_dir" \
             "$emoji_font_family"
+          install_yazelix_themes "$config_root"
           install -dm 755 "$config_root/baseline"
           render_yazelix_config misc/yazelix_terminal_config_baseline.toml \
             "$config_root/baseline/config.toml" \
             "$emoji_font_dir" \
             "$emoji_font_family"
+          install_yazelix_themes "$config_root/baseline"
           install -dm 755 "$config_root/profiles/shaders"
           render_yazelix_config misc/yazelix_terminal_config_shaders.toml \
             "$config_root/profiles/shaders/config.toml" \
             "$emoji_font_dir" \
             "$emoji_font_family"
+          install_yazelix_themes "$config_root/profiles/shaders"
         }
 
         render_yazelix_profile_set "$out/share/yazelix-terminal" \

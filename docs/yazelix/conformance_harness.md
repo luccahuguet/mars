@@ -1,8 +1,17 @@
-# Conformance Harness
+# Protocol Conformance Harness
 
-The local harness lives at `tools/yazelix_conformance.py`. It is intentionally
-small and dependency-free so protocol research can move without changing Rio's
-Rust workspace.
+The local protocol harness lives at `tools/yazelix_conformance.py`. The Python
+entrypoint remains the stable command surface. Supported non-interactive
+commands delegate to the isolated Rust port at
+`tools/yazelix_protocol_conformance` when that binary exists; set
+`YAZELIX_CONFORMANCE_RS=0` to force the Python implementation.
+
+The harness has three explicit scopes:
+
+- protocol conformance fixtures for stable byte streams and manifest checks
+- visual/rendering probes for shader, CPU renderer, and screenshot evidence
+- behavior comparison targets for black-box checks against Ghostty, WezTerm,
+  Kitty, or other terminals
 
 ## Commands
 
@@ -12,7 +21,8 @@ List checked-in fixture streams:
 python3 tools/yazelix_conformance.py list
 ```
 
-Validate fixture manifest bytes and the Ghostty cursor shader probe:
+Validate protocol fixture manifest bytes, fixture metadata, keyboard manifest
+metadata, and the cursor shader ABI probe:
 
 ```text
 python3 tools/yazelix_conformance.py verify
@@ -49,8 +59,8 @@ Launch the built Rio binary with CPU renderer and capture a COSMIC screenshot:
 python3 tools/yazelix_conformance.py launch-cpu-screenshot
 ```
 
-Launch the built WGPU Rio binary with the Ghostty cursor shader probe and
-capture a COSMIC screenshot:
+Launch the built WGPU Rio binary with the Ghostty-compatible cursor shader
+probe and capture a COSMIC screenshot:
 
 ```text
 python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot
@@ -85,7 +95,7 @@ COSMIC/Wayland/NVIDIA stack now creates a WGPU/Vulkan surface for the shader
 probe, so Vulkan is the primary validation path for cursor-shader work. Pass
 `--wgpu-backend gl` only when investigating a host-specific Vulkan regression.
 
-## Current Fixture Scope
+## Protocol Fixture Scope
 
 The first manifest covers:
 
@@ -109,6 +119,14 @@ The first manifest covers:
 - XTVERSION
 - XTGETTCAP RGB query
 
+Each fixture declares:
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | Fixture bucket: `protocol`, `visual-probe`, or `comparison` |
+| `source` | Short source category: `kitty-spec`, `ghostty-behavior`, `xterm`, `iterm2`, `de-facto`, or `rio-implementation` |
+| `reference` | Human-readable note explaining the concrete source or comparison behavior |
+
 The fixtures are not proof that Rio supports every protocol correctly. They are
 stable byte streams that future beads can feed into Rio, Ghostty, WezTerm, or
 black-box probes and compare against expected behavior.
@@ -117,12 +135,23 @@ The Kitty keyboard black-box matrix is separate from `manifest.json` because it
 is a manual capture protocol, not a byte stream sent to the terminal. It is
 documented in `docs/yazelix/kitty_keyboard_blackbox.md`.
 
-## Shader Probe
+## Visual And Rendering Probes
 
 `conformance/shaders/ghostty_cursor_probe.glsl` is a minimal shader that reads
-Ghostty's cursor uniforms. It is not a visual parity target by itself. Its job is
-to fail early when a renderer path cannot compile or populate the names Yazelix
-cursor presets depend on.
+the standard Ghostty-compatible cursor uniforms. It is not a visual parity target
+by itself. Its job is to fail early when a renderer path cannot compile or
+populate the names Yazelix cursor presets depend on.
 
 CPU renderer screenshots prove process launch and window rendering only. They do
 not prove shader parity.
+
+## Comparison Targets
+
+Ghostty remains the primary behavior and quality comparison target for yzxterm,
+especially for shader ABI behavior and terminal-app compatibility. WezTerm is a
+mature terminal-engine comparison target. Kitty is the normative source for
+Kitty-owned protocol specs, not an implementation source to copy from.
+
+When a fixture records Ghostty behavior, it uses `source = "ghostty-behavior"`
+so that the harness does not imply that every fixture is a Ghostty conformance
+test.
