@@ -1,10 +1,8 @@
 # Protocol Conformance Harness
 
-The local protocol harness lives at `tools/yazelix_conformance.py`. The Python
-entrypoint remains the stable command surface. Supported non-interactive
-commands delegate to the isolated Rust port at
-`tools/yazelix_protocol_conformance` when that binary exists; set
-`YAZELIX_CONFORMANCE_RS=0` to force the Python implementation.
+The local protocol harness lives at `tools/yazelix_protocol_conformance`. The
+flake app is the stable command surface, and the isolated Cargo package is the
+direct development entrypoint.
 
 The harness has three explicit scopes:
 
@@ -22,58 +20,58 @@ WezTerm is the mature independent terminal-engine comparison target.
 List checked-in fixture streams:
 
 ```text
-python3 tools/yazelix_conformance.py list
+nix run .#yazelix-protocol-conformance -- list
 ```
 
 Validate protocol fixture manifest bytes, fixture metadata, keyboard manifest
 metadata, and the cursor shader ABI probe:
 
 ```text
-python3 tools/yazelix_conformance.py verify
+nix run .#yazelix-protocol-conformance -- verify
 ```
 
 List Kitty keyboard black-box capture cases:
 
 ```text
-python3 tools/yazelix_conformance.py keyboard-list
+nix run .#yazelix-protocol-conformance -- keyboard-list
 ```
 
 Capture and verify terminal keyboard bytes for Rio, Kitty, Ghostty, or WezTerm:
 
 ```text
-python3 tools/yazelix_conformance.py keyboard-capture --terminal rio
-python3 tools/yazelix_conformance.py keyboard-verify-capture artifacts/conformance/keyboard_captures/rio.json --require-all
+nix run .#yazelix-protocol-conformance -- keyboard-capture --terminal rio
+nix run .#yazelix-protocol-conformance -- keyboard-verify-capture artifacts/conformance/keyboard_captures/rio.json --require-all
 ```
 
 Emit one fixture byte stream to a terminal or file:
 
 ```text
-python3 tools/yazelix_conformance.py emit osc133_semantic_prompt
+nix run .#yazelix-protocol-conformance -- emit osc133_semantic_prompt
 ```
 
 Record local source/version evidence:
 
 ```text
-python3 tools/yazelix_conformance.py record-env
+nix run .#yazelix-protocol-conformance -- record-env
 ```
 
 Launch the built Rio binary with CPU renderer and capture a COSMIC screenshot:
 
 ```text
-python3 tools/yazelix_conformance.py launch-cpu-screenshot
+nix run .#yazelix-protocol-conformance -- launch-cpu-screenshot
 ```
 
 Launch the built WGPU Rio binary with the Ghostty-compatible cursor shader
 probe and capture a COSMIC screenshot:
 
 ```text
-python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot
+nix run .#yazelix-protocol-conformance -- launch-wgpu-shader-screenshot
 ```
 
 Pass `--shader` more than once to validate a Ghostty-style shader chain:
 
 ```text
-python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot \
+nix run .#yazelix-protocol-conformance -- launch-wgpu-shader-screenshot \
   --shader /path/to/cursor_trail_dusk.glsl \
   --shader /path/to/generated_effects/sweep.glsl \
   --shader /path/to/generated_effects/rectangle_boom.glsl

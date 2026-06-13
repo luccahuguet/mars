@@ -100,7 +100,7 @@ The Shadertoy uniform names, cursor-style macro names, and config semantics shou
   - uniform packing size/alignment is stable and 16-byte aligned
   - cursor state transitions update previous/current cursor and `iTimeCursorChange`
 - PTY/conformance smoke:
-  - `python3 tools/yazelix_conformance.py verify`
+  - `nix run .#yazelix-protocol-conformance -- verify`
   - emit a cursor-moving shell probe and keep the frame loop alive while shader animation is enabled
 - screenshot/framebuffer evidence:
   - capture a WGPU window with `conformance/shaders/ghostty_cursor_probe.glsl`
@@ -138,7 +138,7 @@ None of those pivot criteria were proven by source inspection. The current block
   - `nix develop -c cargo build -p rioterm --features wgpu` passed
   - WGPU config parsing reaches `sugarloaf/src/context/webgpu.rs`, proving `backend = "Webgpu"` is honored
   - source audit shows cursor, palette, focus, cell, and postprocess seams already exist
-  - `python3 tools/yazelix_conformance.py verify` passed
+  - `nix run .#yazelix-protocol-conformance -- verify` passed
 - Local launch blockers:
   - native Vulkan: `vkCreateInstance failed ... ERROR_INCOMPATIBLE_DRIVER`
   - WGPU/GL on Wayland/X11: `Request adapter: NotFound ... incompatible_surface_backends: Backends(GL)`
@@ -186,7 +186,7 @@ Ghostty does not currently expose a multi-cursor shader ABI.
 
 - Sugarloaf now passes its raw display handle into `wgpu::InstanceDescriptor`
   instead of constructing WGPU without a display handle
-- `python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot` launches
+- `nix run .#yazelix-protocol-conformance -- launch-wgpu-shader-screenshot` launches
   the checked-in shader probe
 - `artifacts/shader_probe/screenshots/wgpu_shader_probe_gl.png` captures the
   WGPU shader-probe window and shows the magenta cursor block produced through
@@ -199,7 +199,7 @@ COSMIC Wayland/NVIDIA host. WGPU/Vulkan no longer reproduces the earlier
 - Visual evidence:
   `artifacts/shader_probe/screenshots/wgpu_shader_probe_vulkan.png`
 - GL remains useful as an explicit fallback probe:
-  `python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot --wgpu-backend gl`
+  `nix run .#yazelix-protocol-conformance -- launch-wgpu-shader-screenshot --wgpu-backend gl`
 
 ## Yazelix Preset Validation
 

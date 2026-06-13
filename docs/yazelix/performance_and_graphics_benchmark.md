@@ -77,7 +77,7 @@ Interpretation:
 Rio WGPU/Vulkan shader probe:
 
 - command:
-  `python3 tools/yazelix_conformance.py launch-wgpu-shader-screenshot`
+  `nix run .#yazelix-protocol-conformance -- launch-wgpu-shader-screenshot`
 - screenshot:
   `artifacts/shader_probe/screenshots/wgpu_shader_probe_vulkan.png`
 - result: WGPU/Vulkan surface creation succeeded and the cursor probe rendered

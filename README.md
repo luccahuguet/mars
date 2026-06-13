@@ -152,14 +152,11 @@ Release-oriented checks:
 nix build .#yazelix-terminal -o result_yazelix_terminal_package
 desktop-file-validate result_yazelix_terminal_package/share/applications/yazelix-terminal.desktop
 result_yazelix_terminal_package/bin/yazelix-terminal --version
-python3 tools/yazelix_conformance.py verify
+nix run .#yazelix-protocol-conformance -- verify
 ```
 
-The Python protocol conformance entrypoint delegates supported non-interactive
-commands to the Rust port when
-`tools/yazelix_protocol_conformance/target/debug/yazelix-protocol-conformance`
-or the release binary exists. Set `YAZELIX_CONFORMANCE_RS=0` to force the Python
-implementation, or run the Rust port directly:
+The protocol conformance harness is an isolated Rust tool. The flake app is the
+stable command surface; Cargo is useful while editing the harness directly:
 
 ```sh
 cargo run --manifest-path tools/yazelix_protocol_conformance/Cargo.toml -- verify

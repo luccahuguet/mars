@@ -2,16 +2,20 @@ use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type Result<T> = std::result::Result<T, String>;
 
 const DEFAULT_ENV_OUTPUT: &[&str] = &["artifacts", "conformance", "env.json"];
+const DEFAULT_SCREENSHOT_DIR: &[&str] = &["artifacts", "conformance", "screenshots"];
+const DEFAULT_CPU_CONFIG: &[&str] = &["artifacts", "conformance", "rio_cpu_config"];
+const DEFAULT_SHADER_SCREENSHOT_DIR: &[&str] =
+    &["artifacts", "shader_probe", "screenshots"];
+const DEFAULT_SHADER_CONFIG: &[&str] = &["artifacts", "shader_probe", "rio_wgpu_config"];
 const ALLOWED_FIXTURE_KINDS: &[&str] = &["protocol", "visual-probe", "comparison"];
 const ALLOWED_FIXTURE_SOURCES: &[&str] = &[
     "kitty-spec",
@@ -42,6 +46,19 @@ enum Commands {
     Verify,
     /// List Kitty keyboard black-box comparison cases.
     KeyboardList,
+    /// Capture Kitty keyboard bytes from the terminal running this command.
+    KeyboardCapture {
+        #[arg(long)]
+        terminal: String,
+        #[arg(long = "case")]
+        case_ids: Vec<String>,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long, default_value_t = 4.0)]
+        timeout: f64,
+        #[arg(long = "idle-timeout", default_value_t = 0.35)]
+        idle_timeout: f64,
+    },
     /// Verify a keyboard capture JSON report against checked-in expectations.
     KeyboardVerifyCapture {
         capture: PathBuf,
@@ -54,6 +71,36 @@ enum Commands {
         output: Option<PathBuf>,
         #[arg(long, default_value = "target/debug/rio")]
         rio_bin: String,
+    },
+    /// Launch Rio with CPU renderer and capture a COSMIC screenshot.
+    LaunchCpuScreenshot {
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+        #[arg(long, default_value = "target/debug/rio")]
+        rio_bin: String,
+        #[arg(long, default_value_t = 8)]
+        sleep_seconds: u64,
+        #[arg(long, default_value_t = 2)]
+        settle_seconds: u64,
+    },
+    /// Launch Rio with WGPU custom shader probe and capture a COSMIC screenshot.
+    LaunchWgpuShaderScreenshot {
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+        #[arg(long, default_value = "target/debug/rio")]
+        rio_bin: String,
+        #[arg(long, default_value = "vulkan")]
+        wgpu_backend: String,
+        #[arg(long)]
+        shader: Vec<String>,
+        #[arg(long, default_value_t = 8)]
+        sleep_seconds: u64,
+        #[arg(long, default_value_t = 2)]
+        settle_seconds: u64,
     },
 }
 
@@ -72,6 +119,20 @@ fn run() -> Result<()> {
         Commands::Emit { fixture } => command_emit(&root, &fixture),
         Commands::Verify => command_verify(&root),
         Commands::KeyboardList => command_keyboard_list(&root),
+        Commands::KeyboardCapture {
+            terminal,
+            case_ids,
+            output,
+            timeout,
+            idle_timeout,
+        } => command_keyboard_capture(
+            &root,
+            &terminal,
+            &case_ids,
+            output,
+            timeout,
+            idle_timeout,
+        ),
         Commands::KeyboardVerifyCapture {
             capture,
             require_all,
@@ -79,12 +140,48 @@ fn run() -> Result<()> {
         Commands::RecordEnv { output, rio_bin } => {
             command_record_env(&root, output, &rio_bin)
         }
+        Commands::LaunchCpuScreenshot {
+            output_dir,
+            config_dir,
+            rio_bin,
+            sleep_seconds,
+            settle_seconds,
+        } => command_launch_cpu_screenshot(
+            &root,
+            output_dir,
+            config_dir,
+            &rio_bin,
+            sleep_seconds,
+            settle_seconds,
+        ),
+        Commands::LaunchWgpuShaderScreenshot {
+            output_dir,
+            config_dir,
+            rio_bin,
+            wgpu_backend,
+            shader,
+            sleep_seconds,
+            settle_seconds,
+        } => command_launch_wgpu_shader_screenshot(
+            &root,
+            output_dir,
+            config_dir,
+            &rio_bin,
+            &wgpu_backend,
+            &shader,
+            sleep_seconds,
+            settle_seconds,
+        ),
     }
 }
 
 fn repo_root() -> Result<PathBuf> {
     if let Ok(root) = env::var("YAZELIX_CONFORMANCE_ROOT") {
         return Ok(PathBuf::from(root));
+    }
+    let current_dir = env::current_dir().map_err(|err| err.to_string())?;
+    if manifest_path(&current_dir).is_file() {
+        return Ok(current_dir);
     }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
@@ -635,6 +732,133 @@ fn command_keyboard_list(root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn selected_keyboard_cases(
+    manifest: &Value,
+    selected_ids: &[String],
+) -> Result<Vec<Value>> {
+    let manifest_cases = array_field(manifest, "cases", "keyboard manifest")?;
+    if selected_ids.is_empty() {
+        return Ok(manifest_cases.clone());
+    }
+
+    let cases = keyboard_cases_by_id(manifest)?;
+    selected_ids
+        .iter()
+        .map(|case_id| {
+            cases.get(case_id).cloned().ok_or_else(|| {
+                let mut known = cases.keys().cloned().collect::<Vec<_>>();
+                known.sort();
+                format!(
+                    "unknown keyboard case {case_id:?}; known cases: {}",
+                    known.join(", ")
+                )
+            })
+        })
+        .collect()
+}
+
+fn command_keyboard_capture(
+    root: &Path,
+    terminal: &str,
+    case_ids: &[String],
+    output: Option<PathBuf>,
+    timeout: f64,
+    idle_timeout: f64,
+) -> Result<()> {
+    let manifest = load_keyboard_manifest(root)?;
+    let cleanup = hex_bytes(
+        manifest
+            .get("cleanup_hex")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        "keyboard cleanup",
+    )?;
+    let cases = selected_keyboard_cases(&manifest, case_ids)?;
+    let output = output.map(|path| expand_tilde(&path)).unwrap_or_else(|| {
+        root.join("artifacts")
+            .join("conformance")
+            .join("keyboard_captures")
+            .join(format!("{terminal}.json"))
+    });
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("{}: {err}", parent.display()))?;
+    }
+
+    let mut captured_cases = Vec::new();
+    for (index, case) in cases.iter().enumerate() {
+        let case_id = str_field(case, "id", "keyboard case")?;
+        eprintln!(
+            "[{}/{}] {}: {}\n  {}\n  Press Enter to arm capture, then press the requested key sequence.",
+            index + 1,
+            cases.len(),
+            case_id,
+            str_field(case, "keys", "keyboard case")?,
+            str_field(case, "workflow", "keyboard case")?
+        );
+        let mut line = String::new();
+        io::stdin()
+            .read_line(&mut line)
+            .map_err(|err| err.to_string())?;
+
+        let setup = hex_bytes(
+            case.get("setup_hex")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            &format!("keyboard case {case_id} setup"),
+        )?;
+        io::stdout()
+            .write_all(&setup)
+            .map_err(|err| err.to_string())?;
+        io::stdout().flush().map_err(|err| err.to_string())?;
+        let captured = read_keyboard_capture(timeout, idle_timeout);
+        let cleanup_result = io::stdout()
+            .write_all(&cleanup)
+            .and_then(|_| io::stdout().flush())
+            .map_err(|err| err.to_string());
+        let captured = captured?;
+        cleanup_result?;
+
+        let matched = keyboard_capture_matches(case, &captured)?;
+        eprintln!(
+            "  captured {} bytes: {} {}",
+            captured.len(),
+            hex::encode(&captured),
+            if matched { "ok" } else { "mismatch" }
+        );
+        captured_cases.push(json!({
+            "id": case_id,
+            "captured_hex": hex::encode(captured),
+            "matched": matched,
+        }));
+    }
+
+    let report = json!({
+        "version": 1,
+        "terminal": terminal,
+        "timestamp_unix": unix_timestamp()?,
+        "spec": manifest.get("spec").cloned().unwrap_or(Value::Null),
+        "cases": captured_cases,
+    });
+    let text = serde_json::to_string_pretty(&report).map_err(|err| err.to_string())?;
+    fs::write(&output, format!("{text}\n"))
+        .map_err(|err| format!("{}: {err}", output.display()))?;
+    println!("{}", output.display());
+    if report
+        .get("cases")
+        .and_then(Value::as_array)
+        .is_some_and(|cases| {
+            cases
+                .iter()
+                .all(|case| case.get("matched").and_then(Value::as_bool) == Some(true))
+        })
+    {
+        Ok(())
+    } else {
+        Err("one or more keyboard captures did not match".to_string())
+    }
+}
+
 fn command_keyboard_verify_capture(
     root: &Path,
     capture: &Path,
@@ -706,11 +930,9 @@ fn command_keyboard_verify_capture(
 }
 
 fn command_record_env(root: &Path, output: Option<PathBuf>, rio_bin: &str) -> Result<()> {
-    let output = output.map(|path| expand_tilde(&path)).unwrap_or_else(|| {
-        DEFAULT_ENV_OUTPUT
-            .iter()
-            .fold(root.to_path_buf(), |p, c| p.join(c))
-    });
+    let output = output
+        .map(|path| expand_tilde(&path))
+        .unwrap_or_else(|| path_from_components(root, DEFAULT_ENV_OUTPUT));
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("{}: {err}", parent.display()))?;
@@ -733,6 +955,175 @@ fn command_record_env(root: &Path, output: Option<PathBuf>, rio_bin: &str) -> Re
         .map_err(|err| format!("{}: {err}", output.display()))?;
     println!("{}", output.display());
     Ok(())
+}
+
+fn command_launch_cpu_screenshot(
+    root: &Path,
+    output_dir: Option<PathBuf>,
+    config_dir: Option<PathBuf>,
+    rio_bin: &str,
+    sleep_seconds: u64,
+    settle_seconds: u64,
+) -> Result<()> {
+    let output_dir = output_dir
+        .map(|path| expand_tilde(&path))
+        .unwrap_or_else(|| path_from_components(root, DEFAULT_SCREENSHOT_DIR));
+    fs::create_dir_all(&output_dir)
+        .map_err(|err| format!("{}: {err}", output_dir.display()))?;
+    let config_dir = config_dir
+        .map(|path| expand_tilde(&path))
+        .unwrap_or_else(|| path_from_components(root, DEFAULT_CPU_CONFIG));
+    ensure_cpu_config(&config_dir)?;
+
+    let mut command = Command::new("nix");
+    command
+        .arg("develop")
+        .arg("-c")
+        .arg(rio_bin)
+        .arg("--app-id")
+        .arg("yazelix-terminal-protocol-conformance")
+        .arg("--title-placeholder")
+        .arg("Yazelix Terminal Protocol Conformance")
+        .arg("-e")
+        .arg("bash")
+        .arg("--noprofile")
+        .arg("--norc")
+        .arg("-c")
+        .arg(format!(
+            "printf 'yazelix-terminal protocol conformance\nCPU renderer screenshot probe\nPID $$\n'; sleep {sleep_seconds}"
+        ))
+        .current_dir(root)
+        .env("RIO_CONFIG_HOME", &config_dir);
+    let child = command.spawn().map_err(|err| err.to_string())?;
+    capture_cosmic_screenshot(output_dir, child, settle_seconds, sleep_seconds)
+}
+
+fn command_launch_wgpu_shader_screenshot(
+    root: &Path,
+    output_dir: Option<PathBuf>,
+    config_dir: Option<PathBuf>,
+    rio_bin: &str,
+    wgpu_backend: &str,
+    shader: &[String],
+    sleep_seconds: u64,
+    settle_seconds: u64,
+) -> Result<()> {
+    let output_dir = output_dir
+        .map(|path| expand_tilde(&path))
+        .unwrap_or_else(|| path_from_components(root, DEFAULT_SHADER_SCREENSHOT_DIR));
+    fs::create_dir_all(&output_dir)
+        .map_err(|err| format!("{}: {err}", output_dir.display()))?;
+    let config_dir = config_dir
+        .map(|path| expand_tilde(&path))
+        .unwrap_or_else(|| path_from_components(root, DEFAULT_SHADER_CONFIG));
+    let shader_paths = if shader.is_empty() {
+        vec!["conformance/shaders/ghostty_cursor_probe.glsl".to_string()]
+    } else {
+        shader.to_vec()
+    };
+    ensure_shader_config(&config_dir, &shader_paths)?;
+
+    let mut command = Command::new("nix");
+    command
+        .arg("develop")
+        .arg("-c")
+        .arg(rio_bin)
+        .arg("--app-id")
+        .arg("yazelix-terminal-shader-probe")
+        .arg("--title-placeholder")
+        .arg("Yazelix Terminal Shader Probe")
+        .arg("-e")
+        .arg("bash")
+        .arg("--noprofile")
+        .arg("--norc")
+        .arg("-c")
+        .arg(format!(
+            "printf 'yazelix-terminal shader probe\nGhostty cursor uniforms via WGPU\nPID $$\n'; sleep {sleep_seconds}"
+        ))
+        .current_dir(root)
+        .env("RIO_CONFIG_HOME", &config_dir)
+        .env("WGPU_BACKEND", wgpu_backend);
+    let child = command.spawn().map_err(|err| err.to_string())?;
+    capture_cosmic_screenshot(output_dir, child, settle_seconds, sleep_seconds)
+}
+
+fn ensure_cpu_config(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).map_err(|err| format!("{}: {err}", path.display()))?;
+    fs::write(path.join("config.toml"), "[renderer]\nuse-cpu = true\n")
+        .map_err(|err| format!("{}: {err}", path.join("config.toml").display()))
+}
+
+fn ensure_shader_config(path: &Path, shader_paths: &[String]) -> Result<()> {
+    fs::create_dir_all(path).map_err(|err| format!("{}: {err}", path.display()))?;
+    let shader_entries = shader_paths
+        .iter()
+        .map(|shader| serde_json::to_string(shader).map_err(|err| err.to_string()))
+        .collect::<Result<Vec<_>>>()?
+        .join(", ");
+    fs::write(
+        path.join("config.toml"),
+        format!("[renderer]\nbackend = \"Webgpu\"\ncustom-shader = [{shader_entries}]\n"),
+    )
+    .map_err(|err| format!("{}: {err}", path.join("config.toml").display()))
+}
+
+fn capture_cosmic_screenshot(
+    output_dir: PathBuf,
+    mut process: Child,
+    settle_seconds: u64,
+    sleep_seconds: u64,
+) -> Result<()> {
+    let result = (|| -> Result<()> {
+        let screenshot_tool = find_in_path("cosmic-screenshot")
+            .ok_or_else(|| "cosmic-screenshot not found".to_string())?;
+        std::thread::sleep(Duration::from_secs(settle_seconds.max(1)));
+        if let Some(status) = process.try_wait().map_err(|err| err.to_string())? {
+            return Err(format!(
+                "launched terminal exited before screenshot: {status}"
+            ));
+        }
+
+        let shot = Command::new(screenshot_tool)
+            .arg("--interactive=false")
+            .arg("--modal=false")
+            .arg("--notify=false")
+            .arg("--save-dir")
+            .arg(&output_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|err| err.to_string())?;
+        if !shot.status.success() {
+            let stderr = trim_output(&shot.stderr);
+            return Err(if stderr.is_empty() {
+                "screenshot failed".to_string()
+            } else {
+                stderr
+            });
+        }
+
+        let status = wait_with_timeout(
+            &mut process,
+            Duration::from_secs(sleep_seconds.max(1) + 3),
+        )?
+        .ok_or_else(|| "launched terminal did not exit after screenshot".to_string())?;
+        if !status.success() {
+            return Err(format!(
+                "launched terminal exited after screenshot: {status}"
+            ));
+        }
+        let stdout = trim_output(&shot.stdout);
+        if !stdout.is_empty() {
+            println!("{stdout}");
+        }
+        Ok(())
+    })();
+
+    if result.is_err() && process.try_wait().ok().flatten().is_none() {
+        let _ = process.kill();
+        let _ = process.wait();
+    }
+    result
 }
 
 fn run_capture<const N: usize>(root: &Path, argv: [&str; N]) -> Value {
@@ -767,6 +1158,113 @@ fn run_capture<const N: usize>(root: &Path, argv: [&str; N]) -> Value {
             "stdout": "",
             "stderr": err.to_string(),
         }),
+    }
+}
+
+#[cfg(unix)]
+fn read_keyboard_capture(timeout_seconds: f64, idle_seconds: f64) -> Result<Vec<u8>> {
+    use std::mem::MaybeUninit;
+    use std::os::fd::AsRawFd;
+
+    let stdin = io::stdin();
+    let fd = stdin.as_raw_fd();
+    let mut original = MaybeUninit::<libc::termios>::uninit();
+    if unsafe { libc::tcgetattr(fd, original.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error().to_string());
+    }
+    let original = unsafe { original.assume_init() };
+    let mut raw = original;
+    unsafe {
+        libc::cfmakeraw(&mut raw);
+    }
+    if unsafe { libc::tcsetattr(fd, libc::TCSADRAIN, &raw) } != 0 {
+        return Err(io::Error::last_os_error().to_string());
+    }
+    let _guard = TerminalModeGuard { fd, original };
+
+    let mut data = Vec::new();
+    let start = Instant::now();
+    let mut last_input: Option<Instant> = None;
+    let timeout = Duration::from_secs_f64(timeout_seconds.max(0.0));
+    let idle_timeout = Duration::from_secs_f64(idle_seconds.max(0.0));
+
+    while start.elapsed() < timeout {
+        let mut poll_fd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let poll_result = unsafe { libc::poll(&mut poll_fd, 1, 50) };
+        if poll_result < 0 {
+            let err = io::Error::last_os_error();
+            if err.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err.to_string());
+        }
+        if poll_result > 0 && (poll_fd.revents & libc::POLLIN) != 0 {
+            let mut buffer = [0u8; 4096];
+            let read_count = unsafe {
+                libc::read(fd, buffer.as_mut_ptr().cast::<libc::c_void>(), buffer.len())
+            };
+            if read_count < 0 {
+                let err = io::Error::last_os_error();
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) {
+                    continue;
+                }
+                return Err(err.to_string());
+            }
+            if read_count == 0 {
+                break;
+            }
+            data.extend_from_slice(&buffer[..read_count as usize]);
+            last_input = Some(Instant::now());
+        } else if !data.is_empty()
+            && last_input.is_some_and(|last| last.elapsed() >= idle_timeout)
+        {
+            break;
+        }
+    }
+
+    Ok(data)
+}
+
+#[cfg(unix)]
+struct TerminalModeGuard {
+    fd: i32,
+    original: libc::termios,
+}
+
+#[cfg(unix)]
+impl Drop for TerminalModeGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSADRAIN, &self.original);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn read_keyboard_capture(_timeout_seconds: f64, _idle_seconds: f64) -> Result<Vec<u8>> {
+    Err("keyboard-capture currently requires a Unix terminal".to_string())
+}
+
+fn wait_with_timeout(
+    child: &mut Child,
+    timeout: Duration,
+) -> Result<Option<std::process::ExitStatus>> {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
+            return Ok(Some(status));
+        }
+        if start.elapsed() >= timeout {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -960,6 +1458,12 @@ fn rel(root: &Path, path: &Path) -> String {
         .into_owned()
 }
 
+fn path_from_components(root: &Path, components: &[&str]) -> PathBuf {
+    components
+        .iter()
+        .fold(root.to_path_buf(), |path, component| path.join(component))
+}
+
 fn expand_tilde(path: &Path) -> PathBuf {
     let path_text = path.as_os_str().to_string_lossy();
     if path_text == "~" {
@@ -979,6 +1483,18 @@ fn home_dir() -> Option<PathBuf> {
     env::var_os("HOME")
         .filter(|home| !home.is_empty())
         .map(PathBuf::from)
+}
+
+fn find_in_path(program: &str) -> Option<PathBuf> {
+    let program_path = Path::new(program);
+    if program_path.components().count() > 1 {
+        return program_path.is_file().then(|| program_path.to_path_buf());
+    }
+    env::var_os("PATH").and_then(|path| {
+        env::split_paths(&path)
+            .map(|dir| dir.join(program))
+            .find(|candidate| candidate.is_file())
+    })
 }
 
 fn unix_timestamp() -> Result<u64> {
@@ -1097,9 +1613,4 @@ fn sha256(input: &[u8]) -> [u8; 32] {
         output[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
     }
     output
-}
-
-#[allow(dead_code)]
-fn _is_executable(path: &Path) -> bool {
-    path.is_file() && path.extension() != Some(OsStr::new("disabled"))
 }

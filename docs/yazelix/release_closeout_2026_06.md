@@ -29,7 +29,7 @@ enough mature desktop soak to replace Ghostty as the default.
 | Ghostty parity contract | `docs/yazelix/ghostty_parity_contract.md` |
 | Fork-owned feature ledger | `docs/yazelix/fork_feature_verification.md` |
 | Inherited or deferred behavior ledger | `docs/yazelix/validated_not_added.md` |
-| Conformance harness | `docs/yazelix/conformance_harness.md`, `python3 tools/yazelix_conformance.py verify` |
+| Conformance harness | `docs/yazelix/conformance_harness.md`, `nix run .#yazelix-protocol-conformance -- verify` |
 | Parser robustness strategy | `docs/yazelix/parser_robustness_strategy.md` |
 | Cursor shader and animation evidence | `docs/yazelix/dossiers/cursor_shader_parity.md`, `docs/yazelix/cursor_animation_architecture.md` |
 | Yazelix host mode | `docs/yazelix/yazelix_mode.md` |

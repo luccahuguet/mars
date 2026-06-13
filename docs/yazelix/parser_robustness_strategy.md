@@ -21,7 +21,7 @@ and maximum-size behavior.
 ## Coverage Layers
 
 - parser unit tests defend escape-sequence decoding and malformed input handling
-- `tools/yazelix_conformance.py` fixtures defend protocol-level request/response
+- `tools/yazelix_protocol_conformance` fixtures defend protocol-level request/response
   behavior through a real PTY stream
 - screenshot or framebuffer probes defend visual protocols and cursor shaders
 - manual Yazelix sessions defend Zellij, Yazi, Helix, and shell behavior together

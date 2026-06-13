@@ -91,5 +91,5 @@ result_yazelix_terminal_package/bin/yazelix-terminal --version
 Use the protocol conformance harness when parser/protocol behavior changed:
 
 ```sh
-python3 tools/yazelix_conformance.py verify
+nix run .#yazelix-protocol-conformance -- verify
 ```

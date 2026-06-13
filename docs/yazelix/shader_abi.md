@@ -134,7 +134,7 @@ Main Yazelix may not assume:
 
 Cheap validation:
 
-- `python3 tools/yazelix_conformance.py verify` checks the protocol fixture
+- `nix run .#yazelix-protocol-conformance -- verify` checks the protocol fixture
   manifest, Ghostty-compatible cursor probe shader, keyboard manifest, and
   yzxterm packaged shader assets.
 - `git diff --check` catches formatting damage in docs and generated assets.

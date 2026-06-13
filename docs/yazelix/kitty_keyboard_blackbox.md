@@ -33,7 +33,7 @@ identity, event types, associated text, and standalone modifier reporting.
 List the checked-in expectations:
 
 ```text
-python3 tools/yazelix_conformance.py keyboard-list
+nix run .#yazelix-protocol-conformance -- keyboard-list
 ```
 
 ## Capture Workflow
@@ -42,19 +42,19 @@ Run the capture command inside the terminal being tested. For Rio from this
 repository:
 
 ```text
-nix develop -c target/debug/rio -e python3 tools/yazelix_conformance.py keyboard-capture --terminal rio
+nix develop -c target/debug/rio -e nix run .#yazelix-protocol-conformance -- keyboard-capture --terminal rio
 ```
 
 For Kitty:
 
 ```text
-kitty python3 tools/yazelix_conformance.py keyboard-capture --terminal kitty
+kitty nix run .#yazelix-protocol-conformance -- keyboard-capture --terminal kitty
 ```
 
 For Ghostty:
 
 ```text
-ghostty -e python3 tools/yazelix_conformance.py keyboard-capture --terminal ghostty
+ghostty -e nix run .#yazelix-protocol-conformance -- keyboard-capture --terminal ghostty
 ```
 
 The command writes a capture report under
@@ -65,7 +65,7 @@ failed capture should not leave the terminal in an enhanced keyboard mode.
 Verify a capture:
 
 ```text
-python3 tools/yazelix_conformance.py keyboard-verify-capture artifacts/conformance/keyboard_captures/rio.json --require-all
+nix run .#yazelix-protocol-conformance -- keyboard-verify-capture artifacts/conformance/keyboard_captures/rio.json --require-all
 ```
 
 Exact cases must match the expected byte stream exactly. Repeat, release,

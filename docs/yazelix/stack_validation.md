@@ -84,7 +84,7 @@ nix develop -c cargo test -p rio-backend --features 'rio-window/x11 rio-window/w
 nix develop -c cargo test -p sugarloaf --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' image_shaders_use_origin_size_source_rect -- --nocapture
 nix develop -c cargo build -p rioterm --features wgpu
 nix build .#yazelix-terminal -o result_yazelix_terminal_package
-python3 tools/yazelix_conformance.py verify
+nix run .#yazelix-protocol-conformance -- verify
 git diff --check
 ```
 

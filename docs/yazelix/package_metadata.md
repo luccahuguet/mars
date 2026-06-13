@@ -97,7 +97,7 @@ or config boundaries instead of borrowing yzxterm-specific fields.
 
 ## Cheap Validation
 
-`python3 tools/yazelix_conformance.py verify` checks that the metadata source
+`nix run .#yazelix-protocol-conformance -- verify` checks that the metadata source
 defines a package-output JSON file, exposes `passthru.yzxtermPackageMetadata`,
 advertises the packaged appearance modes, validates the terminal-owned theme
 files, and sets distinct release/fast profile fields in `flake.nix`.

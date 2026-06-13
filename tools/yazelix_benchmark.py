@@ -8,6 +8,7 @@ import csv
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -18,6 +19,15 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ARTIFACT_ROOT = ROOT / "artifacts" / "benchmarks" / "frame_time"
 DEFAULT_SHADER = ROOT / "conformance" / "shaders" / "ghostty_cursor_probe.glsl"
+CONFORMANCE_MANIFEST = ROOT / "tools" / "yazelix_protocol_conformance" / "Cargo.toml"
+CONFORMANCE_DEBUG_BIN = (
+    ROOT
+    / "tools"
+    / "yazelix_protocol_conformance"
+    / "target"
+    / "debug"
+    / "yazelix-protocol-conformance"
+)
 YAZELIX_SHADER_DIR = ROOT / "misc" / "yazelix_terminal_shaders"
 WGPU_CONFIG_TEMPLATES = {
     "wgpu",
@@ -48,6 +58,15 @@ def json_string(value: str) -> str:
 
 def shader_list(paths: list[Path]) -> str:
     return "[\n  " + ",\n  ".join(json_string(str(path)) for path in paths) + "\n]"
+
+
+def conformance_emit_shell(fixture: str) -> str:
+    if CONFORMANCE_DEBUG_BIN.exists():
+        return f"{shlex.quote(str(CONFORMANCE_DEBUG_BIN))} emit {shlex.quote(fixture)}"
+    return (
+        "cargo run --manifest-path "
+        f"{shlex.quote(str(CONFORMANCE_MANIFEST))} -- emit {shlex.quote(fixture)}"
+    )
 
 
 def yazelix_default_shader_paths() -> list[Path]:
@@ -112,12 +131,12 @@ def built_in_workload(name: str, lines: int, hold_seconds: float) -> list[str]:
         script = f"printf 'yazelix frame benchmark idle\\n'; sleep {hold_seconds}"
     elif name == "kitty-graphics":
         script = (
-            "python3 tools/yazelix_conformance.py emit kitty_graphics_1x1_rgba; "
+            f"{conformance_emit_shell('kitty_graphics_1x1_rgba')}; "
             f"printf '\\nkitty graphics fixture emitted\\n'; sleep {hold_seconds}"
         )
     elif name == "sixel":
         script = (
-            "python3 tools/yazelix_conformance.py emit sixel_minimal; "
+            f"{conformance_emit_shell('sixel_minimal')}; "
             f"printf '\\nsixel fixture emitted\\n'; sleep {hold_seconds}"
         )
     elif name == "helix-jk":

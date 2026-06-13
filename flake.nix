@@ -71,6 +71,17 @@
           type = "app";
           program = "${package}/bin/yazelix-terminal";
         };
+        protocolConformanceTool = pkgs.rustPlatform.buildRustPackage {
+          pname = "yazelix-protocol-conformance";
+          version = "0.1.0";
+          src = ./tools/yazelix_protocol_conformance;
+          cargoLock.lockFile = ./tools/yazelix_protocol_conformance/Cargo.lock;
+          doCheck = false;
+        };
+        toolAppFor = package: {
+          type = "app";
+          program = "${package}/bin/yazelix-protocol-conformance";
+        };
         # Defines a devshell using the `rust-toolchain`, allowing for
         # different versions of rust to be used.
         mkDevShell = rust-toolchain: let
@@ -122,6 +133,7 @@
           rio-stable-unwrapped = stableUnwrappedPackage;
           rio-nightly = nightlyPackage;
           rio-nightly-unwrapped = nightlyUnwrappedPackage;
+          yazelix-protocol-conformance = protocolConformanceTool;
         };
         apps = {
           default = appFor self'.packages."yazelix-terminal";
@@ -129,6 +141,7 @@
           yazelix-terminal-fast = appFor self'.packages."yazelix-terminal-fast";
           rio = appFor self'.packages.rio;
           rio-fast = appFor self'.packages."rio-fast";
+          yazelix-protocol-conformance = toolAppFor protocolConformanceTool;
         };
         checks = {
           package = self'.packages."yazelix-terminal";
@@ -153,9 +166,9 @@
             done
             touch "$out"
           '';
-          conformance = pkgs.runCommand "yazelix-terminal-conformance" {nativeBuildInputs = [pkgs.python3];} ''
+          conformance = pkgs.runCommand "yazelix-terminal-conformance" {} ''
             cd ${./.}
-            python3 tools/yazelix_conformance.py verify
+            ${protocolConformanceTool}/bin/yazelix-protocol-conformance verify
             touch "$out"
           '';
         };
