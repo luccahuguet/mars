@@ -530,6 +530,17 @@ fn validate_yazelix_font_config(root: &Path) -> Result<()> {
         .and_then(|fonts| fonts.get("symbol-map"))
         .and_then(toml::Value::as_array)
         .ok_or_else(|| format!("{} missing fonts.symbol-map", rel(root, &fonts)))?;
+    let font_size = parsed
+        .get("fonts")
+        .and_then(|fonts| fonts.get("size"))
+        .and_then(toml::Value::as_float)
+        .ok_or_else(|| format!("{} missing fonts.size", rel(root, &fonts)))?;
+    if font_size != 17.0 {
+        return Err(format!(
+            "{} fonts.size is {font_size}, expected 17.0",
+            rel(root, &fonts)
+        ));
+    }
     let emoji_family_placeholder = "@yazelix_terminal_emoji_font_family@";
     for required in [
         r#"font-family = "@yazelix_terminal_emoji_font_family@""#,
