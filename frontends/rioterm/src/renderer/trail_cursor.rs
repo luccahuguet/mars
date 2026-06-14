@@ -242,6 +242,7 @@ pub struct TrailCursor {
     snap_next_jump: bool,
     /// True until the first real destination is set — first frame teleports.
     first_frame: bool,
+    route_id: Option<usize>,
     animating: bool,
 }
 
@@ -264,7 +265,15 @@ impl TrailCursor {
             jumped: false,
             snap_next_jump: false,
             first_frame: true,
+            route_id: None,
             animating: false,
+        }
+    }
+
+    pub fn set_route(&mut self, route_id: usize) {
+        if self.route_id != Some(route_id) {
+            self.route_id = Some(route_id);
+            self.first_frame = true;
         }
     }
 
@@ -663,6 +672,25 @@ mod tests {
             .corners
             .iter()
             .any(|corner| corner.anim_length == ANIMATION_LENGTH));
+    }
+
+    #[test]
+    fn route_change_snaps_without_trailing_between_panels() {
+        let cell_width = 10.0;
+        let cell_height = 20.0;
+        let mut cursor = TrailCursor::new();
+        cursor.set_route(1);
+        seed_cursor(&mut cursor, cell_width, cell_height);
+
+        cursor.set_route(2);
+        cursor.set_destination(cell_width * 5.0, 0.0, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
+
+        assert!(!cursor.is_animating());
+        assert_eq!(cursor.corners[0].x, cell_width * 5.0);
+        assert_eq!(cursor.corners[0].y, 0.0);
+        assert_eq!(cursor.corners[2].x, cell_width * 6.0);
+        assert_eq!(cursor.corners[2].y, cell_height);
     }
 
     #[test]

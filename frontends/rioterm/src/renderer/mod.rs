@@ -589,8 +589,12 @@ impl Renderer {
                         }
                         overlays.push(rio_backend::sugarloaf::GraphicOverlay {
                             image_id: p.image_id,
-                            x: origin_x + p.dest_col as f32 * cell_width,
-                            y: origin_y + screen_row as f32 * cell_height,
+                            x: origin_x
+                                + p.dest_col as f32 * cell_width
+                                + p.cell_x_offset as f32,
+                            y: origin_y
+                                + screen_row as f32 * cell_height
+                                + p.cell_y_offset as f32,
                             width: p.pixel_width as f32,
                             height: p.pixel_height as f32,
                             z_index: p.z_index,

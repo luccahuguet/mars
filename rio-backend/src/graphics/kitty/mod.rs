@@ -414,6 +414,8 @@ fn test_cursor_movement_default() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
 
     term.place_graphic(placement);
@@ -492,6 +494,8 @@ fn test_cursor_movement_no_move() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 1, // Don't move cursor
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
 
     term.place_graphic(placement);
@@ -597,6 +601,8 @@ fn test_image_row_occupation_exact_fit() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
 
     term.place_graphic(placement);
@@ -608,6 +614,155 @@ fn test_image_row_occupation_exact_fit() {
         final_cursor_row, 1,
         "Cursor should be at row 1 (last row of image) after placing a 2-row image, but got row {}",
         final_cursor_row
+    );
+}
+
+#[test]
+fn test_subcell_offset_forwarded_and_clamped() {
+    let event_listener = TestEventListener;
+    let window_id = unsafe { WindowId::dummy() };
+
+    let mut term: Crosswords<TestEventListener> = Crosswords::new(
+        crate::crosswords::CrosswordsSize::new(80, 24),
+        crate::ansi::CursorShape::Block,
+        event_listener,
+        window_id,
+        0,
+        10_000,
+    );
+
+    term.graphics.cell_width = 10.0;
+    term.graphics.cell_height = 20.0;
+
+    let pixels = vec![255u8; 40 * 40 * 4];
+    let graphic = GraphicData {
+        id: GraphicId::new(1),
+        width: 40,
+        height: 40,
+        color_type: ColorType::Rgba,
+        pixels,
+        is_opaque: true,
+        resize: None,
+        display_width: None,
+        display_height: None,
+        transmit_time: std::time::Instant::now(),
+    };
+    term.store_graphic(graphic);
+
+    let placement = kitty_graphics_protocol::PlacementRequest {
+        image_id: 1,
+        placement_id: 7,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        columns: 0,
+        rows: 0,
+        z_index: 0,
+        virtual_placement: false,
+        unicode_placeholder: 0,
+        cursor_movement: 1,
+        cell_x_offset: 7,
+        cell_y_offset: 9,
+    };
+    term.place_graphic(placement);
+
+    let stored = term
+        .graphics
+        .kitty_placements
+        .get(&(1, 7))
+        .expect("placement stored");
+    assert_eq!(stored.cell_x_offset, 7);
+    assert_eq!(stored.cell_y_offset, 9);
+
+    let placement = kitty_graphics_protocol::PlacementRequest {
+        image_id: 1,
+        placement_id: 8,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        columns: 0,
+        rows: 0,
+        z_index: 0,
+        virtual_placement: false,
+        unicode_placeholder: 0,
+        cursor_movement: 1,
+        cell_x_offset: 999,
+        cell_y_offset: 999,
+    };
+    term.place_graphic(placement);
+
+    let stored = term
+        .graphics
+        .kitty_placements
+        .get(&(1, 8))
+        .expect("placement stored");
+    assert_eq!(stored.cell_x_offset, 9, "clamped to cell_width - 1");
+    assert_eq!(stored.cell_y_offset, 19, "clamped to cell_height - 1");
+}
+
+#[test]
+fn test_subcell_offset_extends_row_occupation() {
+    let event_listener = TestEventListener;
+    let window_id = unsafe { WindowId::dummy() };
+
+    let mut term: Crosswords<TestEventListener> = Crosswords::new(
+        crate::crosswords::CrosswordsSize::new(80, 24),
+        crate::ansi::CursorShape::Block,
+        event_listener,
+        window_id,
+        0,
+        10_000,
+    );
+
+    term.graphics.cell_width = 10.0;
+    term.graphics.cell_height = 20.0;
+
+    let pixels = vec![255u8; 40 * 40 * 4];
+    let graphic = GraphicData {
+        id: GraphicId::new(1),
+        width: 40,
+        height: 40,
+        color_type: ColorType::Rgba,
+        pixels,
+        is_opaque: true,
+        resize: None,
+        display_width: None,
+        display_height: None,
+        transmit_time: std::time::Instant::now(),
+    };
+    term.store_graphic(graphic);
+
+    let placement = kitty_graphics_protocol::PlacementRequest {
+        image_id: 1,
+        placement_id: 7,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        columns: 0,
+        rows: 0,
+        z_index: 0,
+        virtual_placement: false,
+        unicode_placeholder: 0,
+        cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 15,
+    };
+    term.place_graphic(placement);
+
+    let stored = term
+        .graphics
+        .kitty_placements
+        .get(&(1, 7))
+        .expect("placement stored");
+    assert_eq!(stored.rows, 3, "Y offset spills the image into a 3rd row");
+    assert_eq!(stored.columns, 4, "no X offset: 40px / 10px = 4 columns");
+
+    assert_eq!(
+        term.grid.cursor.pos.row.0, 2,
+        "cursor advances to the extra row created by the Y offset"
     );
 }
 
@@ -665,6 +820,8 @@ fn test_image_row_occupation_single_row() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
 
     term.place_graphic(placement);
@@ -732,6 +889,8 @@ fn test_image_row_occupation_three_rows() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
 
     term.place_graphic(placement);
@@ -804,6 +963,8 @@ fn test_image_row_occupation_from_middle() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
 
     term.place_graphic(placement);
@@ -916,6 +1077,8 @@ fn test_place_nonexistent_graphic() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
 
     // Should not panic, just warn
@@ -2606,6 +2769,8 @@ fn test_swap_alt_isolates_placements() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 1,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
     assert!(
@@ -3065,6 +3230,8 @@ fn test_resize_widen_unwraps_command_image_follows() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 1,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 
@@ -3143,6 +3310,8 @@ fn test_resize_narrow_wraps_command_image_follows() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 1,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 
@@ -3261,6 +3430,8 @@ fn test_debug_widen_visible_layout() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 
@@ -3319,6 +3490,8 @@ fn test_debug_narrow_visible_layout() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 
@@ -3379,6 +3552,8 @@ fn test_resize_narrow_combined_col_and_row_change() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 
@@ -3476,6 +3651,8 @@ fn test_resize_narrow_with_multi_row_image() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0, // Default: cursor moves to last row of image
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 
@@ -3588,6 +3765,8 @@ fn test_resize_narrow_with_cursor_at_bottom_of_screen() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0,
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 
@@ -3688,6 +3867,8 @@ fn test_resize_narrow_with_prompt_after_image() {
         virtual_placement: false,
         unicode_placeholder: 0,
         cursor_movement: 0, // Default kitty behaviour: cursor stays on the last row of image
+        cell_x_offset: 0,
+        cell_y_offset: 0,
     };
     term.place_graphic(placement);
 

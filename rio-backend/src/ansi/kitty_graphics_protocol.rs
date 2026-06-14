@@ -111,6 +111,9 @@ pub struct PlacementRequest {
     /// the uppercase `U=1` flag). Currently informational only.
     pub unicode_placeholder: u32,
     pub cursor_movement: u8, // 0 = move cursor to after image (default), 1 = don't move cursor
+    /// Kitty `X=`/`Y=` pixel offsets within the placement's first cell.
+    pub cell_x_offset: u32,
+    pub cell_y_offset: u32,
 }
 
 #[derive(Debug)]
@@ -631,6 +634,8 @@ pub fn parse(
                     virtual_placement: cmd.virtual_placement,
                     unicode_placeholder: cmd.unicode_placeholder,
                     cursor_movement: cmd.cursor_movement,
+                    cell_x_offset: cmd.cell_x_offset,
+                    cell_y_offset: cmd.cell_y_offset,
                 })
             } else {
                 None
@@ -659,6 +664,8 @@ pub fn parse(
                 virtual_placement: cmd.virtual_placement,
                 unicode_placeholder: cmd.unicode_placeholder,
                 cursor_movement: cmd.cursor_movement,
+                cell_x_offset: cmd.cell_x_offset,
+                cell_y_offset: cmd.cell_y_offset,
             };
             let response = if cmd.implicit_id {
                 None
@@ -1551,6 +1558,30 @@ mod tests {
         assert_eq!(placement.columns, 5);
         assert_eq!(placement.rows, 3);
         assert_eq!(placement.z_index, 2);
+    }
+
+    #[test]
+    fn test_parse_placement_subcell_offset() {
+        let result = parse_kitty_graphics_protocol("a=p,i=1,X=7,Y=9", "");
+        let placement = result
+            .expect("parse ok")
+            .placement_request
+            .expect("placement");
+
+        assert_eq!(placement.cell_x_offset, 7);
+        assert_eq!(placement.cell_y_offset, 9);
+    }
+
+    #[test]
+    fn test_parse_placement_subcell_offset_defaults_zero() {
+        let result = parse_kitty_graphics_protocol("a=p,i=1", "");
+        let placement = result
+            .expect("parse ok")
+            .placement_request
+            .expect("placement");
+
+        assert_eq!(placement.cell_x_offset, 0);
+        assert_eq!(placement.cell_y_offset, 0);
     }
 
     #[test]

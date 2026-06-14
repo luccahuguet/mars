@@ -3914,6 +3914,9 @@ impl Screen<'_> {
                 let cursor_px_x = origin_x + cursor_col as f32 * cell_width;
                 let cursor_px_y = origin_y + cursor_row as f32 * cell_height;
 
+                self.renderer
+                    .trail_cursor
+                    .set_route(current_item.val.route_id);
                 self.renderer.trail_cursor.set_destination(
                     cursor_px_x,
                     cursor_px_y,
