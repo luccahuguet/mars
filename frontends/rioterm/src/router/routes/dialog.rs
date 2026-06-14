@@ -8,9 +8,10 @@ const WINDOW_MARGIN: f32 = 24.0;
 const CARD_RADIUS: f32 = 12.0;
 const CARD_PADDING_X: f32 = 24.0;
 
-const TITLE_TEXT: &str = "Close Window?";
+const TITLE_TEXT: &str = "Close this window?";
 const BODY_LINE_1: &str = "All terminal sessions in this window will be";
 const BODY_LINE_2: &str = "terminated.";
+const SHORTCUT_TEXT: &str = "Y close    N cancel";
 const CANCEL_TEXT: &str = "Cancel";
 const CLOSE_TEXT: &str = "Close";
 
@@ -21,6 +22,7 @@ const BUTTON_FONT_SIZE: f32 = 14.0;
 const TITLE_Y_OFFSET: f32 = 32.0;
 const BODY_Y_OFFSET: f32 = 76.0;
 const BODY_LINE_HEIGHT: f32 = 19.0;
+const SHORTCUT_Y_OFFSET: f32 = 114.0;
 const BUTTON_HEIGHT: f32 = 42.0;
 const BUTTON_GAP: f32 = 12.0;
 const BUTTON_BOTTOM_OFFSET: f32 = 24.0;
@@ -202,6 +204,14 @@ pub fn screen(sugarloaf: &mut Sugarloaf, hovered_action: Option<ConfirmQuitActio
         layout.card.x,
         layout.card.width,
         layout.card.y + BODY_Y_OFFSET + BODY_LINE_HEIGHT,
+        &body_opts,
+    );
+    draw_centered(
+        ui,
+        SHORTCUT_TEXT,
+        layout.card.x,
+        layout.card.width,
+        layout.card.y + SHORTCUT_Y_OFFSET,
         &body_opts,
     );
     draw_centered_in_rect(ui, CANCEL_TEXT, layout.cancel_button, &cancel_opts);
