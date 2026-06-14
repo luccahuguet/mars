@@ -426,6 +426,7 @@ fn validate_yazelix_profile_configs(root: &Path) -> Result<()> {
     for (profile, path) in profile_configs {
         let text = read_text(&path)?;
         for required in [
+            "confirm-before-quit = true",
             r#"adaptive-theme = { dark = "yazelix-dark", light = "yazelix-light" }"#,
             "[cursor]",
             "blinking = true",

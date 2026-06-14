@@ -1,4 +1,4 @@
-confirm-before-quit = false
+confirm-before-quit = true
 adaptive-theme = { dark = "yazelix-dark", light = "yazelix-light" }
 
 [renderer]

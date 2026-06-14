@@ -70,10 +70,10 @@ contract only for the terminal process. It ignores ambient host
 Terminal config override. Child shells launched by the packaged wrapper do not
 inherit Yazelix Terminal's private `RIO_CONFIG_HOME` or package loader paths,
 so plain host `rio` invocations keep using the user's host Rio defaults.
-The packaged config disables confirm-before-quit, disables native window
-decorations, sets the terminal font size to `17.0`, and uses the default event
-renderer strategy with WebGPU, Rio's native trail cursor effect, and a readable
-650 ms cursor blink. It also maps private-use icon glyphs to
+The packaged config asks before quitting, disables native window decorations,
+sets the terminal font size to `17.0`, and uses the default event renderer
+strategy with WebGPU, Rio's native trail cursor effect, and a readable 650 ms
+cursor blink. It also maps private-use icon glyphs to
 `Symbols Nerd Font Mono`, selected text-style status symbols to packaged
 `Noto Sans Symbols 2`, and common emoji/status symbol ranges to the selected
 packaged emoji fallback. `noto` remains the default, while `twitter` and
