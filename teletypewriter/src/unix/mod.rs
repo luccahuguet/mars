@@ -516,6 +516,8 @@ pub fn create_pty_with_spawn(
     working_directory: &Option<String>,
     columns: u16,
     rows: u16,
+    width: u16,
+    height: u16,
 ) -> Result<Pty, Error> {
     #[cfg(not(any(target_os = "macos", target_os = "freebsd")))]
     let mut is_controling_terminal = true;
@@ -528,8 +530,8 @@ pub fn create_pty_with_spawn(
     let winsize = Winsize {
         ws_row: rows as libc::c_ushort,
         ws_col: columns as libc::c_ushort,
-        ws_width: 0 as libc::c_ushort,
-        ws_height: 0 as libc::c_ushort,
+        ws_xpixel: width as libc::c_ushort,
+        ws_ypixel: height as libc::c_ushort,
     };
     let term = create_termp(true);
 
@@ -739,13 +741,19 @@ pub fn create_pty_with_spawn(
 ///
 /// It returns two [`Pty`] along with respective process name [`String`] and process id (`libc::pid_`)
 ///
-pub fn create_pty_with_fork(shell: &str, columns: u16, rows: u16) -> Result<Pty, Error> {
+pub fn create_pty_with_fork(
+    shell: &str,
+    columns: u16,
+    rows: u16,
+    width: u16,
+    height: u16,
+) -> Result<Pty, Error> {
     let mut main = 0;
     let winsize = Winsize {
         ws_row: rows as libc::c_ushort,
         ws_col: columns as libc::c_ushort,
-        ws_width: 0 as libc::c_ushort,
-        ws_height: 0 as libc::c_ushort,
+        ws_xpixel: width as libc::c_ushort,
+        ws_ypixel: height as libc::c_ushort,
     };
     let term = create_termp(true);
 
@@ -891,12 +899,6 @@ impl Child {
         }
 
         Ok(Some(status))
-    }
-
-    pub fn close(&self) {
-        unsafe {
-            libc::close(*self.pid);
-        }
     }
 }
 
