@@ -1239,6 +1239,30 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
+                if route.path == RoutePath::ConfirmQuit {
+                    if button == MouseButton::Left && state == ElementState::Released {
+                        match crate::router::routes::dialog::action_at(
+                            &route.window.screen.sugarloaf,
+                            route.window.screen.mouse.x,
+                            route.window.screen.mouse.y,
+                        ) {
+                            Some(
+                                crate::router::routes::dialog::ConfirmQuitAction::Cancel,
+                            ) => {
+                                route.path = RoutePath::Terminal;
+                                route.request_redraw();
+                            }
+                            Some(
+                                crate::router::routes::dialog::ConfirmQuitAction::Close,
+                            ) => {
+                                route.quit();
+                            }
+                            None => {}
+                        }
+                    }
+                    return;
+                }
+
                 if route.path != RoutePath::Terminal {
                     return;
                 }
@@ -1514,11 +1538,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.window.winit_window.set_cursor_visible(true);
                 }
 
-                if route.path != RoutePath::Terminal {
-                    route.window.winit_window.set_cursor(CursorIcon::Default);
-                    return;
-                }
-
                 let x = position.x;
                 let y = position.y;
 
@@ -1533,6 +1552,27 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 route.window.screen.mouse.x = x;
                 route.window.screen.mouse.y = y;
                 route.window.screen.mouse.raw_y = position.y;
+
+                if route.path == RoutePath::ConfirmQuit {
+                    let hovered = crate::router::routes::dialog::action_at(
+                        &route.window.screen.sugarloaf,
+                        route.window.screen.mouse.x,
+                        route.window.screen.mouse.y,
+                    )
+                    .is_some();
+                    route.window.winit_window.set_cursor(if hovered {
+                        CursorIcon::Pointer
+                    } else {
+                        CursorIcon::Default
+                    });
+                    route.request_redraw();
+                    return;
+                }
+
+                if route.path != RoutePath::Terminal {
+                    route.window.winit_window.set_cursor(CursorIcon::Default);
+                    return;
+                }
 
                 // Handle assistant overlay hover
                 if route.window.screen.renderer.assistant.is_active() {
@@ -2043,13 +2083,14 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     }
                     RoutePath::Terminal | RoutePath::ConfirmQuit => {
                         if route.path == RoutePath::ConfirmQuit {
-                            let dim = route.window.screen.ctx().current().dimension;
+                            let hovered_action = crate::router::routes::dialog::action_at(
+                                &route.window.screen.sugarloaf,
+                                route.window.screen.mouse.x,
+                                route.window.screen.mouse.y,
+                            );
                             crate::router::routes::dialog::screen(
                                 &mut route.window.screen.sugarloaf,
-                                &dim,
-                                "want to quit?",
-                                "yes (y)",
-                                "no (n)",
+                                hovered_action,
                             );
                         }
 
