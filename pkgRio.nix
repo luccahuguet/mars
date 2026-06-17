@@ -129,10 +129,10 @@ in
       ''
         runHook preInstall
 
-        install -D -m 644 misc/logo.svg \
-                          $out/share/icons/hicolor/scalable/apps/rio.svg
-        install -D -m 644 misc/logo.svg \
-                          $out/share/icons/hicolor/scalable/apps/yazelix-terminal.svg
+        install -D -m 644 misc/mars_terminal_icon.png \
+                          $out/share/icons/hicolor/1024x1024/apps/rio.png
+        install -D -m 644 misc/mars_terminal_icon.png \
+                          $out/share/icons/hicolor/1024x1024/apps/yazelix-terminal.png
         install -D -m 644 sugarloaf/src/font/resources/SymbolsNerdFontMono/SymbolsNerdFontMono-Regular.ttf \
                           $out/share/yazelix-terminal/fonts/SymbolsNerdFontMono-Regular.ttf
         install -D -m 644 ${noto-fonts}/share/fonts/noto/NotoSansSymbols2-Regular.otf \

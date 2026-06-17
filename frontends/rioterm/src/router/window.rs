@@ -4,7 +4,7 @@ use rio_window::window::{
     CursorIcon, Fullscreen, Icon, ImePurpose, Window, WindowAttributes,
 };
 
-pub const LOGO_ICON: &[u8; 410598] = include_bytes!("./resources/images/rio-logo.ico");
+pub const LOGO_ICON: &[u8] = include_bytes!("../../../../misc/mars_terminal_icon.png");
 // Terminal W/H constraints
 pub const DEFAULT_MINIMUM_WINDOW_HEIGHT: i32 = 200;
 pub const DEFAULT_MINIMUM_WINDOW_WIDTH: i32 = 300;

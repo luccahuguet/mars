@@ -97,11 +97,9 @@ default or is advertised as mature.
 - Full live IME, selection/search, high-DPI, and native desktop UX still need a
   stable-promotion audit under `yazelix-yzxterm-stable-promotion-ux-kfjkz`.
 - Polished application icons are not a Ghostty parity blocker for the
-  experimental runtime, but the current Rio-derived icon path is bad enough to
-  remain real product work. The package installs Rio's current `misc/logo.svg`
-  for `yazelix-terminal`, and upstream Rio has open icon pressure in
-  `raphamorim/rio#896` and `raphamorim/rio#1401`, plus older branding
-  discussion in `raphamorim/rio#299`.
+  experimental runtime, but they are product work. The package installs the
+  Mars Terminal icon for `yazelix-terminal`; stable promotion should still
+  audit small-size, dock, taskbar, and installer presentation on each platform.
 - Linux-local graphics and benchmark evidence does not prove native Windows or
   macOS parity.
 
