@@ -157,6 +157,9 @@
               share/mars/emoji/serenityos/profiles/shaders/config.toml"
             for path in \
               $config_paths \
+              share/icons/hicolor/48x48/apps/mars.png \
+              share/icons/hicolor/256x256/apps/mars.png \
+              share/icons/hicolor/512x512/apps/mars.png \
               share/mars/fonts/NotoSansSymbols2-Regular.otf \
               share/mars/package-metadata.json
             do

@@ -2,6 +2,7 @@
   lib,
   stdenv,
   makeWrapper,
+  imagemagick,
   ncurses,
   noto-fonts,
   noto-fonts-color-emoji,
@@ -112,6 +113,7 @@ in
     };
 
     nativeBuildInputs = [
+      imagemagick
       makeWrapper
       ncurses
     ];
@@ -128,8 +130,15 @@ in
       ''
         runHook preInstall
 
-        install -D -m 644 misc/mars_terminal_icon.png \
-                          $out/share/icons/hicolor/1024x1024/apps/mars.png
+        for size in 16 32 48 64 128 256 512 1024; do
+          icon_dir="$out/share/icons/hicolor/''${size}x''${size}/apps"
+          install -dm 755 "$icon_dir"
+          if [ "$size" = 1024 ]; then
+            install -m 644 misc/mars_terminal_icon.png "$icon_dir/mars.png"
+          else
+            magick misc/mars_terminal_icon.png -resize "''${size}x''${size}" "$icon_dir/mars.png"
+          fi
+        done
         install -D -m 644 sugarloaf/src/font/resources/SymbolsNerdFontMono/SymbolsNerdFontMono-Regular.ttf \
                           $out/share/mars/fonts/SymbolsNerdFontMono-Regular.ttf
         install -D -m 644 ${noto-fonts}/share/fonts/noto/NotoSansSymbols2-Regular.otf \
