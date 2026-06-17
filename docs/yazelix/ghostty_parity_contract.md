@@ -1,7 +1,7 @@
 # Ghostty Parity Contract
 
 Status: experimental target for Mars Terminal, currently packaged through the
-`yazelix-terminal` Rio fork surface.
+`mars` Rio fork surface.
 
 This contract defines when Mars Terminal is good enough to replace Ghostty as
 the preferred terminal surface for Yazelix. The goal is not to clone Ghostty's
@@ -22,7 +22,7 @@ not implementation copying.
 
 ## Success Definition
 
-`yazelix-terminal` reaches Ghostty parity when:
+`mars` reaches Ghostty parity when:
 
 - Yazelix can launch it as the terminal host without changing Yazelix's main
   workspace ownership model
@@ -138,7 +138,7 @@ Required:
 
 ### Yazelix Mode
 
-`yazelix-terminal` must provide a Yazelix-owned launch/config mode that is small
+`mars` must provide a Yazelix-owned launch/config mode that is small
 and explicit:
 
 - one command surface for launching Yazelix's runtime command
@@ -177,7 +177,7 @@ block the first cursor-shader proof:
 ## Frontier Protocols
 
 These are modern or exploratory features worth tracking, but they are not
-required for the first usable Yazelix terminal:
+required for the first usable Mars terminal:
 
 - Kitty multicursor protocol, if the public spec and real application behavior
   prove useful

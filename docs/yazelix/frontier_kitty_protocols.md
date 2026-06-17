@@ -301,8 +301,8 @@ Result:
 - Implemented approval-request routing for remote-to-local `send` sessions,
   with default denial when the notification UI cannot provide actions
 - Implemented safe incoming regular-file and directory writes into
-  `$XDG_DOWNLOAD_DIR/yazelix-terminal-transfers` or
-  `~/Downloads/yazelix-terminal-transfers`, staged under `.staging` and
+  `$XDG_DOWNLOAD_DIR/mars-transfers` or
+  `~/Downloads/mars-transfers`, staged under `.staging` and
   committed only on `finish`
 - Implemented approved receive/read sessions that collect requested paths before
   approval, show a path preview, list regular files/directories with bounded

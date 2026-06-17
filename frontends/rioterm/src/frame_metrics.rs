@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const FRAME_LOG_ENV: &str = "YAZELIX_TERMINAL_FRAME_LOG";
-const SHADER_STATE_LOG_ENV: &str = "YAZELIX_TERMINAL_SHADER_STATE_LOG";
+const FRAME_LOG_ENV: &str = "MARS_FRAME_LOG";
+const SHADER_STATE_LOG_ENV: &str = "MARS_SHADER_STATE_LOG";
 
 static FRAME_LOGGER: OnceLock<Option<Mutex<FrameLogger>>> = OnceLock::new();
 static SHADER_STATE_LOGGER: OnceLock<Option<Mutex<ShaderStateLogger>>> = OnceLock::new();
@@ -87,9 +87,9 @@ pub(crate) fn record_redraw(metrics: RedrawMetrics<'_>) {
 
     logger
         .lock()
-        .expect("lock YAZELIX_TERMINAL_FRAME_LOG")
+        .expect("lock MARS_FRAME_LOG")
         .record_redraw(metrics)
-        .expect("write YAZELIX_TERMINAL_FRAME_LOG frame event");
+        .expect("write MARS_FRAME_LOG frame event");
 }
 
 pub(crate) fn record_shader_state(metrics: ShaderStateMetrics) {
@@ -115,15 +115,13 @@ pub(crate) fn record_shader_state(metrics: ShaderStateMetrics) {
         return;
     };
 
-    let mut logger = logger
-        .lock()
-        .expect("lock YAZELIX_TERMINAL_SHADER_STATE_LOG");
+    let mut logger = logger.lock().expect("lock MARS_SHADER_STATE_LOG");
     if logger.last.as_ref() == Some(&metrics) {
         return;
     }
     logger
         .record_shader_state(metrics)
-        .expect("write YAZELIX_TERMINAL_SHADER_STATE_LOG event");
+        .expect("write MARS_SHADER_STATE_LOG event");
 }
 
 struct ShaderStateLogger {

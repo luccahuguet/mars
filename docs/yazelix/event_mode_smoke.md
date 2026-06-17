@@ -12,8 +12,8 @@ tools/yazelix_event_mode_smoke.sh ./result_mars_package
 The script verifies that the packaged config does not default to
 `renderer.strategy = "game"`, that the default profile enables Rio
 `trail-cursor` without custom shaders, that the opt-in shader profile starts,
-and that `YAZELIX_TERMINAL_RENDER_STRATEGY=game` still materializes a valid
-escape-hatch config. It also verifies that `YAZELIX_TERMINAL_PROFILE=baseline`
+and that `MARS_RENDER_STRATEGY=game` still materializes a valid
+escape-hatch config. It also verifies that `MARS_PROFILE=baseline`
 starts a no-effects config and composes with the game-mode diagnostic path.
 
 Manual session smoke:
@@ -26,5 +26,5 @@ Manual session smoke:
 6. Preview an image and a PDF in Yazi.
 7. Move the editor cursor quickly and confirm Rio's trail cursor animation
    renders smoothly.
-8. Relaunch with `YAZELIX_TERMINAL_PROFILE=shaders` only when validating the
+8. Relaunch with `MARS_PROFILE=shaders` only when validating the
    Ghostty-compatible shader stack.

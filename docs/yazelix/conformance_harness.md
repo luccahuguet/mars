@@ -13,7 +13,7 @@ The harness has three explicit scopes:
 
 Protocol authority and comparison targets are separate. Kitty owns Kitty
 protocol specs. Ghostty is the primary behavior and quality target for Mars
-Terminal's current yzxterm package surface. WezTerm is the mature independent
+Terminal's current mars package surface. WezTerm is the mature independent
 terminal-engine comparison target.
 
 ## Commands
@@ -151,7 +151,7 @@ not prove shader parity.
 
 ## Comparison Targets
 
-Ghostty remains the primary behavior and quality comparison target for yzxterm,
+Ghostty remains the primary behavior and quality comparison target for mars,
 especially for shader ABI behavior and terminal-app compatibility. WezTerm is a
 mature terminal-engine comparison target. Kitty is the normative source for
 Kitty-owned protocol specs, not an implementation source to copy from.

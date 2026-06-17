@@ -1,6 +1,6 @@
 # Source Dossiers
 
-Feature dossiers live here while `yazelix-terminal` absorbs behavior from
+Feature dossiers live here while `mars` absorbs behavior from
 Ghostty, WezTerm, Kitty specs, or black-box probes.
 
 Start from `../source_dossier_template.md`. Keep dossiers concise and evidence

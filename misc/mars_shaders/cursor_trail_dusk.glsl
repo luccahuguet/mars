@@ -108,7 +108,7 @@ float trailCoreMask(float sdf, float offset) {
 }
 
 float yazelixRioTrailActiveFactor() {
-#if defined(YAZELIX_TERMINAL_RIO_TRAIL)
+#if defined(MARS_RIO_TRAIL)
     return iYazelixRioTrailActive == 0 ? 0.0 : 1.0;
 #else
     return 0.0;
@@ -116,7 +116,7 @@ float yazelixRioTrailActiveFactor() {
 }
 
 float yazelixRioTrailAnimatingFactor() {
-#if defined(YAZELIX_TERMINAL_RIO_TRAIL)
+#if defined(MARS_RIO_TRAIL)
     return iYazelixRioTrailAnimating == 0 ? 0.0 : 1.0;
 #else
     return 0.0;
@@ -124,7 +124,7 @@ float yazelixRioTrailAnimatingFactor() {
 }
 
 vec4 yazelixRioTrailAnimatedRect() {
-#if defined(YAZELIX_TERMINAL_RIO_TRAIL)
+#if defined(MARS_RIO_TRAIL)
     return vec4(normalize(iYazelixRioTrailAnimatedCursor.xy, 1.), normalize(iYazelixRioTrailAnimatedCursor.zw, 0.));
 #else
     return vec4(0.0);
@@ -132,7 +132,7 @@ vec4 yazelixRioTrailAnimatedRect() {
 }
 
 float yazelixRioTrailMotionFactor(vec4 currentCursor) {
-#if defined(YAZELIX_TERMINAL_RIO_TRAIL)
+#if defined(MARS_RIO_TRAIL)
     if (iYazelixRioTrailActive == 0) {
         return 0.0;
     }
@@ -149,7 +149,7 @@ float yazelixRioTrailMotionFactor(vec4 currentCursor) {
 }
 
 vec2 yazelixRioTrailCenter(vec2 fallback) {
-#if defined(YAZELIX_TERMINAL_RIO_TRAIL)
+#if defined(MARS_RIO_TRAIL)
     if (iYazelixRioTrailActive == 0) {
         return fallback;
     }
@@ -161,7 +161,7 @@ vec2 yazelixRioTrailCenter(vec2 fallback) {
 }
 
 float yazelixRioTrailSdf(in vec2 vu, in vec2 offsetFactor) {
-#if defined(YAZELIX_TERMINAL_RIO_TRAIL)
+#if defined(MARS_RIO_TRAIL)
     vec4 animatedCursor = yazelixRioTrailAnimatedRect();
     float bboxSdf = getSdfRectangle(vu, animatedCursor.xy - (animatedCursor.zw * offsetFactor), animatedCursor.zw * 0.5);
 

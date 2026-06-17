@@ -2829,7 +2829,7 @@ impl Screen<'_> {
         command.args(args);
 
         #[cfg(unix)]
-        teletypewriter::sanitize_yazelix_terminal_child_command(&mut command);
+        teletypewriter::sanitize_mars_child_command(&mut command);
 
         let _ = command.spawn();
     }

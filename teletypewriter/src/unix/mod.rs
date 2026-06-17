@@ -26,22 +26,20 @@ use std::process::{Command, Stdio};
 use std::ptr;
 use std::sync::Arc;
 
-const YAZELIX_TERMINAL_CHILD_ENV_SANITIZE: &str = "YAZELIX_TERMINAL_CHILD_ENV_SANITIZE";
-const YAZELIX_TERMINAL_CONFIG: &str = "YAZELIX_TERMINAL_CONFIG";
-const YAZELIX_TERMINAL_HOST: &str = "YAZELIX_TERMINAL_HOST";
-const YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH: &str =
-    "YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH";
-const YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX: &str =
-    "YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX";
-const YAZELIX_TERMINAL_LAUNCH_ONLY_ENV: &[&str] = &[
+const MARS_CHILD_ENV_SANITIZE: &str = "MARS_CHILD_ENV_SANITIZE";
+const MARS_CONFIG: &str = "MARS_CONFIG";
+const MARS_TERMINAL_HOST: &str = "MARS_TERMINAL_HOST";
+const MARS_HOST_LD_LIBRARY_PATH: &str = "MARS_HOST_LD_LIBRARY_PATH";
+const MARS_LD_LIBRARY_PATH_PREFIX: &str = "MARS_LD_LIBRARY_PATH_PREFIX";
+const MARS_LAUNCH_ONLY_ENV: &[&str] = &[
     "RIO_CONFIG_HOME",
-    YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
-    YAZELIX_TERMINAL_CONFIG,
-    "YAZELIX_TERMINAL_APP_ID",
-    YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
-    YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
-    "YAZELIX_TERMINAL_GRAPHICS_WRAPPER",
-    "YAZELIX_TERMINAL_RENDER_STRATEGY",
+    MARS_CHILD_ENV_SANITIZE,
+    MARS_CONFIG,
+    "MARS_APP_ID",
+    MARS_HOST_LD_LIBRARY_PATH,
+    MARS_LD_LIBRARY_PATH_PREFIX,
+    "MARS_GRAPHICS_WRAPPER",
+    "MARS_RENDER_STRATEGY",
 ];
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
@@ -105,16 +103,14 @@ fn default_shell_command(shell: &str) {
     }
 }
 
-fn should_sanitize_yazelix_terminal_child_env() -> bool {
-    std::env::var_os(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE).is_some()
-        || std::env::var_os(YAZELIX_TERMINAL_CONFIG).is_some()
-        || std::env::var_os(YAZELIX_TERMINAL_HOST).is_some()
+fn should_sanitize_mars_child_env() -> bool {
+    std::env::var_os(MARS_CHILD_ENV_SANITIZE).is_some()
+        || std::env::var_os(MARS_CONFIG).is_some()
+        || std::env::var_os(MARS_TERMINAL_HOST).is_some()
 }
 
-fn apply_yazelix_terminal_child_ld_library_path(command: &mut Command) {
-    if let Some(host_ld_library_path) =
-        std::env::var_os(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH)
-    {
+fn apply_mars_child_ld_library_path(command: &mut Command) {
+    if let Some(host_ld_library_path) = std::env::var_os(MARS_HOST_LD_LIBRARY_PATH) {
         if host_ld_library_path.is_empty() {
             command.env_remove("LD_LIBRARY_PATH");
         } else {
@@ -123,7 +119,7 @@ fn apply_yazelix_terminal_child_ld_library_path(command: &mut Command) {
         return;
     }
 
-    let Some(prefix) = std::env::var_os(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX) else {
+    let Some(prefix) = std::env::var_os(MARS_LD_LIBRARY_PATH_PREFIX) else {
         return;
     };
     let Some(current) = std::env::var_os("LD_LIBRARY_PATH") else {
@@ -137,10 +133,8 @@ fn apply_yazelix_terminal_child_ld_library_path(command: &mut Command) {
     }
 }
 
-fn apply_yazelix_terminal_process_ld_library_path() {
-    if let Some(host_ld_library_path) =
-        std::env::var_os(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH)
-    {
+fn apply_mars_process_ld_library_path() {
+    if let Some(host_ld_library_path) = std::env::var_os(MARS_HOST_LD_LIBRARY_PATH) {
         if host_ld_library_path.is_empty() {
             std::env::remove_var("LD_LIBRARY_PATH");
         } else {
@@ -149,7 +143,7 @@ fn apply_yazelix_terminal_process_ld_library_path() {
         return;
     }
 
-    let Some(prefix) = std::env::var_os(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX) else {
+    let Some(prefix) = std::env::var_os(MARS_LD_LIBRARY_PATH_PREFIX) else {
         return;
     };
     let Some(current) = std::env::var_os("LD_LIBRARY_PATH") else {
@@ -181,24 +175,24 @@ fn strip_path_prefix(
     std::env::join_paths(&current_paths[prefix_paths.len()..]).ok()
 }
 
-pub fn sanitize_yazelix_terminal_child_command(command: &mut Command) {
-    if !should_sanitize_yazelix_terminal_child_env() {
+pub fn sanitize_mars_child_command(command: &mut Command) {
+    if !should_sanitize_mars_child_env() {
         return;
     }
 
-    apply_yazelix_terminal_child_ld_library_path(command);
-    for name in YAZELIX_TERMINAL_LAUNCH_ONLY_ENV {
+    apply_mars_child_ld_library_path(command);
+    for name in MARS_LAUNCH_ONLY_ENV {
         command.env_remove(name);
     }
 }
 
-fn sanitize_yazelix_terminal_child_process_env() {
-    if !should_sanitize_yazelix_terminal_child_env() {
+fn sanitize_mars_child_process_env() {
+    if !should_sanitize_mars_child_env() {
         return;
     }
 
-    apply_yazelix_terminal_process_ld_library_path();
-    for name in YAZELIX_TERMINAL_LAUNCH_ONLY_ENV {
+    apply_mars_process_ld_library_path();
+    for name in MARS_LAUNCH_ONLY_ENV {
         std::env::remove_var(name);
     }
 }
@@ -636,7 +630,7 @@ pub fn create_pty_with_spawn(
 
             let mut shell_probe = std::process::Command::new("flatpak-spawn");
             shell_probe.args(["--host", "sh", "-c", "echo $SHELL"]);
-            sanitize_yazelix_terminal_child_command(&mut shell_probe);
+            sanitize_mars_child_command(&mut shell_probe);
             let output = shell_probe.output()?;
             let shell = String::from_utf8_lossy(&output.stdout);
 
@@ -661,7 +655,7 @@ pub fn create_pty_with_spawn(
 
     builder.env("USER", user.user);
     builder.env("HOME", user.home);
-    sanitize_yazelix_terminal_child_command(&mut builder);
+    sanitize_mars_child_command(&mut builder);
 
     unsafe {
         builder.pre_exec(move || {
@@ -783,7 +777,7 @@ pub fn create_pty_with_fork(
         )
     } {
         0 => {
-            sanitize_yazelix_terminal_child_process_env();
+            sanitize_mars_child_process_env();
             default_shell_command(shell_program);
             Err(Error::other(format!(
                 "forkpty has reach unreachable with {shell_program}"
@@ -930,7 +924,7 @@ pub fn command_per_pid(pid: libc::pid_t) -> String {
         .arg(format!("{pid:}"))
         .arg("-o")
         .arg("comm=");
-    sanitize_yazelix_terminal_child_command(&mut command);
+    sanitize_mars_child_command(&mut command);
     let current_process_name =
         command.output().expect("failed to execute process").stdout;
 
@@ -1101,7 +1095,7 @@ where
     if let Ok(cwd) = foreground_process_path(main_fd, shell_pid) {
         command.current_dir(cwd);
     }
-    sanitize_yazelix_terminal_child_command(&mut command);
+    sanitize_mars_child_command(&mut command);
     unsafe {
         command
             .pre_exec(|| {
@@ -1137,28 +1131,25 @@ mod tests {
         let _restore = EnvRestore::capture(&[
             "LD_LIBRARY_PATH",
             "RIO_CONFIG_HOME",
-            YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
-            YAZELIX_TERMINAL_CONFIG,
-            YAZELIX_TERMINAL_HOST,
-            YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
-            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
+            MARS_CHILD_ENV_SANITIZE,
+            MARS_CONFIG,
+            MARS_TERMINAL_HOST,
+            MARS_HOST_LD_LIBRARY_PATH,
+            MARS_LD_LIBRARY_PATH_PREFIX,
         ]);
 
-        std::env::set_var(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE, "1");
-        std::env::set_var("RIO_CONFIG_HOME", "/tmp/yazelix-terminal-config");
-        std::env::set_var(YAZELIX_TERMINAL_CONFIG, "/tmp/yazelix-terminal-config");
-        std::env::set_var(
-            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
-            "/nix/lib-a:/nix/lib-b",
-        );
+        std::env::set_var(MARS_CHILD_ENV_SANITIZE, "1");
+        std::env::set_var("RIO_CONFIG_HOME", "/tmp/mars-config");
+        std::env::set_var(MARS_CONFIG, "/tmp/mars-config");
+        std::env::set_var(MARS_LD_LIBRARY_PATH_PREFIX, "/nix/lib-a:/nix/lib-b");
         std::env::set_var("LD_LIBRARY_PATH", "/nix/lib-a:/nix/lib-b:/host/lib");
 
         let mut command = Command::new("env");
-        sanitize_yazelix_terminal_child_command(&mut command);
+        sanitize_mars_child_command(&mut command);
 
         assert_env_removed(&command, "RIO_CONFIG_HOME");
-        assert_env_removed(&command, YAZELIX_TERMINAL_CONFIG);
-        assert_env_removed(&command, YAZELIX_TERMINAL_CHILD_ENV_SANITIZE);
+        assert_env_removed(&command, MARS_CONFIG);
+        assert_env_removed(&command, MARS_CHILD_ENV_SANITIZE);
         assert_eq!(
             command_env_override(&command, "LD_LIBRARY_PATH"),
             Some(Some(OsString::from("/host/lib")))
@@ -1170,25 +1161,25 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let _restore = EnvRestore::capture(&[
             "LD_LIBRARY_PATH",
-            YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
-            YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
-            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
+            MARS_CHILD_ENV_SANITIZE,
+            MARS_HOST_LD_LIBRARY_PATH,
+            MARS_LD_LIBRARY_PATH_PREFIX,
         ]);
 
-        std::env::set_var(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE, "1");
-        std::env::set_var(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH, "/host/original");
-        std::env::set_var(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX, "/nix/lib");
+        std::env::set_var(MARS_CHILD_ENV_SANITIZE, "1");
+        std::env::set_var(MARS_HOST_LD_LIBRARY_PATH, "/host/original");
+        std::env::set_var(MARS_LD_LIBRARY_PATH_PREFIX, "/nix/lib");
         std::env::set_var("LD_LIBRARY_PATH", "/nix/lib:/graphics/lib:/host/original");
 
         let mut command = Command::new("env");
-        sanitize_yazelix_terminal_child_command(&mut command);
+        sanitize_mars_child_command(&mut command);
 
         assert_eq!(
             command_env_override(&command, "LD_LIBRARY_PATH"),
             Some(Some(OsString::from("/host/original")))
         );
-        assert_env_removed(&command, YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH);
-        assert_env_removed(&command, YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX);
+        assert_env_removed(&command, MARS_HOST_LD_LIBRARY_PATH);
+        assert_env_removed(&command, MARS_LD_LIBRARY_PATH_PREFIX);
     }
 
     #[test]
@@ -1197,33 +1188,33 @@ mod tests {
         let _restore = EnvRestore::capture(&[
             "LD_LIBRARY_PATH",
             "RIO_CONFIG_HOME",
-            YAZELIX_TERMINAL_CHILD_ENV_SANITIZE,
-            YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH,
-            YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX,
-            "YAZELIX_TERMINAL_APP_ID",
-            "YAZELIX_TERMINAL_GRAPHICS_WRAPPER",
-            "YAZELIX_TERMINAL_RENDER_STRATEGY",
+            MARS_CHILD_ENV_SANITIZE,
+            MARS_HOST_LD_LIBRARY_PATH,
+            MARS_LD_LIBRARY_PATH_PREFIX,
+            "MARS_APP_ID",
+            "MARS_GRAPHICS_WRAPPER",
+            "MARS_RENDER_STRATEGY",
         ]);
 
-        std::env::set_var(YAZELIX_TERMINAL_CHILD_ENV_SANITIZE, "1");
-        std::env::set_var(YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH, "");
-        std::env::set_var(YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX, "/nix/lib");
+        std::env::set_var(MARS_CHILD_ENV_SANITIZE, "1");
+        std::env::set_var(MARS_HOST_LD_LIBRARY_PATH, "");
+        std::env::set_var(MARS_LD_LIBRARY_PATH_PREFIX, "/nix/lib");
         std::env::set_var("LD_LIBRARY_PATH", "/nix/lib:/other/nix/lib");
-        std::env::set_var("RIO_CONFIG_HOME", "/tmp/yazelix-terminal-config");
-        std::env::set_var("YAZELIX_TERMINAL_APP_ID", "com.yazelix.Yazelix.Yzxterm");
-        std::env::set_var("YAZELIX_TERMINAL_GRAPHICS_WRAPPER", "nixGL");
-        std::env::set_var("YAZELIX_TERMINAL_RENDER_STRATEGY", "game");
+        std::env::set_var("RIO_CONFIG_HOME", "/tmp/mars-config");
+        std::env::set_var("MARS_APP_ID", "com.yazelix.Yazelix.Mars");
+        std::env::set_var("MARS_GRAPHICS_WRAPPER", "nixGL");
+        std::env::set_var("MARS_RENDER_STRATEGY", "game");
 
         let mut command = Command::new("env");
-        sanitize_yazelix_terminal_child_command(&mut command);
+        sanitize_mars_child_command(&mut command);
 
         assert_env_removed(&command, "LD_LIBRARY_PATH");
         assert_env_removed(&command, "RIO_CONFIG_HOME");
-        assert_env_removed(&command, "YAZELIX_TERMINAL_APP_ID");
-        assert_env_removed(&command, "YAZELIX_TERMINAL_GRAPHICS_WRAPPER");
-        assert_env_removed(&command, "YAZELIX_TERMINAL_RENDER_STRATEGY");
-        assert_env_removed(&command, YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH);
-        assert_env_removed(&command, YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX);
+        assert_env_removed(&command, "MARS_APP_ID");
+        assert_env_removed(&command, "MARS_GRAPHICS_WRAPPER");
+        assert_env_removed(&command, "MARS_RENDER_STRATEGY");
+        assert_env_removed(&command, MARS_HOST_LD_LIBRARY_PATH);
+        assert_env_removed(&command, MARS_LD_LIBRARY_PATH_PREFIX);
     }
 
     fn command_env_override(command: &Command, name: &str) -> Option<Option<OsString>> {

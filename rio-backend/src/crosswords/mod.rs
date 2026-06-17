@@ -6365,10 +6365,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "yazelix-terminal-{label}-{}-{nanos}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("mars-{label}-{}-{nanos}", std::process::id()))
     }
 
     // macOS temp dirs can live under /var, which is a system symlink.

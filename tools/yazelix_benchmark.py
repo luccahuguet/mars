@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark harnesses for the Yazelix terminal experiment."""
+"""Benchmark harnesses for the Mars terminal experiment."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ CONFORMANCE_DEBUG_BIN = (
     / "debug"
     / "yazelix-protocol-conformance"
 )
-YAZELIX_SHADER_DIR = ROOT / "misc" / "yazelix_terminal_shaders"
+YAZELIX_SHADER_DIR = ROOT / "misc" / "mars_shaders"
 WGPU_CONFIG_TEMPLATES = {
     "wgpu",
     "wgpu-no-effects",
@@ -596,7 +596,7 @@ def command_frame_run(args: argparse.Namespace) -> int:
     config_path = write_rio_config(config_home, args.config_template)
 
     env = os.environ.copy()
-    env["YAZELIX_TERMINAL_FRAME_LOG"] = str(frame_log)
+    env["MARS_FRAME_LOG"] = str(frame_log)
     if config_path is not None:
         env["RIO_CONFIG_HOME"] = str(config_home)
     if args.config_template in WGPU_CONFIG_TEMPLATES:

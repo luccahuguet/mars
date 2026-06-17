@@ -6,7 +6,7 @@
 
 Born from Rio. Built for Mars
 
-Mars Terminal is an experimental Yazelix-led, Rio-derived Rust terminal emulator, forked from [Rio](https://github.com/raphamorim/rio). The child package surface uses `mars`; main Yazelix still consumes it through the staged `yzxterm` runtime variant while the wider runtime rename stays staged
+Mars Terminal is an experimental Yazelix-led, Rio-derived Rust terminal emulator, forked from [Rio](https://github.com/raphamorim/rio). Its package, app, desktop, config, and metadata surfaces use the `mars` name, and main Yazelix consumes it as the Mars runtime
 
 Mars explores a first-party terminal path with strong Nix packaging, Yazelix-controlled package metadata, profiles, protocols, notifications, Kitty graphics, and cursor-shader boundaries. It aims to support useful modern terminal protocols broadly, stay aligned with Kitty protocol specs where they define the surface, and use Ghostty-inspired behavior and quality targets
 
@@ -19,10 +19,10 @@ If a fix or feature is useful to Rio users, we are happy to help upstreaming it 
 | Upstream project | Rio |
 | Fork category | Experimental active Rio fork |
 | Why this fork exists | Yazelix needs a Rust terminal it can evolve as a first-party runtime, with broad protocol coverage, runtime integration, tighter control, customization, and contract-driven validation |
-| Current Yazelix delta | `mars` package names, the staged `yzxterm` main-runtime profile, desktop wrapper, package metadata passthru, generated profile templates, Rio trail defaults, packaged emoji/Nerd Font glyph fallback, `yazelix-cursors` shader support, BELL/terminal notification behavior, Kitty graphics support, and Ghostty-compatible shader ABI |
+| Current Yazelix delta | `mars` package names, Mars main-runtime integration, desktop wrapper, package metadata passthru, generated profile templates, Rio trail defaults, packaged emoji/Nerd Font glyph fallback, `yazelix-cursors` shader support, BELL/terminal notification behavior, Kitty graphics support, and Ghostty-compatible shader ABI |
 | Non-goals | This fork does not own the full Yazelix workspace, Zellij/Yazi/Helix integration policy, or compatibility shims in the main repo |
 | Standalone support | Supported for experimental users through the flake package and app outputs; normal Yazelix users consume it through main-repo runtime outputs |
-| Upstream sync cadence | Monthly while dogfooding, and before any yzxterm release-gate decision |
+| Upstream sync cadence | Monthly while dogfooding, and before any mars release-gate decision |
 | Maturity policy | Keep Mars experimental until the checked package proves useful in real Yazelix workflows; upstream generally useful fixes to Rio when appropriate, and drop local patches once Rio owns the behavior |
 
 The fork status, feature ledger, and verification evidence live in
@@ -32,13 +32,13 @@ Build-speed guidance lives in
 Cachix setup lives in [`docs/yazelix/cachix.md`](docs/yazelix/cachix.md).
 Mars Terminal shader/profile ownership lives in
 [`docs/yazelix/shader_profile_ownership.md`](docs/yazelix/shader_profile_ownership.md).
-The yzxterm shader ABI lives in
+The mars shader ABI lives in
 [`docs/yazelix/shader_abi.md`](docs/yazelix/shader_abi.md).
 Main Yazelix fork policy lives in
 [Fork and child-repo maintenance](https://github.com/luccahuguet/yazelix/blob/main/docs/contracts/fork_child_repo_maintenance.md).
 
 For visual source edits, run the cargo-built terminal with the Yazelix config
-shape through `tools/yazelix_terminal_local.sh` before paying for a Nix package
+shape through `tools/mars_local.sh` before paying for a Nix package
 or Home Manager rebuild.
 
 ## Yazelix Package Surface
@@ -60,13 +60,13 @@ The package installs:
 
 - `bin/mars`
 - `bin/mars-desktop`
-- `share/applications/yazelix-terminal.desktop`
-- `share/yazelix-terminal/config.toml`
-- `share/yazelix-terminal/baseline/config.toml`
-- `share/yazelix-terminal/profiles/shaders/config.toml`
-- `share/yazelix-terminal/emoji/twitter/config.toml`
-- `share/yazelix-terminal/emoji/serenityos/config.toml`
-- `share/yazelix-terminal/package-metadata.json`
+- `share/applications/mars.desktop`
+- `share/mars/config.toml`
+- `share/mars/baseline/config.toml`
+- `share/mars/profiles/shaders/config.toml`
+- `share/mars/emoji/twitter/config.toml`
+- `share/mars/emoji/serenityos/config.toml`
+- `share/mars/package-metadata.json`
 
 The packaged wrapper keeps Mars isolated from host Rio config, provides stable
 profiles for full, baseline, and shader-heavy runs, and exposes explicit
@@ -78,22 +78,22 @@ Wrapper override knobs:
 
 | Variable | Behavior |
 | --- | --- |
-| `YAZELIX_TERMINAL_CONFIG` | Uses a custom Rio config directory; must contain readable `config.toml` |
-| `YAZELIX_TERMINAL_APP_ID` | Sets the Wayland app id / X11 class used by the wrapper; defaults to `yazelix-terminal` |
-| `YAZELIX_TERMINAL_PROFILE=full` | Uses the packaged WebGPU + Rio trail defaults |
-| `YAZELIX_TERMINAL_PROFILE=baseline` | Uses the packaged no-effects baseline config |
-| `YAZELIX_TERMINAL_PROFILE=shaders` | Uses the opt-in Ghostty-compatible shader profile |
-| `YAZELIX_TERMINAL_EFFECTS=none` | Alias for the baseline no-effects profile |
-| `YAZELIX_TERMINAL_EMOJI_FONT=noto` | Uses the default Noto Color Emoji fallback |
-| `YAZELIX_TERMINAL_EMOJI_FONT=twitter` | Uses the packaged Twitter/Twemoji color emoji fallback |
-| `YAZELIX_TERMINAL_EMOJI_FONT=serenityos` | Uses the packaged SerenityOS emoji fallback |
-| `YAZELIX_TERMINAL_APPEARANCE=dark` | Forces the packaged dark palette; this is the default |
-| `YAZELIX_TERMINAL_APPEARANCE=light` | Forces the packaged light palette |
-| `YAZELIX_TERMINAL_APPEARANCE=auto` | Uses the packaged adaptive dark/light pair and follows the platform theme |
-| `YAZELIX_TERMINAL_RENDER_STRATEGY=events` | Uses the packaged config with Rio's default event renderer strategy |
-| `YAZELIX_TERMINAL_RENDER_STRATEGY=game` | Creates a runtime copy of the packaged config with `strategy = "game"` for diagnostics |
-| `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=none` | Skips automatic nixGL/nixVulkan wrapper discovery |
-| `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=/path/to/wrapper` | Runs the terminal through the selected wrapper |
+| `MARS_CONFIG` | Uses a custom Rio config directory; must contain readable `config.toml` |
+| `MARS_APP_ID` | Sets the Wayland app id / X11 class used by the wrapper; defaults to `mars` |
+| `MARS_PROFILE=full` | Uses the packaged WebGPU + Rio trail defaults |
+| `MARS_PROFILE=baseline` | Uses the packaged no-effects baseline config |
+| `MARS_PROFILE=shaders` | Uses the opt-in Ghostty-compatible shader profile |
+| `MARS_EFFECTS=none` | Alias for the baseline no-effects profile |
+| `MARS_EMOJI_FONT=noto` | Uses the default Noto Color Emoji fallback |
+| `MARS_EMOJI_FONT=twitter` | Uses the packaged Twitter/Twemoji color emoji fallback |
+| `MARS_EMOJI_FONT=serenityos` | Uses the packaged SerenityOS emoji fallback |
+| `MARS_APPEARANCE=dark` | Forces the packaged dark palette; this is the default |
+| `MARS_APPEARANCE=light` | Forces the packaged light palette |
+| `MARS_APPEARANCE=auto` | Uses the packaged adaptive dark/light pair and follows the platform theme |
+| `MARS_RENDER_STRATEGY=events` | Uses the packaged config with Rio's default event renderer strategy |
+| `MARS_RENDER_STRATEGY=game` | Creates a runtime copy of the packaged config with `strategy = "game"` for diagnostics |
+| `MARS_GRAPHICS_WRAPPER=none` | Skips automatic nixGL/nixVulkan wrapper discovery |
+| `MARS_GRAPHICS_WRAPPER=/path/to/wrapper` | Runs the terminal through the selected wrapper |
 
 ## Yazelix Stack Behavior
 
@@ -128,7 +128,7 @@ Release-oriented checks:
 
 ```sh
 nix build .#mars -o result_mars_package
-desktop-file-validate result_mars_package/share/applications/yazelix-terminal.desktop
+desktop-file-validate result_mars_package/share/applications/mars.desktop
 result_mars_package/bin/mars --version
 nix run .#yazelix-protocol-conformance -- verify
 ```

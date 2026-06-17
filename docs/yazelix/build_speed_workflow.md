@@ -25,12 +25,12 @@ Nix package for every Rust edit.
 To open the local cargo-built terminal with the Yazelix packaged config shape:
 
 ```sh
-tools/yazelix_terminal_local.sh
+tools/mars_local.sh
 ```
 
 The launcher builds `target/debug/rio` by default, materializes resolved config
-templates under `target/yazelix-terminal-local/`, sets app id
-`yazelix-terminal-local`, and preserves the desktop wrapper's profile,
+templates under `target/mars-local/`, sets app id
+`mars-local`, and preserves the desktop wrapper's profile,
 renderer-strategy, graphics-wrapper, and child-environment cleanup contracts.
 It never falls back to a host `rio` on `PATH`.
 
@@ -38,13 +38,13 @@ Useful local launcher knobs:
 
 | Variable | Behavior |
 | --- | --- |
-| `YAZELIX_TERMINAL_LOCAL_SKIP_BUILD=1` | Run the existing local binary without invoking Cargo |
-| `YAZELIX_TERMINAL_LOCAL_PROFILE=fast` | Build and run `cargo build --profile fast -p rioterm --features wgpu` |
-| `YAZELIX_TERMINAL_LOCAL_PROFILE=release` | Build and run the local release binary |
-| `YAZELIX_TERMINAL_LOCAL_BINARY=/path/to/rio` | Run an explicit binary instead of `target/<profile>/rio` |
-| `YAZELIX_TERMINAL_PROFILE=baseline` | Use the no-effects baseline config |
-| `YAZELIX_TERMINAL_RENDER_STRATEGY=game` | Generate a runtime config copy with `strategy = "game"` |
-| `YAZELIX_TERMINAL_GRAPHICS_WRAPPER=none` | Skip nixGL/nixVulkan wrapper discovery |
+| `MARS_LOCAL_SKIP_BUILD=1` | Run the existing local binary without invoking Cargo |
+| `MARS_LOCAL_PROFILE=fast` | Build and run `cargo build --profile fast -p rioterm --features wgpu` |
+| `MARS_LOCAL_PROFILE=release` | Build and run the local release binary |
+| `MARS_LOCAL_BINARY=/path/to/rio` | Run an explicit binary instead of `target/<profile>/rio` |
+| `MARS_PROFILE=baseline` | Use the no-effects baseline config |
+| `MARS_RENDER_STRATEGY=game` | Generate a runtime config copy with `strategy = "game"` |
+| `MARS_GRAPHICS_WRAPPER=none` | Skip nixGL/nixVulkan wrapper discovery |
 
 ## Packaging Loop
 
@@ -66,11 +66,11 @@ fast outputs instead of overriding the child input into the normal release
 runtime:
 
 ```sh
-nix build .#runtime_yzxterm_fast --no-link --no-write-lock-file
-nix run .#yzxterm_fast -- launch
+nix build .#runtime_mars_fast --no-link --no-write-lock-file
+nix run .#mars_fast -- launch
 ```
 
-The normal main-repo `#runtime_yzxterm` and Home Manager default path still use
+The normal main-repo `#runtime_mars` and Home Manager default path still use
 the checked `mars` package and remain the release gate.
 
 Wrapper-only changes should rebuild only the cheap `mars` wrapper
@@ -84,7 +84,7 @@ Use the checked package before claiming package correctness:
 
 ```sh
 nix build .#mars -o result_mars_package
-desktop-file-validate result_mars_package/share/applications/yazelix-terminal.desktop
+desktop-file-validate result_mars_package/share/applications/mars.desktop
 result_mars_package/bin/mars --version
 ```
 

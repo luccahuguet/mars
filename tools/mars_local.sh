@@ -56,17 +56,17 @@ is_truthy() {
 }
 
 find_graphics_wrapper() {
-  case "${YAZELIX_TERMINAL_GRAPHICS_WRAPPER:-}" in
+  case "${MARS_GRAPHICS_WRAPPER:-}" in
     none | NONE | 0)
       return 1
       ;;
     "")
       ;;
     *)
-      if print_executable_or_command "$YAZELIX_TERMINAL_GRAPHICS_WRAPPER"; then
+      if print_executable_or_command "$MARS_GRAPHICS_WRAPPER"; then
         return 0
       fi
-      printf 'YAZELIX_TERMINAL_GRAPHICS_WRAPPER is set but not executable or on PATH: %s\n' "$YAZELIX_TERMINAL_GRAPHICS_WRAPPER" >&2
+      printf 'MARS_GRAPHICS_WRAPPER is set but not executable or on PATH: %s\n' "$MARS_GRAPHICS_WRAPPER" >&2
       exit 127
       ;;
   esac
@@ -120,16 +120,16 @@ find_graphics_wrapper() {
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repo_root="$(CDPATH= cd -- "$script_dir/.." && pwd)"
-state_root="${YAZELIX_TERMINAL_LOCAL_STATE:-$repo_root/target/yazelix-terminal-local}"
+state_root="${MARS_LOCAL_STATE:-$repo_root/target/mars-local}"
 font_dir="$repo_root/sugarloaf/src/font/resources/SymbolsNerdFontMono"
-shader_dir="$repo_root/misc/yazelix_terminal_shaders"
-font_template="$repo_root/misc/yazelix_terminal_fonts.toml"
-full_template="$repo_root/misc/yazelix_terminal_config.toml"
-baseline_template="$repo_root/misc/yazelix_terminal_config_baseline.toml"
-shader_template="$repo_root/misc/yazelix_terminal_config_shaders.toml"
+shader_dir="$repo_root/misc/mars_shaders"
+font_template="$repo_root/misc/mars_fonts.toml"
+full_template="$repo_root/misc/mars_config.toml"
+baseline_template="$repo_root/misc/mars_config_baseline.toml"
+shader_template="$repo_root/misc/mars_config_shaders.toml"
 
 select_emoji_font() {
-  case "${YAZELIX_TERMINAL_LOCAL_EMOJI_FONT:-${YAZELIX_TERMINAL_EMOJI_FONT:-noto}}" in
+  case "${MARS_LOCAL_EMOJI_FONT:-${MARS_EMOJI_FONT:-noto}}" in
     "" | noto | Noto | NOTO | default | Default | DEFAULT)
       printf '%s\n' "noto"
       ;;
@@ -140,7 +140,7 @@ select_emoji_font() {
       printf '%s\n' "serenityos"
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_LOCAL_EMOJI_FONT/YAZELIX_TERMINAL_EMOJI_FONT: %s\n' "${YAZELIX_TERMINAL_LOCAL_EMOJI_FONT:-${YAZELIX_TERMINAL_EMOJI_FONT:-}}" >&2
+      printf 'Unsupported MARS_LOCAL_EMOJI_FONT/MARS_EMOJI_FONT: %s\n' "${MARS_LOCAL_EMOJI_FONT:-${MARS_EMOJI_FONT:-}}" >&2
       printf 'Use noto, twitter, or serenityos.\n' >&2
       exit 64
       ;;
@@ -168,9 +168,9 @@ find_emoji_font_dir() {
   emoji_font="$(select_emoji_font)"
   emoji_font_family="$(emoji_font_family_for "$emoji_font")"
 
-  if [ -n "${YAZELIX_TERMINAL_LOCAL_EMOJI_FONT_DIR:-}" ]; then
-    [ -d "$YAZELIX_TERMINAL_LOCAL_EMOJI_FONT_DIR" ] || die "YAZELIX_TERMINAL_LOCAL_EMOJI_FONT_DIR is not a directory: $YAZELIX_TERMINAL_LOCAL_EMOJI_FONT_DIR"
-    printf '%s\n' "$YAZELIX_TERMINAL_LOCAL_EMOJI_FONT_DIR"
+  if [ -n "${MARS_LOCAL_EMOJI_FONT_DIR:-}" ]; then
+    [ -d "$MARS_LOCAL_EMOJI_FONT_DIR" ] || die "MARS_LOCAL_EMOJI_FONT_DIR is not a directory: $MARS_LOCAL_EMOJI_FONT_DIR"
+    printf '%s\n' "$MARS_LOCAL_EMOJI_FONT_DIR"
     return 0
   fi
 
@@ -192,7 +192,7 @@ find_emoji_font_dir() {
   fi
 
   if [ "$emoji_font" != "noto" ]; then
-    die "could not find $emoji_font_family through fontconfig; install its font package or set YAZELIX_TERMINAL_LOCAL_EMOJI_FONT_DIR"
+    die "could not find $emoji_font_family through fontconfig; install its font package or set MARS_LOCAL_EMOJI_FONT_DIR"
   fi
 
   for candidate in \
@@ -229,20 +229,20 @@ write_resolved_config() {
 
   mkdir -p "$(dirname -- "$dst")"
   while IFS= read -r yzt_config_line; do
-    if [ "$yzt_config_line" = "@yazelix_terminal_fonts@" ]; then
+    if [ "$yzt_config_line" = "@mars_fonts@" ]; then
       cat "$font_template"
     else
       printf '%s\n' "$yzt_config_line"
     fi
   done < "$src" >"$dst.template.tmp"
   sed \
-    -e "s|@yazelix_terminal_font_dir@|$font_dir_escaped|g" \
-    -e "s|@yazelix_terminal_emoji_font_dir@|$emoji_font_dir_escaped|g" \
-    -e "s|@yazelix_terminal_emoji_font_family@|$emoji_font_family_escaped|g" \
-    -e "s|@yazelix_terminal_shader_dir@|$shader_dir_escaped|g" \
+    -e "s|@mars_font_dir@|$font_dir_escaped|g" \
+    -e "s|@mars_emoji_font_dir@|$emoji_font_dir_escaped|g" \
+    -e "s|@mars_emoji_font_family@|$emoji_font_family_escaped|g" \
+    -e "s|@mars_shader_dir@|$shader_dir_escaped|g" \
     "$dst.template.tmp" >"$dst.tmp"
   rm -f "$dst.template.tmp"
-  if grep -q "@yazelix_terminal_" "$dst.tmp"; then
+  if grep -q "@mars_" "$dst.tmp"; then
     rm -f "$dst.tmp"
     die "unresolved Mars Terminal config placeholder in $src"
   fi
@@ -268,7 +268,7 @@ prepare_local_configs() {
 }
 
 select_default_config_home() {
-  case "${YAZELIX_TERMINAL_PROFILE:-${YAZELIX_TERMINAL_EFFECTS:-full}}" in
+  case "${MARS_PROFILE:-${MARS_EFFECTS:-full}}" in
     "" | full | Full | FULL | effects | Effects | EFFECTS | default | Default | DEFAULT)
       printf '%s\n' "$state_root/full"
       ;;
@@ -279,7 +279,7 @@ select_default_config_home() {
       printf '%s\n' "$state_root/shaders"
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_PROFILE/YAZELIX_TERMINAL_EFFECTS: %s\n' "${YAZELIX_TERMINAL_PROFILE:-${YAZELIX_TERMINAL_EFFECTS:-}}" >&2
+      printf 'Unsupported MARS_PROFILE/MARS_EFFECTS: %s\n' "${MARS_PROFILE:-${MARS_EFFECTS:-}}" >&2
       printf 'Use full, default, baseline, no-effects, shaders, none, or 0.\n' >&2
       exit 64
       ;;
@@ -312,22 +312,22 @@ write_game_config() {
 }
 
 configure_rio_config() {
-  if [ -n "${YAZELIX_TERMINAL_CONFIG:-}" ]; then
-    if [ -d "$YAZELIX_TERMINAL_CONFIG" ] && [ -r "$YAZELIX_TERMINAL_CONFIG/config.toml" ]; then
-      export RIO_CONFIG_HOME="$YAZELIX_TERMINAL_CONFIG"
-      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
+  if [ -n "${MARS_CONFIG:-}" ]; then
+    if [ -d "$MARS_CONFIG" ] && [ -r "$MARS_CONFIG/config.toml" ]; then
+      export RIO_CONFIG_HOME="$MARS_CONFIG"
+      export MARS_CHILD_ENV_SANITIZE=1
       return 0
     fi
-    printf 'YAZELIX_TERMINAL_CONFIG must point to a readable Rio config directory containing config.toml: %s\n' "$YAZELIX_TERMINAL_CONFIG" >&2
+    printf 'MARS_CONFIG must point to a readable Rio config directory containing config.toml: %s\n' "$MARS_CONFIG" >&2
     exit 127
   fi
 
   prepare_local_configs
   selected_config_home="$(select_default_config_home)"
-  case "${YAZELIX_TERMINAL_RENDER_STRATEGY:-events}" in
+  case "${MARS_RENDER_STRATEGY:-events}" in
     events | Events | EVENTS | event | Event | EVENT | default | none | NONE | 0)
       export RIO_CONFIG_HOME="$selected_config_home"
-      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
+      export MARS_CHILD_ENV_SANITIZE=1
       ;;
     game | Game | GAME)
       config_home="$state_root/game-config"
@@ -335,10 +335,10 @@ configure_rio_config() {
       write_game_config "$selected_config_home/config.toml" "$config_home/config.toml"
       chmod 600 "$config_home/config.toml"
       export RIO_CONFIG_HOME="$config_home"
-      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
+      export MARS_CHILD_ENV_SANITIZE=1
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_RENDER_STRATEGY: %s\n' "$YAZELIX_TERMINAL_RENDER_STRATEGY" >&2
+      printf 'Unsupported MARS_RENDER_STRATEGY: %s\n' "$MARS_RENDER_STRATEGY" >&2
       printf 'Use events, game, default, none, or 0.\n' >&2
       exit 64
       ;;
@@ -346,8 +346,8 @@ configure_rio_config() {
 }
 
 cargo_build() {
-  features="${YAZELIX_TERMINAL_LOCAL_FEATURES:-wgpu}"
-  profile="${YAZELIX_TERMINAL_LOCAL_PROFILE:-debug}"
+  features="${MARS_LOCAL_FEATURES:-wgpu}"
+  profile="${MARS_LOCAL_PROFILE:-debug}"
 
   cd "$repo_root"
   case "$profile" in
@@ -376,7 +376,7 @@ cargo_build() {
       printf '%s\n' "$repo_root/target/release/rio"
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_LOCAL_PROFILE: %s\n' "$profile" >&2
+      printf 'Unsupported MARS_LOCAL_PROFILE: %s\n' "$profile" >&2
       printf 'Use debug, fast, or release.\n' >&2
       exit 64
       ;;
@@ -384,24 +384,24 @@ cargo_build() {
 }
 
 select_binary() {
-  if [ -n "${YAZELIX_TERMINAL_LOCAL_BINARY:-}" ]; then
-    printf '%s\n' "$YAZELIX_TERMINAL_LOCAL_BINARY"
+  if [ -n "${MARS_LOCAL_BINARY:-}" ]; then
+    printf '%s\n' "$MARS_LOCAL_BINARY"
     return 0
   fi
 
-  profile="${YAZELIX_TERMINAL_LOCAL_PROFILE:-debug}"
+  profile="${MARS_LOCAL_PROFILE:-debug}"
   case "$profile" in
     debug | Debug | DEBUG) default_binary="$repo_root/target/debug/rio" ;;
     fast | Fast | FAST) default_binary="$repo_root/target/fast/rio" ;;
     release | Release | RELEASE) default_binary="$repo_root/target/release/rio" ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_LOCAL_PROFILE: %s\n' "$profile" >&2
+      printf 'Unsupported MARS_LOCAL_PROFILE: %s\n' "$profile" >&2
       printf 'Use debug, fast, or release.\n' >&2
       exit 64
       ;;
   esac
 
-  if is_truthy "${YAZELIX_TERMINAL_LOCAL_SKIP_BUILD:-0}"; then
+  if is_truthy "${MARS_LOCAL_SKIP_BUILD:-0}"; then
     printf '%s\n' "$default_binary"
     return 0
   fi
@@ -413,9 +413,9 @@ binary="$(select_binary)"
 [ -x "$binary" ] || die "local Rio binary is not executable: $binary"
 
 configure_rio_config
-export YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-app_id="${YAZELIX_TERMINAL_LOCAL_APP_ID:-yazelix-terminal-local}"
-title="${YAZELIX_TERMINAL_LOCAL_TITLE:-Mars Terminal Local}"
+export MARS_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+app_id="${MARS_LOCAL_APP_ID:-mars-local}"
+title="${MARS_LOCAL_TITLE:-Mars Terminal Local}"
 
 if graphics_wrapper="$(find_graphics_wrapper)"; then
   exec "$graphics_wrapper" "$binary" --app-id "$app_id" --title-placeholder "$title" "$@"

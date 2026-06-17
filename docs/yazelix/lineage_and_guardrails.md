@@ -3,8 +3,8 @@
 Mars Terminal is an experimental Rio-derived terminal intended to evaluate
 whether Yazelix can get a Rust terminal to Ghostty-grade behavior.
 
-The current package and integration surfaces still use `yazelix-terminal` and
-`yzxterm` while the public project name moves toward Mars Terminal.
+The current package and integration surfaces still use `mars` and
+`mars` while the public project name moves toward Mars Terminal.
 
 It is not yet a supported Yazelix runtime component.
 
@@ -14,7 +14,7 @@ It is not yet a supported Yazelix runtime component.
 - Upstream remote: `https://github.com/raphamorim/rio.git`
 - Local upstream remote name: `rio-upstream`
 - Experiment origin: `git@github.com:luccahuguet/mars.git`
-- Initial experiment branch: `yazelix-terminal-experiment`
+- Initial experiment branch: `mars-experiment`
 - Base commit: `7e18dde1c90182a5170a7cca7779544967d7291c`
 - Base commit subject: `flake.lock: Update (#1636)`
 - Base commit date: `2026-05-31T07:16:47+02:00`

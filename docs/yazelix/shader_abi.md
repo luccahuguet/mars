@@ -1,25 +1,25 @@
-# Yzxterm Shader ABI
+# Mars Shader ABI
 
-This document describes the shader ABI owned by `yazelix-terminal`. It is the
-contract between packaged yzxterm profiles, the Rio-derived renderer, and main
+This document describes the shader ABI owned by `mars`. It is the
+contract between packaged mars profiles, the Rio-derived renderer, and main
 Yazelix cursor settings.
 
 ## Boundary
 
-Main Yazelix is terminal-agnostic. It may select a yzxterm package/profile and
-pass stable cursor settings that the yzxterm package advertises as supported.
-It must not generate Rio-specific shader code, depend on yzxterm shader file
-names, or reuse yzxterm extension uniforms for Ghostty, Kitty, WezTerm, Ratty,
+Main Yazelix is terminal-agnostic. It may select a mars package/profile and
+pass stable cursor settings that the mars package advertises as supported.
+It must not generate Rio-specific shader code, depend on mars shader file
+names, or reuse mars extension uniforms for Ghostty, Kitty, WezTerm, Ratty,
 or host terminal modes.
 
 The corresponding main boundary bead is
-`yazelix:yazelix-yzxterm-boundary-cleanup-1l7rd`. Terminal-side shader profile
+`yazelix:yazelix-mars-boundary-cleanup-1l7rd`. Terminal-side shader profile
 ownership is documented in
 [`shader_profile_ownership.md`](shader_profile_ownership.md).
 
 ## Standard Ghostty-Compatible Surface
 
-Yzxterm custom shaders use Shadertoy-style GLSL source with
+Mars custom shaders use Shadertoy-style GLSL source with
 `mainImage(out vec4 fragColor, in vec2 fragCoord)`. The shader wrapper provides
 the current terminal frame through `iChannel0` and composes one or more shaders
 in the order listed by `[renderer].custom-shader`.
@@ -65,7 +65,7 @@ Ghostty-compatible cursor and terminal-state names:
 | `CURSORSTYLE_UNDERLINE` | Cursor style value `3` |
 | `CURSORSTYLE_LOCK` | Cursor style value `4` |
 
-Yzxterm keeps these standard names available so Ghostty-style shader source can
+Mars keeps these standard names available so Ghostty-style shader source can
 compile and render without knowing about Rio trail internals.
 
 `iCursorVisible` follows the renderer's effective cursor visibility, not just
@@ -73,18 +73,18 @@ the terminal's logical cursor-visible state. Blink-off frames export no normal
 cursor rectangle, set `iCursorVisible` to zero, and suppress Rio trail extension
 state so shader glow and native cursor blinking do not fight each other.
 
-## Yzxterm Extension Surface
+## Mars Extension Surface
 
-The yzxterm shader wrapper defines:
+The mars shader wrapper defines:
 
 ```glsl
-#define YAZELIX_TERMINAL_RIO_TRAIL 1
+#define MARS_RIO_TRAIL 1
 ```
 
 Every shader that reads Rio-specific uniforms must guard those reads with
-`#if defined(YAZELIX_TERMINAL_RIO_TRAIL)` and provide a valid fallback path.
+`#if defined(MARS_RIO_TRAIL)` and provide a valid fallback path.
 This is required so generated shader files remain usable as Ghostty-compatible
-source when the yzxterm extension is absent.
+source when the mars extension is absent.
 
 Rio trail extension uniforms:
 
@@ -113,21 +113,21 @@ lived after the tail arrays.
 ## Main Yazelix Cursor Inputs
 
 Main Yazelix may provide stable settings such as a supported profile name and a
-named cursor glow level when yzxterm package metadata advertises those settings.
+named cursor glow level when mars package metadata advertises those settings.
 The current packaged shader assets use a medium glow profile.
 
 Main Yazelix may assume:
 
 - `full`, `baseline`, and `shaders` are stable profile names when advertised
-- `shaders` means the yzxterm-owned opt-in Ghostty-compatible shader chain
+- `shaders` means the mars-owned opt-in Ghostty-compatible shader chain
 - `full` means Rio native `trail-cursor` without a custom shader chain
 - `baseline` means no cursor effects
 
 Main Yazelix may not assume:
 
 - which GLSL files implement `shaders`
-- that Rio extension uniforms exist outside yzxterm
-- that yzxterm shader glow/spread constants map to Ghostty or other terminals
+- that Rio extension uniforms exist outside mars
+- that mars shader glow/spread constants map to Ghostty or other terminals
 - that shader profile internals are stable without package metadata saying so
 
 ## Validation
@@ -136,7 +136,7 @@ Cheap validation:
 
 - `nix run .#yazelix-protocol-conformance -- verify` checks the protocol fixture
   manifest, Ghostty-compatible cursor probe shader, keyboard manifest, and
-  yzxterm packaged shader assets.
+  mars packaged shader assets.
 - `git diff --check` catches formatting damage in docs and generated assets.
 
 Focused Rust tests, when the compile-heavy gate permits them:
@@ -146,7 +146,7 @@ Focused Rust tests, when the compile-heavy gate permits them:
 - `sugarloaf` `shadertoy_prefix_exposes_ghostty_cursor_names` checks standard
   and extension names exposed by the wrapper.
 - `sugarloaf` `rio_trail_extension_macro_selects_yazelix_branch` checks guarded
-  yzxterm extension reads.
+  mars extension reads.
 - `sugarloaf` `rio_trail_extension_uniforms_validate_as_user_shader_reads`
   checks direct user shader reads of the Rio trail extension.
 - `sugarloaf` `rio_trail_extension_uniforms_precede_extra_cursor_arrays` checks

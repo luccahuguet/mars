@@ -4,9 +4,9 @@ adaptive-theme = { dark = "yazelix-dark", light = "yazelix-light" }
 [renderer]
 backend = "Webgpu"
 custom-shader = [
-  "@yazelix_terminal_shader_dir@/cursor_trail_dusk.glsl",
-  "@yazelix_terminal_shader_dir@/generated_effects/sweep.glsl",
-  "@yazelix_terminal_shader_dir@/generated_effects/rectangle_boom.glsl",
+  "@mars_shader_dir@/cursor_trail_dusk.glsl",
+  "@mars_shader_dir@/generated_effects/sweep.glsl",
+  "@mars_shader_dir@/generated_effects/rectangle_boom.glsl",
 ]
 
 [window]
@@ -19,4 +19,4 @@ blinking-interval = 650
 [effects]
 trail-cursor = true
 
-@yazelix_terminal_fonts@
+@mars_fonts@

@@ -46,7 +46,6 @@ const LOG_LEVEL_ENV: &str = "RIO_LOG_LEVEL";
 const MARS_TERM_PROGRAM: &str = "mars";
 const MARS_TERMINAL_HOST_ENV: &str = "MARS_TERMINAL_HOST";
 const MARS_TERMINAL_HOST: &str = "mars";
-const LEGACY_YAZELIX_TERMINAL_HOST_ENV: &str = "YAZELIX_TERMINAL_HOST";
 const INHERITED_TERMINAL_IDENTITY_ENV: &[&str] = &[
     "ALACRITTY_LOG",
     "ALACRITTY_SOCKET",
@@ -136,7 +135,6 @@ pub fn setup_environment_variables(
     let identity = child_terminal_identity(yazelix_mode);
     std::env::set_var("TERM_PROGRAM", identity.term_program);
     std::env::set_var("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-    std::env::remove_var(LEGACY_YAZELIX_TERMINAL_HOST_ENV);
     if let Some(host) = identity.mars_terminal_host {
         std::env::set_var(MARS_TERMINAL_HOST_ENV, host);
     } else {
@@ -182,7 +180,7 @@ fn apply_yazelix_mode(
     config.navigation.use_split = false;
     config.navigation.open_config_with_split = false;
     config.navigation.hide_if_single = true;
-    app_id.get_or_insert_with(|| "yazelix-terminal".to_string());
+    app_id.get_or_insert_with(|| "mars".to_string());
 
     Ok(())
 }
@@ -398,7 +396,7 @@ mod tests {
         assert!(!config.navigation.open_config_with_split);
         assert!(config.navigation.hide_if_single);
         assert!(!config.use_fork);
-        assert_eq!(app_id.as_deref(), Some("yazelix-terminal"));
+        assert_eq!(app_id.as_deref(), Some("mars"));
     }
 
     #[test]
@@ -428,28 +426,6 @@ mod tests {
         assert_eq!(select_terminfo(has_xterm_rio), "xterm-rio");
         assert_eq!(select_terminfo(has_rio), "rio");
         assert_eq!(select_terminfo(has_none), "xterm-256color");
-    }
-
-    #[test]
-    // Regression: stale pre-Mars host markers must not leak into child processes beside MARS_TERMINAL_HOST.
-    fn setup_environment_scrubs_legacy_yazelix_terminal_host_marker() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let previous_mars_host = std::env::var(MARS_TERMINAL_HOST_ENV).ok();
-        let previous_legacy_host = std::env::var(LEGACY_YAZELIX_TERMINAL_HOST_ENV).ok();
-
-        std::env::set_var(MARS_TERMINAL_HOST_ENV, "stale-mars");
-        std::env::set_var(LEGACY_YAZELIX_TERMINAL_HOST_ENV, "stale-yazelix");
-
-        setup_environment_variables(&rio_backend::config::Config::default(), true);
-
-        assert_eq!(
-            std::env::var(MARS_TERMINAL_HOST_ENV).as_deref(),
-            Ok(MARS_TERMINAL_HOST)
-        );
-        assert!(std::env::var_os(LEGACY_YAZELIX_TERMINAL_HOST_ENV).is_none());
-
-        restore_env(MARS_TERMINAL_HOST_ENV, previous_mars_host);
-        restore_env(LEGACY_YAZELIX_TERMINAL_HOST_ENV, previous_legacy_host);
     }
 
     #[test]

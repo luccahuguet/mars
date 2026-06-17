@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
-binary="@yazelix_terminal_binary@"
-default_config_home="@yazelix_terminal_config_home@"
-baseline_config_home="@yazelix_terminal_baseline_config_home@"
-shader_config_home="@yazelix_terminal_shader_config_home@"
-emoji_config_home="@yazelix_terminal_emoji_config_home@"
+binary="@mars_binary@"
+default_config_home="@mars_config_home@"
+baseline_config_home="@mars_baseline_config_home@"
+shader_config_home="@mars_shader_config_home@"
+emoji_config_home="@mars_emoji_config_home@"
 
 is_executable() {
   [ -n "$1" ] && [ -x "$1" ]
@@ -46,17 +46,17 @@ print_executable_or_command() {
 }
 
 find_graphics_wrapper() {
-  case "${YAZELIX_TERMINAL_GRAPHICS_WRAPPER:-}" in
+  case "${MARS_GRAPHICS_WRAPPER:-}" in
     none | NONE | 0)
       return 1
       ;;
     "")
       ;;
     *)
-      if print_executable_or_command "$YAZELIX_TERMINAL_GRAPHICS_WRAPPER"; then
+      if print_executable_or_command "$MARS_GRAPHICS_WRAPPER"; then
         return 0
       fi
-      printf 'YAZELIX_TERMINAL_GRAPHICS_WRAPPER is set but not executable or on PATH: %s\n' "$YAZELIX_TERMINAL_GRAPHICS_WRAPPER" >&2
+      printf 'MARS_GRAPHICS_WRAPPER is set but not executable or on PATH: %s\n' "$MARS_GRAPHICS_WRAPPER" >&2
       exit 127
       ;;
   esac
@@ -109,13 +109,13 @@ find_graphics_wrapper() {
 }
 
 configure_rio_config() {
-  if [ -n "${YAZELIX_TERMINAL_CONFIG:-}" ]; then
-    if [ -d "$YAZELIX_TERMINAL_CONFIG" ] && [ -r "$YAZELIX_TERMINAL_CONFIG/config.toml" ]; then
-      export RIO_CONFIG_HOME="$YAZELIX_TERMINAL_CONFIG"
-      export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
+  if [ -n "${MARS_CONFIG:-}" ]; then
+    if [ -d "$MARS_CONFIG" ] && [ -r "$MARS_CONFIG/config.toml" ]; then
+      export RIO_CONFIG_HOME="$MARS_CONFIG"
+      export MARS_CHILD_ENV_SANITIZE=1
       return 0
     fi
-    printf 'YAZELIX_TERMINAL_CONFIG must point to a readable Rio config directory containing config.toml: %s\n' "$YAZELIX_TERMINAL_CONFIG" >&2
+    printf 'MARS_CONFIG must point to a readable Rio config directory containing config.toml: %s\n' "$MARS_CONFIG" >&2
     exit 127
   fi
 
@@ -128,7 +128,7 @@ configure_rio_config() {
       export RIO_CONFIG_HOME="$selected_config_home"
       ;;
     *)
-      config_parent="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/yazelix-terminal"
+      config_parent="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/mars"
       config_home="$config_parent/effective-config-$$"
       mkdir -p "$config_home"
       write_effective_config \
@@ -144,11 +144,11 @@ configure_rio_config() {
       export RIO_CONFIG_HOME="$config_home"
       ;;
   esac
-  export YAZELIX_TERMINAL_CHILD_ENV_SANITIZE=1
+  export MARS_CHILD_ENV_SANITIZE=1
 }
 
 select_appearance_mode() {
-  case "${YAZELIX_TERMINAL_APPEARANCE:-dark}" in
+  case "${MARS_APPEARANCE:-dark}" in
     "" | dark | Dark | DARK | default | Default | DEFAULT)
       printf '%s\n' "dark"
       ;;
@@ -159,7 +159,7 @@ select_appearance_mode() {
       printf '%s\n' "auto"
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_APPEARANCE: %s\n' "${YAZELIX_TERMINAL_APPEARANCE:-}" >&2
+      printf 'Unsupported MARS_APPEARANCE: %s\n' "${MARS_APPEARANCE:-}" >&2
       printf 'Use dark, light, auto, system, adaptive, or default.\n' >&2
       exit 64
       ;;
@@ -167,7 +167,7 @@ select_appearance_mode() {
 }
 
 select_render_strategy() {
-  case "${YAZELIX_TERMINAL_RENDER_STRATEGY:-events}" in
+  case "${MARS_RENDER_STRATEGY:-events}" in
     events | Events | EVENTS | event | Event | EVENT | default | none | NONE | 0)
       printf '%s\n' "events"
       ;;
@@ -175,7 +175,7 @@ select_render_strategy() {
       printf '%s\n' "game"
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_RENDER_STRATEGY: %s\n' "$YAZELIX_TERMINAL_RENDER_STRATEGY" >&2
+      printf 'Unsupported MARS_RENDER_STRATEGY: %s\n' "$MARS_RENDER_STRATEGY" >&2
       printf 'Use events, game, default, none, or 0.\n' >&2
       exit 64
       ;;
@@ -183,7 +183,7 @@ select_render_strategy() {
 }
 
 select_emoji_font() {
-  case "${YAZELIX_TERMINAL_EMOJI_FONT:-noto}" in
+  case "${MARS_EMOJI_FONT:-noto}" in
     "" | noto | Noto | NOTO | default | Default | DEFAULT)
       printf '%s\n' "noto"
       ;;
@@ -194,7 +194,7 @@ select_emoji_font() {
       printf '%s\n' "serenityos"
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_EMOJI_FONT: %s\n' "${YAZELIX_TERMINAL_EMOJI_FONT:-}" >&2
+      printf 'Unsupported MARS_EMOJI_FONT: %s\n' "${MARS_EMOJI_FONT:-}" >&2
       printf 'Use noto, twitter, or serenityos.\n' >&2
       exit 64
       ;;
@@ -206,7 +206,7 @@ select_profile_config_home() {
   no_effects_config_home="$2"
   shaders_config_home="$3"
 
-  case "${YAZELIX_TERMINAL_PROFILE:-${YAZELIX_TERMINAL_EFFECTS:-full}}" in
+  case "${MARS_PROFILE:-${MARS_EFFECTS:-full}}" in
     "" | full | Full | FULL | effects | Effects | EFFECTS | default | Default | DEFAULT)
       printf '%s\n' "$full_config_home"
       ;;
@@ -217,7 +217,7 @@ select_profile_config_home() {
       printf '%s\n' "$shaders_config_home"
       ;;
     *)
-      printf 'Unsupported YAZELIX_TERMINAL_PROFILE/YAZELIX_TERMINAL_EFFECTS: %s\n' "${YAZELIX_TERMINAL_PROFILE:-${YAZELIX_TERMINAL_EFFECTS:-}}" >&2
+      printf 'Unsupported MARS_PROFILE/MARS_EFFECTS: %s\n' "${MARS_PROFILE:-${MARS_EFFECTS:-}}" >&2
       printf 'Use full, default, baseline, no-effects, shaders, none, or 0.\n' >&2
       exit 64
       ;;
@@ -237,7 +237,7 @@ select_default_config_home() {
         "$emoji_config_home/$selected_emoji_font/profiles/shaders"
       ;;
     *)
-      printf 'Unsupported normalized yzxterm emoji font: %s\n' "$selected_emoji_font" >&2
+      printf 'Unsupported normalized mars emoji font: %s\n' "$selected_emoji_font" >&2
       exit 64
       ;;
   esac
@@ -279,8 +279,8 @@ write_effective_config() {
 }
 
 configure_rio_config
-export YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-app_id="${YAZELIX_TERMINAL_APP_ID:-yazelix-terminal}"
+export MARS_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+app_id="${MARS_APP_ID:-mars}"
 
 if graphics_wrapper="$(find_graphics_wrapper)"; then
   exec "$graphics_wrapper" "$binary" --app-id "$app_id" "$@"

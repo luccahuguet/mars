@@ -95,7 +95,7 @@ Ghostty OpenGL shader probe:
 Status: implemented for `yzt-7p3.39`.
 
 Rio now has an opt-in frame event log for benchmark runs. Set
-`YAZELIX_TERMINAL_FRAME_LOG=/path/to/frame_log.jsonl` and each
+`MARS_FRAME_LOG=/path/to/frame_log.jsonl` and each
 `RedrawRequested` pass writes a JSON event with:
 
 - route and window id
@@ -170,13 +170,13 @@ python3 tools/yazelix_benchmark.py frame-run --config-template yzt-shaders --wor
 python3 tools/yazelix_benchmark.py frame-run --config-template yzt-shaders-game --workload helix-viewport --lines 400 --hold-seconds 1
 ```
 
-For packaged `yazelix-terminal`, the runtime no-effects equivalent is
-`YAZELIX_TERMINAL_PROFILE=baseline`. That profile keeps the packaged WebGPU,
+For packaged `mars`, the runtime no-effects equivalent is
+`MARS_PROFILE=baseline`. That profile keeps the packaged WebGPU,
 font, and window settings while removing custom shaders and trail cursor
 effects, so it is the first comparison to run before blaming event scheduling.
-The packaged default equivalent is `YAZELIX_TERMINAL_PROFILE=full`, which keeps
+The packaged default equivalent is `MARS_PROFILE=full`, which keeps
 Rio's native trail cursor and does not load custom shaders. Use
-`YAZELIX_TERMINAL_PROFILE=shaders` only when measuring the opt-in
+`MARS_PROFILE=shaders` only when measuring the opt-in
 Ghostty-compatible shader stack.
 
 Platform coverage caveat: the Helix viewport latency work touches shared

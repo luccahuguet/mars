@@ -30,7 +30,7 @@ const ALLOWED_FIXTURE_SOURCES: &[&str] = &[
 const ALLOWED_COMPARISON_TARGETS: &[&str] = &["kitty", "ghostty", "wezterm"];
 
 #[derive(Parser)]
-#[command(about = "Protocol conformance harness for the Yazelix terminal experiment.")]
+#[command(about = "Protocol conformance harness for the Mars terminal experiment.")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -362,7 +362,7 @@ fn command_verify(root: &Path) -> Result<()> {
 }
 
 fn validate_yazelix_shader_assets(root: &Path) -> Result<()> {
-    let shader_root = root.join("misc").join("yazelix_terminal_shaders");
+    let shader_root = root.join("misc").join("mars_shaders");
     let cursor_trail = shader_root.join("cursor_trail_dusk.glsl");
     let cursor_trail_text = read_text(&cursor_trail)?;
     for required in [
@@ -374,7 +374,7 @@ fn validate_yazelix_shader_assets(root: &Path) -> Result<()> {
         "cursorGlowMask",
         "cursorEdgeMask",
         "yazelixRioTrailSdf",
-        "#if defined(YAZELIX_TERMINAL_RIO_TRAIL)",
+        "#if defined(MARS_RIO_TRAIL)",
     ] {
         ensure_contains(
             &cursor_trail_text,
@@ -410,17 +410,17 @@ fn validate_yazelix_profile_configs(root: &Path) -> Result<()> {
     let profile_configs = [
         (
             "full",
-            root.join("misc").join("yazelix_terminal_config.toml"),
+            root.join("misc").join("mars_config.toml"),
         ),
         (
             "baseline",
             root.join("misc")
-                .join("yazelix_terminal_config_baseline.toml"),
+                .join("mars_config_baseline.toml"),
         ),
         (
             "shaders",
             root.join("misc")
-                .join("yazelix_terminal_config_shaders.toml"),
+                .join("mars_config_shaders.toml"),
         ),
     ];
     for (profile, path) in profile_configs {
@@ -463,11 +463,11 @@ fn validate_yazelix_theme_configs(root: &Path) -> Result<()> {
     let theme_files = [
         (
             "dark",
-            root.join("misc").join("yazelix_terminal_theme_dark.toml"),
+            root.join("misc").join("mars_theme_dark.toml"),
         ),
         (
             "light",
-            root.join("misc").join("yazelix_terminal_theme_light.toml"),
+            root.join("misc").join("mars_theme_light.toml"),
         ),
     ];
     let required_colors = [
@@ -523,7 +523,7 @@ fn validate_yazelix_theme_configs(root: &Path) -> Result<()> {
 }
 
 fn validate_yazelix_font_config(root: &Path) -> Result<()> {
-    let fonts = root.join("misc").join("yazelix_terminal_fonts.toml");
+    let fonts = root.join("misc").join("mars_fonts.toml");
     let text = read_text(&fonts)?;
     let parsed = parse_toml(&fonts)?;
     let symbol_map = parsed
@@ -542,9 +542,9 @@ fn validate_yazelix_font_config(root: &Path) -> Result<()> {
             rel(root, &fonts)
         ));
     }
-    let emoji_family_placeholder = "@yazelix_terminal_emoji_font_family@";
+    let emoji_family_placeholder = "@mars_emoji_font_family@";
     for required in [
-        r#"font-family = "@yazelix_terminal_emoji_font_family@""#,
+        r#"font-family = "@mars_emoji_font_family@""#,
         r#"start = "2600", end = "2605""#,
         r#"start = "26A0", end = "26A2""#,
         r#"start = "2744", end = "2745""#,
@@ -603,7 +603,7 @@ fn validate_yazelix_font_config(root: &Path) -> Result<()> {
         "twitter-color-emoji",
         "serenityos-emoji-font",
         "supported_emoji_fonts",
-        "YAZELIX_TERMINAL_EMOJI_FONT",
+        "MARS_EMOJI_FONT",
     ] {
         ensure_contains(
             &pkg_text,
@@ -662,21 +662,21 @@ fn validate_package_metadata_sources(root: &Path) -> Result<()> {
                 r#""light""#,
                 r#""auto""#,
                 r#"default_appearance_mode = "dark""#,
-                r#"appearance = "YAZELIX_TERMINAL_APPEARANCE""#,
+                r#"appearance = "MARS_APPEARANCE""#,
                 "install_yazelix_themes",
-                "yazelix_terminal_theme_dark.toml",
-                "yazelix_terminal_theme_light.toml",
+                "mars_theme_dark.toml",
+                "mars_theme_light.toml",
                 "yazelix-dark.toml",
                 "yazelix-light.toml",
-                "share/yazelix-terminal/package-metadata.json",
+                "share/mars/package-metadata.json",
                 "passthru",
             ],
         ),
         (
-            root.join("misc").join("yazelix_terminal_desktop.sh"),
+            root.join("misc").join("mars_desktop.sh"),
             vec![
                 "select_appearance_mode",
-                "YAZELIX_TERMINAL_APPEARANCE",
+                "MARS_APPEARANCE",
                 "write_effective_config",
                 "force-theme",
             ],

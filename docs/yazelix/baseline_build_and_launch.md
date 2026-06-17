@@ -109,9 +109,9 @@ Command used:
 ```text
 RIO_CONFIG_HOME=/home/lucca/pjs/yazelix-dir/mars/artifacts/baseline/rio_cpu_config \
   target/debug/rio \
-  --app-id yazelix-terminal-baseline \
+  --app-id mars-baseline \
   --title-placeholder "Mars Terminal Baseline" \
-  -e bash -lc 'printf "yazelix-terminal baseline\nrioterm 0.4.6\nCPU renderer\nPID $$\n"; sleep 20'
+  -e bash -lc 'printf "mars baseline\nrioterm 0.4.6\nCPU renderer\nPID $$\n"; sleep 20'
 ```
 
 Screenshot evidence:

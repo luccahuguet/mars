@@ -1,7 +1,7 @@
 # Source Absorption Workflow
 
 This workflow is for implementing Ghostty-parity features in
-`yazelix-terminal` by studying existing terminal emulators without losing
+`mars` by studying existing terminal emulators without losing
 license discipline or Rio ownership clarity.
 
 The aim is to absorb behavior, not blindly transplant architecture.

@@ -1,7 +1,7 @@
 # Upstream Rio Sync Workflow
 
 Status: repeatable maintenance workflow for Mars Terminal's current
-`yazelix-terminal` Rio fork.
+`mars` Rio fork.
 
 This document covers Rio-to-Mars sync work. It is narrower than
 `source_absorption_workflow.md`: Rio is the fork base, so direct code ports are
@@ -17,7 +17,7 @@ step.
 
 Reasons:
 
-- the fork owns packaged yzxterm profiles, shader behavior, protocol probes,
+- the fork owns packaged mars profiles, shader behavior, protocol probes,
   Yazelix host mode, and Beads/doc artifacts that upstream Rio does not carry
 - high-conflict files have meaningful local behavior, not just formatting drift
 - upstream still delivers small correctness fixes that are worth absorbing
@@ -34,7 +34,7 @@ Classify every upstream commit before editing code:
 | Class | Definition | Default action |
 | --- | --- | --- |
 | upstream-compatible correctness | Bug fix, platform fix, protocol fix, or dependency-independent cleanup that can fit the fork without changing Yazelix behavior | Port in a focused commit with tests |
-| fork-owned feature | Behavior added by Mars Terminal on top of Rio, such as shader ABI, protocol harnesses, yzxterm packaging, host mode, custom cursor policy, or Beads/docs | Keep local; compare for conflicts but do not overwrite |
+| fork-owned feature | Behavior added by Mars Terminal on top of Rio, such as shader ABI, protocol harnesses, mars packaging, host mode, custom cursor policy, or Beads/docs | Keep local; compare for conflicts but do not overwrite |
 | packaging/runtime integration | Nix, packaged config, runtime profile, Home Manager handoff, or main Yazelix lock consumption | Own in Yazelix/main release transaction; do not expect Rio upstream to match |
 | experimental surface | Shader experiments, UI experiments, benchmarks, screenshots, or maintainer-only diagnostics | Keep isolated; delete or graduate before broad sync |
 | broad upstream UI/architecture | Tab drag, island layout, title ownership, platform chrome, or renderer/module reorganizations | Evaluate separately; adapt only after local seams are ready |
@@ -102,7 +102,7 @@ Classify every upstream commit before editing code:
 
    Prefer focused Rust tests and `git diff --check`. Use heavyweight Nix or
    runtime validation only when the touched surface requires it, and respect the
-   yzxterm rebuild-speed gate.
+   mars rebuild-speed gate.
 
 8. Update the comparison ledger.
 
@@ -124,7 +124,7 @@ These files should be treated as manual adaptation zones:
 | `frontends/rioterm/src/renderer/mod.rs` | Fork owns shader/event-mode handoff, frame metrics, and renderer state beyond upstream Rio | Keep shader state isolated and avoid broad upstream renderer rewrites without screenshot/manual evidence |
 | `sugarloaf/src/text.rs` and `frontends/rioterm/src/grid_emit.rs` | Font fallback behavior affects emoji/icons, glyph protocol, status symbols, and UI text | Keep fallback routing through `FontLibrary::resolve_font_for_char`; add tests before changing fallback search order |
 | Kitty graphics files | Protocol behavior is correctness-sensitive and should follow spec/black-box evidence | Keep small parser/storage/renderer ports with protocol tests and no GPL Kitty implementation copying |
-| `misc/`, `pkgRio.nix`, packaged shader/config files | These are yzxterm runtime surfaces, not upstream Rio surfaces | Treat as fork-owned packaging; sync only when upstream changes affect build inputs or binary layout |
+| `misc/`, `pkgRio.nix`, packaged shader/config files | These are mars runtime surfaces, not upstream Rio surfaces | Treat as fork-owned packaging; sync only when upstream changes affect build inputs or binary layout |
 
 ## Tab Drag And Island Decision
 

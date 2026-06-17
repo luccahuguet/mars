@@ -46,8 +46,8 @@ Current remote-to-local behavior:
 - the approval prompt identifies that a terminal program wants to write files to
   this computer and shows the destination root
 - the destination root is
-  `$XDG_DOWNLOAD_DIR/yazelix-terminal-transfers` when set, otherwise
-  `~/Downloads/yazelix-terminal-transfers`
+  `$XDG_DOWNLOAD_DIR/mars-transfers` when set, otherwise
+  `~/Downloads/mars-transfers`
 - accepted sessions write only regular files and directories into a per-session
   staging directory and commit that staging directory only on `finish`
 - rejected, canceled, errored, or uncommitted sessions do not expose partial

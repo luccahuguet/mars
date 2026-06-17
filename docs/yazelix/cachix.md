@@ -1,15 +1,15 @@
 # Cachix Cache
 
-Mars Terminal currently uses the Cachix cache `luccahuguet-yazelix-terminal`
+Mars Terminal currently uses the Cachix cache `luccahuguet-mars`
 for Linux package builds.
 
 ## Trust Model
 
 The cache is intended to be public and project-scoped:
 
-- Cache name: `luccahuguet-yazelix-terminal`
-- Substituter: `https://luccahuguet-yazelix-terminal.cachix.org`
-- Public key: `luccahuguet-yazelix-terminal.cachix.org-1:NwYldFPOxjg4cjLoU9jZW9rrd/Jj60PzksvRXhDy574=`
+- Cache name: `luccahuguet-mars`
+- Substituter: `https://luccahuguet-mars.cachix.org`
+- Public key: `luccahuguet-mars.cachix.org-1:NwYldFPOxjg4cjLoU9jZW9rrd/Jj60PzksvRXhDy574=`
 - Signing: Cachix-managed signing key
 - Writers: GitHub Actions on this repository's `main` branch and manual
   `workflow_dispatch` runs
@@ -24,7 +24,7 @@ access to this Cachix cache.
 Create the cache on Cachix if it does not exist:
 
 1. Open <https://app.cachix.org/>.
-2. Create `luccahuguet-yazelix-terminal`.
+2. Create `luccahuguet-mars`.
 3. Keep it public if the goal is speeding up normal Home Manager/runtime users.
 4. Use Cachix-managed signing unless there is a specific reason to own the
    signing key locally.
@@ -63,7 +63,7 @@ To push from a local machine for testing:
 ```sh
 export CACHIX_AUTH_TOKEN='...'
 nix build .#mars -o result_mars_package
-cachix push luccahuguet-yazelix-terminal result_mars_package
+cachix push luccahuguet-mars result_mars_package
 ```
 
 ## User Setup
@@ -71,7 +71,7 @@ cachix push luccahuguet-yazelix-terminal result_mars_package
 If the cache is public, users do not need a token. Configure Nix with:
 
 ```sh
-cachix use luccahuguet-yazelix-terminal
+cachix use luccahuguet-mars
 ```
 
 For declarative Nix or Home Manager setups, add the substituter and public key
@@ -80,10 +80,10 @@ that Cachix prints for this cache. The shape is:
 ```nix
 {
   nix.settings.extra-substituters = [
-    "https://luccahuguet-yazelix-terminal.cachix.org?priority=30"
+    "https://luccahuguet-mars.cachix.org?priority=30"
   ];
   nix.settings.extra-trusted-public-keys = [
-    "luccahuguet-yazelix-terminal.cachix.org-1:NwYldFPOxjg4cjLoU9jZW9rrd/Jj60PzksvRXhDy574="
+    "luccahuguet-mars.cachix.org-1:NwYldFPOxjg4cjLoU9jZW9rrd/Jj60PzksvRXhDy574="
   ];
 }
 ```
@@ -92,7 +92,7 @@ If the cache is private, users also need a read token:
 
 ```sh
 cachix authtoken '...'
-cachix use luccahuguet-yazelix-terminal
+cachix use luccahuguet-mars
 ```
 
 ## Substitution Check
@@ -102,8 +102,8 @@ machine that has the cache configured:
 
 ```sh
 nix build .#mars \
-  --option substituters 'https://cache.nixos.org https://luccahuguet-yazelix-terminal.cachix.org' \
-  --option trusted-public-keys 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= luccahuguet-yazelix-terminal.cachix.org-1:NwYldFPOxjg4cjLoU9jZW9rrd/Jj60PzksvRXhDy574=' \
+  --option substituters 'https://cache.nixos.org https://luccahuguet-mars.cachix.org' \
+  --option trusted-public-keys 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= luccahuguet-mars.cachix.org-1:NwYldFPOxjg4cjLoU9jZW9rrd/Jj60PzksvRXhDy574=' \
   --print-build-logs
 ```
 
@@ -112,7 +112,7 @@ of compiling `rioterm` locally.
 
 If Nix still builds locally, check:
 
-- the GitHub secret is a write token for `luccahuguet-yazelix-terminal`
+- the GitHub secret is a write token for `luccahuguet-mars`
 - the CI workflow completed for the same commit and system
 - the cache is public or the read token is configured
 - the trusted public key matches Cachix

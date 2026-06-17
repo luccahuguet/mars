@@ -11,7 +11,7 @@ Current protocol state:
 - Yazelix host mode sets `TERM_PROGRAM=mars` for product identity
 - Yazelix host mode sets `MARS_TERMINAL_HOST=mars` for fork-specific detection
 - Yazelix host mode defaults the Wayland app id / X11 class to
-  `yazelix-terminal`
+  `mars`
 - `TERM` prefers Mars packaged terminfo while keeping Rio aliases:
   `xterm-mars`, `mars`, `xterm-rio`, `rio`, then `xterm-256color`
 

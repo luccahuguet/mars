@@ -139,26 +139,26 @@
                 exit 1
               fi
             done
-            for stale_path in bin/rio bin/yazelix-terminal bin/yazelix-terminal-desktop; do
+            for stale_path in bin/rio; do
               if [ -e "$package/$stale_path" ]; then
                 echo "stale package layout file still exists: $stale_path" >&2
                 exit 1
               fi
             done
             config_paths="\
-              share/yazelix-terminal/config.toml \
-              share/yazelix-terminal/baseline/config.toml \
-              share/yazelix-terminal/profiles/shaders/config.toml \
-              share/yazelix-terminal/emoji/twitter/config.toml \
-              share/yazelix-terminal/emoji/twitter/baseline/config.toml \
-              share/yazelix-terminal/emoji/twitter/profiles/shaders/config.toml \
-              share/yazelix-terminal/emoji/serenityos/config.toml \
-              share/yazelix-terminal/emoji/serenityos/baseline/config.toml \
-              share/yazelix-terminal/emoji/serenityos/profiles/shaders/config.toml"
+              share/mars/config.toml \
+              share/mars/baseline/config.toml \
+              share/mars/profiles/shaders/config.toml \
+              share/mars/emoji/twitter/config.toml \
+              share/mars/emoji/twitter/baseline/config.toml \
+              share/mars/emoji/twitter/profiles/shaders/config.toml \
+              share/mars/emoji/serenityos/config.toml \
+              share/mars/emoji/serenityos/baseline/config.toml \
+              share/mars/emoji/serenityos/profiles/shaders/config.toml"
             for path in \
               $config_paths \
-              share/yazelix-terminal/fonts/NotoSansSymbols2-Regular.otf \
-              share/yazelix-terminal/package-metadata.json
+              share/mars/fonts/NotoSansSymbols2-Regular.otf \
+              share/mars/package-metadata.json
             do
               if [ ! -f "$package/$path" ]; then
                 echo "missing package layout file: $path" >&2

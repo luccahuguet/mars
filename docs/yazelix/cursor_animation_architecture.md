@@ -27,7 +27,7 @@ separate redraw window or compute an independent cursor transition.
   <https://ghostty.org/docs/config/reference#custom-shader>
 - Local dogfooding on 2026-06-02 first showed the focus-regain lag and fast
   catch-up rendering bug improve when `custom-shader` was removed from the
-  generated `yzxterm` config while `trail-cursor = true` stayed enabled. The
+  generated `mars` config while `trail-cursor = true` stayed enabled. The
   bug later reproduced without custom shaders, so shader stacking is not the
   proven root cause.
 - Before `yzt-unify-rio-trail-shader-cursor-cho`, local code had two
@@ -36,15 +36,15 @@ separate redraw window or compute an independent cursor transition.
   - `sugarloaf/src/components/ghostty_shaders/mod.rs` owns shader time,
     previous/current cursor uniforms, and shader animation invalidation.
 - Runtime diagnostics on 2026-06-03 show that the WebGPU `custom-shader`
-  pipeline and generated `yzxterm` configuration load in fresh windows: a
+  pipeline and generated `mars` configuration load in fresh windows: a
   full-screen diagnostic shader tints the terminal, config reloads swap the
   diagnostic color, and fresh packaged windows can see
-  `YAZELIX_TERMINAL_RIO_TRAIL`.
+  `MARS_RIO_TRAIL`.
 - Follow-up probes on 2026-06-03 isolated the shader visibility failure to
   uniform placement, not config or frame-state collection: a macro probe
   rendered cyan, a base `iCursorVisible` probe rendered green, and an
   `iYazelixRioTrailActive` probe rendered blue while
-  `YAZELIX_TERMINAL_SHADER_STATE_LOG` simultaneously reported
+  `MARS_SHADER_STATE_LOG` simultaneously reported
   `rio_trail_active=true`. The Rio trail extension fields were therefore moved
   before the large extra-cursor arrays in the std140 block and covered with
   layout/order tests.
@@ -63,12 +63,12 @@ motion when `trail-cursor` is disabled.
 | `baseline`, `no-effects`, `none` | WebGPU | disabled | disabled | enabled, 650 ms | No-effects comparison profile |
 | `shaders`, `cursor-shaders`, `ghostty-shaders` | WebGPU | enabled | enabled | enabled, 650 ms | Compatibility and visual-effect diagnostics |
 
-`YAZELIX_TERMINAL_RENDER_STRATEGY=game` remains a renderer scheduling
+`MARS_RENDER_STRATEGY=game` remains a renderer scheduling
 diagnostic. It composes with each profile, but it does not imply shader use.
 
 ## Diagnostics
 
-Set `YAZELIX_TERMINAL_SHADER_STATE_LOG=/path/to/shader_state.jsonl` before
+Set `MARS_SHADER_STATE_LOG=/path/to/shader_state.jsonl` before
 launching the terminal to record active-panel shader frame-state changes. The
 logger is disabled when the variable is unset. It records only state changes,
 including:
@@ -98,14 +98,14 @@ The implemented integration is:
   `iPreviousCursor == iCurrentCursor` for externally animated cursor motion.
 - Wider OSC 66 cursor extents and shader-only configurations keep the existing
   Ghostty previous/current cursor transition behavior.
-- `YAZELIX_TERMINAL_RIO_TRAIL` is defined only by the Mars Terminal shader
+- `MARS_RIO_TRAIL` is defined only by the Mars Terminal shader
   wrapper. Yazelix cursor shaders must guard all Rio-specific uniform reads with
-  `#if defined(YAZELIX_TERMINAL_RIO_TRAIL)` so the same generated shader files
+  `#if defined(MARS_RIO_TRAIL)` so the same generated shader files
   remain valid in Ghostty.
 
 ## Rio Trail Shader ABI
 
-The canonical yzxterm shader ABI is documented in
+The canonical mars shader ABI is documented in
 [`shader_abi.md`](shader_abi.md). This section summarizes the Rio trail pieces
 that drive cursor animation.
 
@@ -138,12 +138,12 @@ not compute an independent Ghostty cursor trail while Rio's trail is active.
 
 ## Validation Matrix
 
-- package config: `share/yazelix-terminal/config.toml` has
+- package config: `share/mars/config.toml` has
   `trail-cursor = true` and no `custom-shader`
-- baseline config: `share/yazelix-terminal/baseline/config.toml` has neither
+- baseline config: `share/mars/baseline/config.toml` has neither
   `trail-cursor` nor `custom-shader`
 - shader profile:
-  `share/yazelix-terminal/profiles/shaders/config.toml` has both
+  `share/mars/profiles/shaders/config.toml` has both
   `trail-cursor = true` and the packaged `custom-shader` chain
 - wrapper smoke: `tools/yazelix_event_mode_smoke.sh` verifies all profile
   contents and starts the default, baseline, and shader profiles

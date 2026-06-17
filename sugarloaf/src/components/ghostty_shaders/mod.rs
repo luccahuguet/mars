@@ -30,7 +30,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32
 
 const SHADERTOY_PREFIX: &str = r#"#version 450
 
-#define YAZELIX_TERMINAL_RIO_TRAIL 1
+#define MARS_RIO_TRAIL 1
 
 layout(set = 0, binding = 2, std140) uniform Globals {
     vec3  iResolution;
@@ -868,7 +868,7 @@ mod tests {
             "iYazelixExtraCursors",
             "iYazelixRioTrailActive",
             "iYazelixRioTrailDestinationCursor",
-            "YAZELIX_TERMINAL_RIO_TRAIL",
+            "MARS_RIO_TRAIL",
             "void main()",
         ] {
             assert!(source.contains(required), "missing {required}");
@@ -889,12 +889,12 @@ mod tests {
     #[test]
     fn rio_trail_extension_macro_selects_yazelix_branch() {
         // Defends: user shader source can guard Rio-specific reads behind the
-        // Yazelix Terminal extension macro.
+        // Mars Terminal extension macro.
         let source = build_shadertoy_glsl(
             r#"
 void mainImage(out vec4 color, in vec2 fragCoord) {
-#ifndef YAZELIX_TERMINAL_RIO_TRAIL
-    color = vec4(YAZELIX_TERMINAL_RIO_TRAIL_MISSING);
+#ifndef MARS_RIO_TRAIL
+    color = vec4(MARS_RIO_TRAIL_MISSING);
 #else
     vec2 cursor = iYazelixRioTrailDestinationCursor.xy / max(iResolution.xy, vec2(1.0));
     color = vec4(cursor, float(iYazelixRioTrailActive), 1.0);

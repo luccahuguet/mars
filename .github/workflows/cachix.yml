@@ -38,14 +38,14 @@ jobs:
           fi
       - uses: cachix/cachix-action@v17
         with:
-          name: luccahuguet-yazelix-terminal
+          name: luccahuguet-mars
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           pushFilter: '(-source$|\.drv$)'
       - name: Check Cachix write access
         run: |
           probe_path="$(nix eval --raw --expr 'builtins.toFile "mars-cachix-write-probe" "ok\n"')"
-          cachix push luccahuguet-yazelix-terminal "$probe_path"
+          cachix push luccahuguet-mars "$probe_path"
       - name: Build terminal packages
         run: |
           nix build \
@@ -58,4 +58,4 @@ jobs:
             | tee "$RUNNER_TEMP/mars-paths"
       - name: Push terminal packages
         run: |
-          xargs -r cachix push luccahuguet-yazelix-terminal < "$RUNNER_TEMP/mars-paths"
+          xargs -r cachix push luccahuguet-mars < "$RUNNER_TEMP/mars-paths"

@@ -4,16 +4,16 @@ Date: 2026-06-07
 
 Status: experimental release gate closed for dogfooding.
 
-Decision: keep Mars Terminal's current `yazelix-terminal` / `yzxterm` surface
+Decision: keep Mars Terminal's current `mars` / `mars` surface
 as an opt-in experimental first-party terminal path. It is credible enough to
 package, document, dogfood, benchmark, and compare seriously against Ghostty
-and WezTerm. It is not the default Yazelix terminal and is not
+and WezTerm. It is not the default Mars terminal and is not
 stable-promotion ready.
 
 Ghostty remains the mature default. WezTerm remains the stable alternate.
-`yzxterm` is the protocol-forward Yazelix-owned path.
+`mars` is the protocol-forward Yazelix-owned path.
 
-Compared with vanilla Rio, `yzxterm` is already ahead on the surfaces Yazelix
+Compared with vanilla Rio, `mars` is already ahead on the surfaces Yazelix
 cares about most: Ghostty-compatible shader support, Yazelix cursor shader
 assets, Rio trail/profile packaging, OSC 21/22/66/99/133, OSC 5522 text
 clipboard, Kitty keyboard work, Kitty multiple cursors, safe Kitty file
@@ -37,15 +37,15 @@ enough mature desktop soak to replace Ghostty as the default.
 | Package and profile metadata | `docs/yazelix/package_metadata.md` |
 | Stack validation | `docs/yazelix/stack_validation.md` |
 | Performance and graphics benchmark | `docs/yazelix/performance_and_graphics_benchmark.md` |
-| Main Yazelix terminal comparison | `docs/terminal_emulators.md` in the main Yazelix repo |
+| Main Mars terminal comparison | `docs/terminal_emulators.md` in the main Yazelix repo |
 
 ## Stack Matrix
 
-This matrix is for the experimental `yzxterm` decision. It does not claim a
+This matrix is for the experimental `mars` decision. It does not claim a
 fresh stable-promotion pass across every terminal. Ghostty and WezTerm are used
 as comparison baselines and owner-classification references.
 
-| Flow | `yzxterm` state | Ghostty baseline | WezTerm baseline | Owner or follow-up |
+| Flow | `mars` state | Ghostty baseline | WezTerm baseline | Owner or follow-up |
 | --- | --- | --- | --- | --- |
 | Yazelix host launch | Pass. `--yazelix` launches one child command and disables terminal-native workspace ownership | Pass. Default packaged runtime | Pass. Packaged alternate | None |
 | Zellij pane and tab ownership | Pass. Zellij owns panes, tabs, sessions, layouts, and focus policy | Pass | Pass | None |
@@ -63,23 +63,23 @@ as comparison baselines and owner-classification references.
 ## UX Matrix
 
 This matrix closes the experimental UX gate. The stable-promotion gate remains
-separate and should collect fresh live evidence before `yzxterm` becomes the
+separate and should collect fresh live evidence before `mars` becomes the
 default or is advertised as mature.
 
-| UX area | `yzxterm` state | Ghostty / WezTerm comparison | Follow-up |
+| UX area | `mars` state | Ghostty / WezTerm comparison | Follow-up |
 | --- | --- | --- | --- |
 | Font quality and shaping | Inherits Rio text rendering; no blocking dogfooding regression recorded for the experimental release | Ghostty and WezTerm remain the mature daily-driver references | Stable-promotion UX soak |
 | Grapheme clusters, emoji, fallback fonts | Covered by inherited Rio behavior and prior rendering fixes; not exhaustively promoted | Compare against Ghostty and WezTerm in future live audit | Stable-promotion UX soak |
 | Selection, copy, and search | Inherited Rio UX; no known blocker for opt-in dogfooding | Ghostty and WezTerm remain mature references | Stable-promotion UX soak |
 | IME | X11 IME callback warning was fixed in the fork. Full live IME behavior is not promoted | Ghostty and WezTerm remain references for live IME quality | Stable-promotion UX soak |
 | High-DPI and resize | Stack screenshots and dogfooding did not leave a current release blocker; cross-platform claims are not made | Ghostty and WezTerm remain mature references | Stable-promotion UX soak |
-| Native window behavior | Packaged desktop wrapper and yzxterm profile metadata exist; app identity is good enough for experimental use | Ghostty and WezTerm remain more mature desktop apps | Icon and native polish follow-up |
-| Transparency and background behavior | Main Yazelix materializes transparency into `yzxterm` generated config; OSC 21 visual colors are implemented in the fork | Ghostty remains the default transparency target | None for experimental release |
+| Native window behavior | Packaged desktop wrapper and mars profile metadata exist; app identity is good enough for experimental use | Ghostty and WezTerm remain more mature desktop apps | Icon and native polish follow-up |
+| Transparency and background behavior | Main Yazelix materializes transparency into `mars` generated config; OSC 21 visual colors are implemented in the fork | Ghostty remains the default transparency target | None for experimental release |
 | Cursor effects | Default profile uses Rio native trail. Shader profile keeps Ghostty-compatible shader support explicit and opt-in | Ghostty remains the strongest mature shader target | Helix cursor effects and future shader/trail unification |
 
 ## Known Gaps
 
-- `yzxterm` is not the default and should not be promoted without a fresh
+- `mars` is not the default and should not be promoted without a fresh
   maintainer stable-promotion pass.
 - The default profile uses Rio native trail cursor behavior. The
   Ghostty-compatible shader stack is an explicit shader profile, not the
@@ -88,17 +88,17 @@ default or is advertised as mature.
   animation works during Helix movement, but Ghostty shader effects do not get a
   stronger claim than Ghostty itself currently gets in Helix.
 - WebGPU trail geometry differs from the default Rio edge-style trail geometry.
-  This is documented and accepted for the packaged Yazelix Rio / `yzxterm`
+  This is documented and accepted for the packaged Yazelix Rio / `mars`
   WebGPU path.
 - Same-flow Ghostty and WezTerm screenshots were not freshly recollected for
   this closeout. The main compatibility matrix should refresh them before
-  stable promotion. Main Bead `yazelix-yzxterm-stable-promotion-ux-kfjkz`
+  stable promotion. Main Bead `yazelix-mars-stable-promotion-ux-kfjkz`
   owns that future promotion audit.
 - Full live IME, selection/search, high-DPI, and native desktop UX still need a
-  stable-promotion audit under `yazelix-yzxterm-stable-promotion-ux-kfjkz`.
+  stable-promotion audit under `yazelix-mars-stable-promotion-ux-kfjkz`.
 - Polished application icons are not a Ghostty parity blocker for the
   experimental runtime, but they are product work. The package installs the
-  Mars Terminal icon for `yazelix-terminal`; stable promotion should still
+  Mars Terminal icon for `mars`; stable promotion should still
   audit small-size, dock, taskbar, and installer presentation on each platform.
 - Linux-local graphics and benchmark evidence does not prove native Windows or
   macOS parity.
@@ -111,9 +111,9 @@ Close the Ghostty-parity epic when the decision remains experimental:
 - stack evidence exists for Yazelix/Zellij/Yazi/Helix
 - performance and graphics evidence is documented
 - known gaps are explicit and assigned to follow-up work
-- main Yazelix docs present `yzxterm` as experimental, not default
+- main Yazelix docs present `mars` as experimental, not default
 
-Do not use this closeout to promote `yzxterm` to the default terminal. A future
+Do not use this closeout to promote `mars` to the default terminal. A future
 stable-promotion decision should collect fresh Ghostty and WezTerm same-flow
 evidence, live IME/selection/search checks, high-DPI and resize checks, native
 window polish evidence, and maintainer approval.

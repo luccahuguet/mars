@@ -7,7 +7,7 @@ or shader assets.
 The metadata is available in two forms:
 
 - `passthru.marsPackageMetadata` on the Nix package
-- `share/yazelix-terminal/package-metadata.json` in the package output
+- `share/mars/package-metadata.json` in the package output
 
 Both forms use the same schema. Field names in the JSON output are stable for
 main Yazelix consumption.
@@ -40,10 +40,9 @@ main Yazelix consumption.
 `wrapper_env` currently advertises `profile`, `effects`, `config`, `app_id`,
 `render_strategy`, `graphics_wrapper`, `appearance`, and `emoji_font`. `app_id` lets an
 integrated parent runtime associate the terminal window with its own desktop
-entry while the standalone Mars package keeps the staged `yazelix-terminal`
-desktop app id until the platform-app identity migration lands.
+entry while the standalone Mars package defaults to the `mars` desktop app id.
 `appearance` selects `dark`, `light`, or `auto`; the wrapper default is `dark`
-for continuity with earlier Yazelix terminal packages.
+for continuity with earlier Mars terminal packages.
 `emoji_font` selects one of `noto`, `twitter`, or `serenityos`.
 
 ## Release And Fast Distinction

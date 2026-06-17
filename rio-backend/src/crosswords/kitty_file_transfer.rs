@@ -1438,14 +1438,12 @@ fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, &'static str> {
 
 fn default_destination_root() -> Result<PathBuf, &'static str> {
     if let Some(root) = std::env::var_os("XDG_DOWNLOAD_DIR") {
-        return Ok(PathBuf::from(root).join("yazelix-terminal-transfers"));
+        return Ok(PathBuf::from(root).join("mars-transfers"));
     }
     if let Some(home) =
         std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
     {
-        return Ok(PathBuf::from(home)
-            .join("Downloads")
-            .join("yazelix-terminal-transfers"));
+        return Ok(PathBuf::from(home).join("Downloads").join("mars-transfers"));
     }
     Err("EIO:No home directory for file transfer destination")
 }
