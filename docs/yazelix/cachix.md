@@ -1,7 +1,9 @@
 # Cachix Cache
 
-Mars Terminal currently uses the Cachix cache `luccahuguet-mars`
-for Linux package builds.
+Mars Terminal's Linux package cache is configured by the repository variable
+`CACHIX_CACHE_NAME`. Set it to `luccahuguet-mars` after that Cachix cache and a
+matching write token exist. If the variable is unset, the GitHub Actions
+publish job skips cleanly instead of failing before cache setup is complete.
 
 ## Trust Model
 
@@ -43,10 +45,17 @@ Install it as a GitHub Actions secret:
 gh secret set CACHIX_AUTH_TOKEN --repo luccahuguet/mars
 ```
 
+Set the cache name as a GitHub Actions variable:
+
+```sh
+gh variable set CACHIX_CACHE_NAME --body luccahuguet-mars --repo luccahuguet/mars
+```
+
 Verify GitHub has the secret name:
 
 ```sh
 gh secret list --repo luccahuguet/mars
+gh variable list --repo luccahuguet/mars
 ```
 
 The workflow `.github/workflows/cachix.yml` publishes these x86_64-linux

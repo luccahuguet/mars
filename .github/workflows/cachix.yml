@@ -23,6 +23,7 @@ concurrency:
 jobs:
   publish-x86_64-linux:
     name: Publish x86_64-linux packages
+    if: ${{ vars.CACHIX_CACHE_NAME != '' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -31,21 +32,28 @@ jobs:
       - name: Require Cachix auth token
         env:
           CACHIX_AUTH_TOKEN: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          CACHIX_CACHE_NAME: "${{ vars.CACHIX_CACHE_NAME }}"
         run: |
+          if [ -z "$CACHIX_CACHE_NAME" ]; then
+            echo "::error::Missing CACHIX_CACHE_NAME repository variable"
+            exit 1
+          fi
           if [ -z "$CACHIX_AUTH_TOKEN" ]; then
             echo "::error::Missing CACHIX_AUTH_TOKEN repository secret"
             exit 1
           fi
       - uses: cachix/cachix-action@v17
         with:
-          name: luccahuguet-mars
+          name: "${{ vars.CACHIX_CACHE_NAME }}"
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
           skipPush: true
           pushFilter: '(-source$|\.drv$)'
       - name: Check Cachix write access
+        env:
+          CACHIX_CACHE_NAME: "${{ vars.CACHIX_CACHE_NAME }}"
         run: |
           probe_path="$(nix eval --raw --expr 'builtins.toFile "mars-cachix-write-probe" "ok\n"')"
-          cachix push luccahuguet-mars "$probe_path"
+          cachix push "$CACHIX_CACHE_NAME" "$probe_path"
       - name: Build terminal packages
         run: |
           nix build \
@@ -57,5 +65,7 @@ jobs:
             --build-max-jobs auto \
             | tee "$RUNNER_TEMP/mars-paths"
       - name: Push terminal packages
+        env:
+          CACHIX_CACHE_NAME: "${{ vars.CACHIX_CACHE_NAME }}"
         run: |
-          xargs -r cachix push luccahuguet-mars < "$RUNNER_TEMP/mars-paths"
+          xargs -r cachix push "$CACHIX_CACHE_NAME" < "$RUNNER_TEMP/mars-paths"
