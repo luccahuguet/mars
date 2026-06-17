@@ -13,7 +13,7 @@ It is not yet a supported Yazelix runtime component.
 - Fork base: Rio upstream
 - Upstream remote: `https://github.com/raphamorim/rio.git`
 - Local upstream remote name: `rio-upstream`
-- Experiment origin: `git@github.com:luccahuguet/yazelix-terminal.git`
+- Experiment origin: `git@github.com:luccahuguet/mars.git`
 - Initial experiment branch: `yazelix-terminal-experiment`
 - Base commit: `7e18dde1c90182a5170a7cca7779544967d7291c`
 - Base commit subject: `flake.lock: Update (#1636)`

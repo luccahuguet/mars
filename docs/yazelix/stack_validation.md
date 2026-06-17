@@ -5,7 +5,7 @@ Mars host mode.
 
 ## Environment
 
-- Terminal command: `target/debug/rio --yazelix -e yzx enter --path /home/lucca/pjs/yazelix-terminal`
+- Terminal command: `target/debug/rio --yazelix -e yzx enter --path /home/lucca/pjs/yazelix-dir/mars`
 - Renderer: WGPU with `WGPU_BACKEND=gl`
 - Yazelix runtime observed during the stack probe: `v17.2`
 - Stack components observed by `yazi --debug`: Zellij `0.44.3`, Yazi `26.5.6`, Helix `25.07.1`

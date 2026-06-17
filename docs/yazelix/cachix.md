@@ -40,13 +40,13 @@ let the workflow start but will fail when it tries to upload packages.
 Install it as a GitHub Actions secret:
 
 ```sh
-gh secret set CACHIX_AUTH_TOKEN --repo luccahuguet/yazelix-terminal
+gh secret set CACHIX_AUTH_TOKEN --repo luccahuguet/mars
 ```
 
 Verify GitHub has the secret name:
 
 ```sh
-gh secret list --repo luccahuguet/yazelix-terminal
+gh secret list --repo luccahuguet/mars
 ```
 
 The workflow `.github/workflows/cachix.yml` publishes these x86_64-linux

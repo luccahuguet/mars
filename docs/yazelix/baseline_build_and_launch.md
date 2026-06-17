@@ -107,7 +107,7 @@ use-cpu = true
 Command used:
 
 ```text
-RIO_CONFIG_HOME=/home/lucca/pjs/yazelix-terminal/artifacts/baseline/rio_cpu_config \
+RIO_CONFIG_HOME=/home/lucca/pjs/yazelix-dir/mars/artifacts/baseline/rio_cpu_config \
   target/debug/rio \
   --app-id yazelix-terminal-baseline \
   --title-placeholder "Mars Terminal Baseline" \
