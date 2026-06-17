@@ -603,6 +603,7 @@ fn ensure_cursor_sprite_slot(
         font_id: CURSOR_FONT_ID_BASE + style as u32,
         glyph_id: cell_w,
         size_bucket: ((thickness as u16 & 0xF) << 12) | (cell_h.min(0xFFF) as u16),
+        color_variant: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some(slot);
@@ -731,6 +732,7 @@ fn ensure_drawable_sprite(
         // are always single-cell; wide (CJK-ambiguous) cells aren't
         // special-cased.
         size_bucket: cell_h.min(u16::MAX as u32) as u16,
+        color_variant: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some(slot);
@@ -955,6 +957,7 @@ fn ensure_decoration_slot(
         font_id: DECORATION_FONT_ID_BASE + style as u32,
         glyph_id: cell_w,
         size_bucket: thickness as u16,
+        color_variant: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some(slot);
@@ -2625,6 +2628,7 @@ fn ensure_glyph_by_id(
         font_id,
         glyph_id: glyph_id as u32,
         size_bucket,
+        color_variant: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some((key, slot, false));
@@ -2672,10 +2676,12 @@ fn ensure_glyph_by_id(
 /// Look up or rasterise a Glyph Protocol registration into the grid
 /// atlas. The atlas key combines the codepoint with the registration's
 /// `version` (bumped on every register/clear) so re-registering the
-/// same codepoint never serves a stale rasterisation. Each unique
-/// (codepoint × version × pixel size) combination owns one atlas slot;
-/// previous-version slots become unreachable and the atlas LRU evicts
-/// them in due course.
+/// same codepoint never serves a stale rasterisation. Foreground-
+/// dependent COLR payloads add the current RGBA foreground to the
+/// atlas key because their colour pixels are pre-painted. Each
+/// unique (codepoint × version × pixel size × colour variant)
+/// combination owns one atlas slot; previous-version slots become
+/// unreachable and the atlas LRU evicts them in due course.
 ///
 /// `ascent_px` matches the primary font's ascent at the same size
 /// bucket — Glyph Protocol payloads have no font-of-their-own, so we
@@ -2709,10 +2715,19 @@ fn ensure_custom_glyph_by_codepoint(
     // happens under the registry's RwLock read; the entry's payload is
     // cloned out so the lock drops before we hit tiny-skia.
     let entry = registry.get(codepoint)?;
+    let color_variant =
+        if rio_backend::sugarloaf::glyph_protocol::payload_depends_on_foreground(
+            entry.payload.as_ref(),
+        ) {
+            u32::from_be_bytes(foreground_rgba)
+        } else {
+            0
+        };
     let key = GlyphKey {
         font_id: CUSTOM_GLYPH_FONT_ID_U32,
         glyph_id: pack_atlas_glyph_id(codepoint, entry.version),
         size_bucket,
+        color_variant,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some((key, slot, false));
@@ -2762,16 +2777,6 @@ struct RawGlyph {
     bytes: Vec<u8>,
 }
 
-#[cfg(not(target_os = "macos"))]
-fn premultiply_rgba_in_place(bytes: &mut [u8]) {
-    for px in bytes.chunks_exact_mut(4) {
-        let a = px[3] as u16;
-        px[0] = ((px[0] as u16 * a + 127) / 255) as u8;
-        px[1] = ((px[1] as u16 * a + 127) / 255) as u8;
-        px[2] = ((px[2] as u16 * a + 127) / 255) as u8;
-    }
-}
-
 #[cfg(target_os = "macos")]
 fn rasterize_glyph_native(
     rasterizer: &mut GridGlyphRasterizer,
@@ -2812,12 +2817,12 @@ fn rasterize_glyph_native(
     synthetic_italic: bool,
 ) -> Option<RawGlyph> {
     use rio_backend::sugarloaf::swash::{
+        FontRef,
         scale::{
-            image::{Content, Image as GlyphImage},
             Render, Source, StrikeWith,
+            image::{Content, Image as GlyphImage},
         },
         zeno::{Angle, Format, Transform},
-        FontRef,
     };
 
     let font_entry = rasterizer.font_data_cache.get(&font_id)?.clone();
@@ -2826,6 +2831,22 @@ fn rasterize_glyph_native(
         offset: font_entry.1,
         key: font_entry.2,
     };
+
+    if let Some(raster) = rio_backend::sugarloaf::glyph_protocol::rasterize_font_glyph(
+        font_ref,
+        glyph_id,
+        size_u16,
+        [255, 255, 255, 255],
+    ) {
+        return Some(RawGlyph {
+            width: raster.width as u32,
+            height: raster.height as u32,
+            left: raster.left,
+            top: raster.top,
+            is_color: raster.is_color,
+            bytes: raster.data,
+        });
+    }
 
     let hinting = font_library_hinting(rasterizer);
     let mut scaler = rasterizer
@@ -2862,8 +2883,12 @@ fn rasterize_glyph_native(
         return None;
     }
     let is_color = image.content == Content::Color;
-    if is_color {
-        premultiply_rgba_in_place(&mut image.data);
+    if is_color
+        && rio_backend::sugarloaf::grid::swash_color_source_needs_premultiply(
+            image.source,
+        )
+    {
+        rio_backend::sugarloaf::grid::premultiply_straight_rgba_in_place(&mut image.data);
     }
     Some(RawGlyph {
         width: image.placement.width,
@@ -3074,28 +3099,6 @@ mod tests {
         );
 
         assert_ne!(hash_for(plain, &extras), hash_for(emoji, &extras));
-    }
-
-    #[test]
-    #[cfg(not(target_os = "macos"))]
-    // Defends: Swash straight-RGBA color glyphs match the grid atlas premultiplied blend contract.
-    fn swash_color_glyph_bytes_are_premultiplied_for_grid_atlas() {
-        let mut bytes = vec![
-            200, 100, 50, 128, //
-            10, 20, 30, 255, //
-            255, 128, 64, 0,
-        ];
-
-        premultiply_rgba_in_place(&mut bytes);
-
-        assert_eq!(
-            bytes,
-            vec![
-                100, 50, 25, 128, //
-                10, 20, 30, 255, //
-                0, 0, 0, 0,
-            ]
-        );
     }
 
     #[test]

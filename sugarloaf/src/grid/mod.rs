@@ -31,7 +31,10 @@ pub mod webgpu;
 
 use crate::context::{Context, ContextType};
 
-pub use atlas::{AtlasSlot, GlyphKey, RasterizedGlyph};
+pub use atlas::{
+    AtlasSlot, GlyphKey, RasterizedGlyph, premultiply_straight_rgba_in_place,
+    swash_color_source_needs_premultiply,
+};
 pub use cell::{CellBg, CellText, GridUniforms, MAX_CURSOR_REVERSE_CELLS};
 
 /// Backend-dispatching grid renderer. One of these lives per terminal

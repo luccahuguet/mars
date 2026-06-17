@@ -581,6 +581,7 @@ impl Text {
             font_id: run.font_id,
             glyph_id: glyph_id as u32,
             size_bucket: run.size_bucket,
+            color_variant: 0,
         };
 
         // CPU path takes precedence whenever it's initialized
@@ -1294,8 +1295,8 @@ fn rasterize_swash_glyph(
     wght_variation: Option<f32>,
 ) -> Option<SwashRawGlyph> {
     use swash::scale::{
-        image::{Content, Image as GlyphImage},
         Render, Source, StrikeWith,
+        image::{Content, Image as GlyphImage},
     };
     use swash::zeno::{Angle, Format, Transform};
     use swash::{FontRef, Setting};
@@ -1305,6 +1306,23 @@ fn rasterize_swash_glyph(
         offset: font_entry.1,
         key: font_entry.2,
     };
+
+    let pixel_size = size_px.round().clamp(1.0, u16::MAX as f32) as u16;
+    if let Some(raster) = crate::glyph_protocol::rasterize_font_glyph(
+        font_ref,
+        glyph_id,
+        pixel_size,
+        [255, 255, 255, 255],
+    ) {
+        return Some(SwashRawGlyph {
+            width: raster.width as u32,
+            height: raster.height as u32,
+            left: raster.left,
+            top: raster.top,
+            is_color: raster.is_color,
+            bytes: raster.data,
+        });
+    }
 
     // wght axis tag — variable-font fallback faces use this to pick the
     // right outlines (regular vs. bold) from a single source file.
@@ -1354,6 +1372,9 @@ fn rasterize_swash_glyph(
     }
 
     let is_color = image.content == Content::Color;
+    if is_color && crate::grid::swash_color_source_needs_premultiply(image.source) {
+        crate::grid::premultiply_straight_rgba_in_place(&mut image.data);
+    }
     Some(SwashRawGlyph {
         width: image.placement.width,
         height: image.placement.height,

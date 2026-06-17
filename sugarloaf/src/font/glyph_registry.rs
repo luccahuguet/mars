@@ -117,9 +117,10 @@ pub struct RegisteredGlyph {
     pub insertion_id: u64,
     /// Bumps on every register call (fresh OR overwrite). The atlas
     /// key for a custom glyph is `(CUSTOM_FONT_ID, pack(cp, version),
-    /// size)`, so any mutation produces a fresh slot and prevents a
-    /// post-clear or post-overwrite render from serving the previous
-    /// rasterisation.
+    /// size, color_variant)`, so any mutation produces a fresh slot and
+    /// prevents a post-clear or post-overwrite render from serving the
+    /// previous rasterisation. `color_variant` is nonzero only for
+    /// foreground-dependent COLR payloads.
     pub version: u32,
 }
 

@@ -1,10 +1,10 @@
 // CPU rasteriser for OpenType COLR v0 / v1 paint graphs.
 //
 // Drives ttf-parser's `colr::Painter` trait against a `tiny-skia`
-// backend. The result is an RGBA8 bitmap that the caller uploads
-// into sugarloaf's colour atlas — so the same code path works across
-// all three backends (Wgpu, native Metal, Cpu) since rasterisation
-// happens on CPU and only the upload is backend-specific.
+// backend. The result is a premultiplied RGBA8 bitmap that the caller
+// uploads into sugarloaf's colour atlas — so the same code path works
+// across all three backends (Wgpu, native Metal, Cpu) since
+// rasterisation happens on CPU and only the upload is backend-specific.
 //
 // Correctness budget:
 //   * Linear + radial gradients are handled correctly, including the
@@ -17,15 +17,18 @@
 //     full set so there's no loss, but we pass them through rather
 //     than validating each one per font.
 //
-// Rasterisation is cached per `(codepoint, pixel_size)` upstream by
-// the existing glyph cache, so a 1-2 ms CPU pass per unique glyph
-// size is invisible to the user.
+// Rasterisation is cached upstream by the glyph atlas key. Glyph
+// Protocol COLR payloads that use paletteIndex 0xFFFF include the
+// current foreground RGBA in that key because this rasterizer
+// pre-paints color pixels before upload. Normal font COLR glyphs keep
+// their ink inside the requested visual size so emoji fonts with loose
+// paint bounds do not spill out of terminal cells.
 
 use ttf_parser::colr::{
     ClipBox, CompositeMode, GradientExtend, LinearGradient as TtfLinear, Paint, Painter,
     RadialGradient as TtfRadial,
 };
-use ttf_parser::{GlyphId, RgbaColor, Transform as TtfTransform};
+use ttf_parser::{GlyphId, OutlineBuilder, RgbaColor, Transform as TtfTransform};
 
 use tiny_skia::{
     BlendMode, Color, FillRule, GradientStop, LinearGradient, Mask, Paint as SkPaint,
@@ -38,9 +41,9 @@ use crate::font::glyf_decode;
 /// Bitmap + placement metadata produced by [`rasterize_payload`] (and
 /// internally by [`rasterize`]). `is_color` distinguishes the two
 /// underlying formats: `false` → A8 alpha mask (mono `glyf`), `true`
-/// → straight RGBA8 (`colrv0` / `colrv1`). The grid renderer routes
-/// mono entries to the grayscale atlas and colour entries to the
-/// colour atlas based on this flag.
+/// → premultiplied RGBA8 (`colrv0` / `colrv1`). The grid renderer
+/// routes mono entries to the grayscale atlas and colour entries to
+/// the colour atlas based on this flag.
 pub struct RasterizedPayload {
     pub data: Vec<u8>,
     pub width: u16,
@@ -54,11 +57,30 @@ pub struct RasterizedPayload {
     pub is_color: bool,
 }
 
+const EMPTY_CPAL: [u8; 12] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C,
+];
+const RASTER_PAD: f32 = 1.0;
+const MAX_RASTER_SIDE: u32 = 8192;
+
+/// Rasterise a COLR/CPAL glyph from a normal font face. This covers
+/// installed colour-vector emoji fonts used through normal font
+/// fallback/symbol-map routing, not only Glyph Protocol payloads.
+pub fn rasterize_font_glyph(
+    font: swash::FontRef<'_>,
+    glyph_id: u16,
+    pixel_size: u16,
+    foreground_rgba: [u8; 4],
+) -> Option<RasterizedPayload> {
+    let face = face_from_swash_font(font)?;
+    rasterize_face_glyph(&face, GlyphId(glyph_id), pixel_size, foreground_rgba)
+}
+
 /// Rasterise a registered Glyph Protocol payload. Dispatches the
 /// monochrome `glyf` path through tiny-skia's anti-aliased fill (A8
 /// output) and the colour `colrv0`/`colrv1` paths through the COLR
-/// painter graph (RGBA8 output). Returns `None` on malformed payload
-/// or degenerate sizing.
+/// painter graph (premultiplied RGBA8 output). Returns `None` on
+/// malformed payload or degenerate sizing.
 pub fn rasterize_payload(
     payload: &crate::font::glyph_registry::StoredPayload,
     upm: u16,
@@ -75,6 +97,19 @@ pub fn rasterize_payload(
     }
 }
 
+pub fn payload_depends_on_foreground(
+    payload: &crate::font::glyph_registry::StoredPayload,
+) -> bool {
+    use crate::font::glyph_registry::StoredPayload;
+    match payload {
+        StoredPayload::Glyf { .. } => false,
+        StoredPayload::ColrV0 { glyphs, colr, cpal }
+        | StoredPayload::ColrV1 { glyphs, colr, cpal } => {
+            colr_payload_depends_on_foreground(glyphs, colr, cpal).unwrap_or(false)
+        }
+    }
+}
+
 /// Walk a `glyf` simple-glyph outline and rasterise it as an A8 alpha
 /// mask sized to fit `pixel_size`. The atlas-bound caller uploads
 /// the bytes straight into the grayscale atlas, same shape as the
@@ -87,11 +122,10 @@ fn rasterize_mono(glyf: &[u8], upm: u16, pixel_size: u16) -> Option<RasterizedPa
     let outline = glyf_decode::decode(glyf).ok()?;
     let scale = pixel_size as f32 / upm as f32;
 
-    let pad = 1.0_f32;
-    let pix_w = (((outline.x_max - outline.x_min) as f32 * scale).ceil() + pad * 2.0)
-        .max(1.0) as u32;
-    let pix_h = (((outline.y_max - outline.y_min) as f32 * scale).ceil() + pad * 2.0)
-        .max(1.0) as u32;
+    let pix_w =
+        raster_axis_pixels(i32::from(outline.x_max) - i32::from(outline.x_min), scale)?;
+    let pix_h =
+        raster_axis_pixels(i32::from(outline.y_max) - i32::from(outline.y_min), scale)?;
 
     // `glyf_decode::Outline::walk` flips Y so its output is Y-down
     // with origin at the top of the bbox (y=0 → top, y increases
@@ -125,8 +159,8 @@ fn rasterize_mono(glyf: &[u8], upm: u16, pixel_size: u16) -> Option<RasterizedPa
         0.0,
         0.0,
         scale,
-        pad - outline.x_min as f32 * scale,
-        pad,
+        RASTER_PAD - outline.x_min as f32 * scale,
+        RASTER_PAD,
     );
     let mut paint = SkPaint::default();
     paint.set_color_rgba8(0xFF, 0xFF, 0xFF, 0xFF);
@@ -141,8 +175,8 @@ fn rasterize_mono(glyf: &[u8], upm: u16, pixel_size: u16) -> Option<RasterizedPa
     // sub-pixel and avoid clipping anti-aliased edges, matching the
     // COLR rasteriser's convention. The bitmap's top edge sits at
     // design-unit `y_max` in baseline-up convention.
-    let left = (outline.x_min as f32 * scale - pad).floor() as i32;
-    let top = (outline.y_max as f32 * scale + pad).ceil() as i32;
+    let left = (outline.x_min as f32 * scale - RASTER_PAD).floor() as i32;
+    let top = (outline.y_max as f32 * scale + RASTER_PAD).ceil() as i32;
 
     Some(RasterizedPayload {
         data,
@@ -155,7 +189,7 @@ fn rasterize_mono(glyf: &[u8], upm: u16, pixel_size: u16) -> Option<RasterizedPa
 }
 
 /// Rasterise a COLR glyph to RGBA. Returns `None` when COLR/CPAL is
-/// malformed, when the base-glyph outline is empty, or when tiny-skia
+/// malformed, when no paintable bounds can be derived, or when tiny-skia
 /// rejects a degenerate configuration (e.g. zero pixmap size).
 pub(super) fn rasterize(
     glyphs: &[Vec<u8>],
@@ -173,9 +207,6 @@ pub(super) fn rasterize(
     // slice, even for v1 fonts that make no palette lookups. If the
     // container ships an empty CPAL (legal for v1-only paints), feed
     // the parser a zero-entry placeholder.
-    const EMPTY_CPAL: [u8; 12] = [
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C,
-    ];
     let cpal_source: &[u8] = if cpal_bytes.is_empty() {
         &EMPTY_CPAL
     } else {
@@ -183,15 +214,20 @@ pub(super) fn rasterize(
     };
     let cpal = ttf_parser::cpal::Table::parse(cpal_source)?;
     let colr = ttf_parser::colr::Table::parse(cpal, colr_bytes)?;
-    let base_gid = first_base_glyph_id(colr_bytes, glyphs)?;
+    let outline_source = OutlineSource::GlyphProtocol(glyphs);
+    let fg = RgbaColor::new(foreground[0], foreground[1], foreground[2], foreground[3]);
+    let (base_gid, painted_bbox) =
+        select_base_glyph(colr_bytes, outline_source, |gid, painter| {
+            colr.paint(GlyphId(gid), 0, painter, &[], fg)
+        })?;
 
-    // Prefer the COLR ClipBox — authoritative per the OpenType spec,
-    // and required for emoji fonts (Noto Color Emoji, etc.) whose base
-    // glyphs are empty wrappers that reference layer glyphs via the
-    // paint graph. Fall back to the base glyph's `glyf` bbox for fonts
-    // like Nabla that carry geometry on the base glyph. Pad 1 px each
-    // side so anti-aliased layer edges that drift slightly past the
-    // declared bbox (common in hand-authored fonts) aren't clipped.
+    // Prefer the COLR ClipBox — authoritative per the OpenType spec.
+    // Without one, derive bounds by walking the paint graph so empty
+    // wrapper base glyphs can still render their layer glyphs. Fall
+    // back to the base glyph's `glyf` bbox for simpler fonts that carry
+    // geometry on the base glyph. Pad 1 px each side so anti-aliased
+    // layer edges that drift slightly past the declared bbox (common in
+    // hand-authored fonts) aren't clipped.
     //
     // Widened to i32 immediately because a saturated ClipBox (e.g.
     // `x_min = i16::MIN`, `x_max = i16::MAX`) would overflow on the
@@ -205,31 +241,110 @@ pub(super) fn rasterize(
                 cb.x_max.ceil() as i32,
                 cb.y_max.ceil() as i32,
             ),
-            None => {
-                let (a, b, c, d) = glyf_bbox(glyphs.get(base_gid as usize)?)?;
-                (a as i32, b as i32, c as i32, d as i32)
-            }
+            None => painted_bbox.or_else(|| {
+                glyphs
+                    .get(base_gid as usize)
+                    .and_then(|bytes| glyf_bbox(bytes))
+                    .map(|(a, b, c, d)| (a as i32, b as i32, c as i32, d as i32))
+            })?,
         };
     let scale = pixel_size as f32 / upm as f32;
+    rasterize_colr_paint(
+        (x_min, y_min, x_max, y_max),
+        scale,
+        foreground,
+        outline_source,
+        |raster, fg| colr.paint(GlyphId(base_gid), 0, raster, &[], fg),
+    )
+}
 
-    let pad = 1.0_f32;
-    let pix_w = (((x_max - x_min) as f32 * scale).ceil() + pad * 2.0).max(1.0) as u32;
-    let pix_h = (((y_max - y_min) as f32 * scale).ceil() + pad * 2.0).max(1.0) as u32;
+fn rasterize_face_glyph(
+    face: &ttf_parser::Face<'_>,
+    glyph_id: GlyphId,
+    pixel_size: u16,
+    foreground: [u8; 4],
+) -> Option<RasterizedPayload> {
+    if pixel_size == 0 || !face.is_color_glyph(glyph_id) {
+        return None;
+    }
+
+    let colr = face.tables().colr?;
+    if color_glyph_depends_on_foreground(face, glyph_id)? {
+        return None;
+    }
+    let bbox = match colr.clip_box(glyph_id, &[]) {
+        Some(cb) => (
+            cb.x_min.floor() as i32,
+            cb.y_min.floor() as i32,
+            cb.x_max.ceil() as i32,
+            cb.y_max.ceil() as i32,
+        ),
+        None => painted_colr_bbox(OutlineSource::FontFace(face), |painter| {
+            let fg = RgbaColor::new(
+                foreground[0],
+                foreground[1],
+                foreground[2],
+                foreground[3],
+            );
+            face.paint_color_glyph(glyph_id, 0, fg, painter)
+        })
+        .or_else(|| {
+            face.glyph_bounding_box(glyph_id)
+                .map(|bb| bbox_to_i32(rect_to_bbox(bb)))
+        })?,
+    };
+    let upm = face.units_per_em();
+    if upm == 0 {
+        return None;
+    }
+    let scale = visual_capped_font_colr_scale(bbox, upm, pixel_size);
+
+    rasterize_colr_paint(
+        bbox,
+        scale,
+        foreground,
+        OutlineSource::FontFace(face),
+        |raster, fg| face.paint_color_glyph(glyph_id, 0, fg, raster),
+    )
+}
+
+fn visual_capped_font_colr_scale(
+    (x_min, y_min, x_max, y_max): (i32, i32, i32, i32),
+    upm: u16,
+    pixel_size: u16,
+) -> f32 {
+    let base_scale = pixel_size as f32 / upm as f32;
+    let Some(max_axis_units) = x_max
+        .checked_sub(x_min)
+        .and_then(|width| y_max.checked_sub(y_min).map(|height| width.max(height)))
+    else {
+        return base_scale;
+    };
+    if max_axis_units <= i32::from(upm) {
+        return base_scale;
+    }
+
+    let cap = pixel_size as f32 / max_axis_units as f32;
+    base_scale.min(cap)
+}
+
+fn rasterize_colr_paint<'a>(
+    (x_min, y_min, x_max, y_max): (i32, i32, i32, i32),
+    scale: f32,
+    foreground: [u8; 4],
+    outlines: OutlineSource<'a>,
+    paint: impl FnOnce(&mut ColorRaster<'a>, RgbaColor) -> Option<()>,
+) -> Option<RasterizedPayload> {
+    let (pix_w, pix_h) = raster_size((x_min, y_min, x_max, y_max), scale)?;
 
     let base_pixmap = Pixmap::new(pix_w, pix_h)?;
-
-    // Font units (y-up, origin at baseline) → pixmap pixels (y-down,
-    // origin at top-left). The identity-sized glyph outline in the
-    // painter gets this transform applied before drawing.
-    // Matrix [sx, ky, kx, sy, tx, ty] applies (x,y) as
-    //   (sx*x + kx*y + tx, ky*x + sy*y + ty).
     let base_ctm = Transform::from_row(
         scale,
         0.0,
         0.0,
         -scale,
-        -(x_min as f32) * scale + pad,
-        (y_max as f32) * scale + pad,
+        -(x_min as f32) * scale + RASTER_PAD,
+        (y_max as f32) * scale + RASTER_PAD,
     );
 
     let mut raster = ColorRaster {
@@ -240,11 +355,11 @@ pub(super) fn rasterize(
         transforms: vec![base_ctm],
         clips: vec![None],
         current_path: None,
-        glyphs,
+        outlines,
     };
 
     let fg = RgbaColor::new(foreground[0], foreground[1], foreground[2], foreground[3]);
-    colr.paint(GlyphId(base_gid), 0, &mut raster, &[], fg)?;
+    paint(&mut raster, fg)?;
 
     debug_assert_eq!(raster.layers.len(), 1, "layer stack should drain");
     let final_pixmap = raster.layers.pop().unwrap().pixmap;
@@ -253,10 +368,410 @@ pub(super) fn rasterize(
         data: pixmap_to_rgba(&final_pixmap),
         width: pix_w as u16,
         height: pix_h as u16,
-        left: (x_min as f32 * scale - pad).floor() as i32,
-        top: (y_max as f32 * scale + pad).ceil() as i32,
+        left: (x_min as f32 * scale - RASTER_PAD).floor() as i32,
+        top: (y_max as f32 * scale + RASTER_PAD).ceil() as i32,
         is_color: true,
     })
+}
+
+fn raster_size(
+    (x_min, y_min, x_max, y_max): (i32, i32, i32, i32),
+    scale: f32,
+) -> Option<(u32, u32)> {
+    let width_units = x_max.checked_sub(x_min)?;
+    let height_units = y_max.checked_sub(y_min)?;
+    Some((
+        raster_axis_pixels(width_units, scale)?,
+        raster_axis_pixels(height_units, scale)?,
+    ))
+}
+
+fn raster_axis_pixels(units: i32, scale: f32) -> Option<u32> {
+    if units < 0 || !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let pixels = (units as f32 * scale).ceil() + RASTER_PAD * 2.0;
+    if !pixels.is_finite() || pixels < 1.0 || pixels > MAX_RASTER_SIDE as f32 {
+        return None;
+    }
+    Some(pixels as u32)
+}
+
+fn color_glyph_depends_on_foreground(
+    face: &ttf_parser::Face<'_>,
+    glyph_id: GlyphId,
+) -> Option<bool> {
+    let mut first = ForegroundProbePainter::default();
+    let mut second = ForegroundProbePainter::default();
+    face.paint_color_glyph(glyph_id, 0, RgbaColor::new(13, 37, 59, 251), &mut first)?;
+    face.paint_color_glyph(glyph_id, 0, RgbaColor::new(197, 113, 29, 251), &mut second)?;
+    Some(first.colors != second.colors)
+}
+
+fn colr_payload_depends_on_foreground(
+    glyphs: &[Vec<u8>],
+    colr_bytes: &[u8],
+    cpal_bytes: &[u8],
+) -> Option<bool> {
+    let cpal_source: &[u8] = if cpal_bytes.is_empty() {
+        &EMPTY_CPAL
+    } else {
+        cpal_bytes
+    };
+    let cpal = ttf_parser::cpal::Table::parse(cpal_source)?;
+    let colr = ttf_parser::colr::Table::parse(cpal, colr_bytes)?;
+    let fg = RgbaColor::new(13, 37, 59, 251);
+    let (base_gid, _) = select_base_glyph(
+        colr_bytes,
+        OutlineSource::GlyphProtocol(glyphs),
+        |gid, painter| colr.paint(GlyphId(gid), 0, painter, &[], fg),
+    )?;
+    let mut first = ForegroundProbePainter::default();
+    let mut second = ForegroundProbePainter::default();
+    colr.paint(
+        GlyphId(base_gid),
+        0,
+        &mut first,
+        &[],
+        RgbaColor::new(13, 37, 59, 251),
+    )?;
+    colr.paint(
+        GlyphId(base_gid),
+        0,
+        &mut second,
+        &[],
+        RgbaColor::new(197, 113, 29, 251),
+    )?;
+    Some(first.colors != second.colors)
+}
+
+#[derive(Default)]
+struct ForegroundProbePainter {
+    colors: Vec<[u8; 4]>,
+}
+
+impl ForegroundProbePainter {
+    fn push_color(&mut self, color: RgbaColor) {
+        self.colors
+            .push([color.red, color.green, color.blue, color.alpha]);
+    }
+
+    fn push_stops(&mut self, stops: impl Iterator<Item = ttf_parser::colr::ColorStop>) {
+        for stop in stops {
+            self.push_color(stop.color);
+        }
+    }
+}
+
+impl<'a> Painter<'a> for ForegroundProbePainter {
+    fn outline_glyph(&mut self, _glyph_id: GlyphId) {}
+
+    fn paint(&mut self, paint: Paint<'a>) {
+        match paint {
+            Paint::Solid(color) => self.push_color(color),
+            Paint::LinearGradient(lg) => self.push_stops(lg.stops(0, &[])),
+            Paint::RadialGradient(rg) => self.push_stops(rg.stops(0, &[])),
+            Paint::SweepGradient(sg) => self.push_stops(sg.stops(0, &[])),
+        }
+    }
+
+    fn push_clip(&mut self) {}
+
+    fn push_clip_box(&mut self, _clipbox: ClipBox) {}
+
+    fn pop_clip(&mut self) {}
+
+    fn push_layer(&mut self, _mode: CompositeMode) {}
+
+    fn pop_layer(&mut self) {}
+
+    fn push_transform(&mut self, _transform: TtfTransform) {}
+
+    fn pop_transform(&mut self) {}
+}
+
+fn face_from_swash_font(font: swash::FontRef<'_>) -> Option<ttf_parser::Face<'_>> {
+    let colr = font.table(swash_tag(b"COLR"))?;
+    let cpal = font.table(swash_tag(b"CPAL")).unwrap_or(&EMPTY_CPAL);
+    let cpal = if cpal.is_empty() { &EMPTY_CPAL } else { cpal };
+    let raw_tables = ttf_parser::RawFaceTables {
+        head: font.table(swash_tag(b"head"))?,
+        hhea: font.table(swash_tag(b"hhea"))?,
+        maxp: font.table(swash_tag(b"maxp"))?,
+        bdat: font.table(swash_tag(b"bdat")),
+        bloc: font.table(swash_tag(b"bloc")),
+        cbdt: font.table(swash_tag(b"CBDT")),
+        cblc: font.table(swash_tag(b"CBLC")),
+        cmap: font.table(swash_tag(b"cmap")),
+        colr: Some(colr),
+        cpal: Some(cpal),
+        cff: font.table(swash_tag(b"CFF ")),
+        ebdt: font.table(swash_tag(b"EBDT")),
+        eblc: font.table(swash_tag(b"EBLC")),
+        glyf: font.table(swash_tag(b"glyf")),
+        hmtx: font.table(swash_tag(b"hmtx")),
+        kern: font.table(swash_tag(b"kern")),
+        loca: font.table(swash_tag(b"loca")),
+        name: font.table(swash_tag(b"name")),
+        os2: font.table(swash_tag(b"OS/2")),
+        post: font.table(swash_tag(b"post")),
+        sbix: font.table(swash_tag(b"sbix")),
+        stat: font.table(swash_tag(b"STAT")),
+        svg: font.table(swash_tag(b"SVG ")),
+        vhea: font.table(swash_tag(b"vhea")),
+        vmtx: font.table(swash_tag(b"vmtx")),
+        vorg: font.table(swash_tag(b"VORG")),
+        gdef: font.table(swash_tag(b"GDEF")),
+        gpos: font.table(swash_tag(b"GPOS")),
+        gsub: font.table(swash_tag(b"GSUB")),
+        math: font.table(swash_tag(b"MATH")),
+        ankr: font.table(swash_tag(b"ankr")),
+        feat: font.table(swash_tag(b"feat")),
+        kerx: font.table(swash_tag(b"kerx")),
+        morx: font.table(swash_tag(b"morx")),
+        trak: font.table(swash_tag(b"trak")),
+        avar: font.table(swash_tag(b"avar")),
+        cff2: font.table(swash_tag(b"CFF2")),
+        fvar: font.table(swash_tag(b"fvar")),
+        gvar: font.table(swash_tag(b"gvar")),
+        hvar: font.table(swash_tag(b"HVAR")),
+        mvar: font.table(swash_tag(b"MVAR")),
+        vvar: font.table(swash_tag(b"VVAR")),
+        ..ttf_parser::RawFaceTables::default()
+    };
+    ttf_parser::Face::from_raw_tables(raw_tables).ok()
+}
+
+#[inline]
+fn swash_tag(tag: &[u8; 4]) -> swash::Tag {
+    u32::from_be_bytes(*tag)
+}
+
+fn bbox_to_i32(
+    (x_min, y_min, x_max, y_max): (f32, f32, f32, f32),
+) -> (i32, i32, i32, i32) {
+    (
+        x_min.floor() as i32,
+        y_min.floor() as i32,
+        x_max.ceil() as i32,
+        y_max.ceil() as i32,
+    )
+}
+
+fn rect_to_bbox(bb: ttf_parser::Rect) -> (f32, f32, f32, f32) {
+    (
+        bb.x_min as f32,
+        bb.y_min as f32,
+        bb.x_max as f32,
+        bb.y_max as f32,
+    )
+}
+
+fn union_bbox(
+    a: Option<(f32, f32, f32, f32)>,
+    b: (f32, f32, f32, f32),
+) -> Option<(f32, f32, f32, f32)> {
+    Some(match a {
+        Some((ax0, ay0, ax1, ay1)) => {
+            (ax0.min(b.0), ay0.min(b.1), ax1.max(b.2), ay1.max(b.3))
+        }
+        None => b,
+    })
+}
+
+fn intersect_bbox(
+    a: (f32, f32, f32, f32),
+    b: (f32, f32, f32, f32),
+) -> Option<(f32, f32, f32, f32)> {
+    let x_min = a.0.max(b.0);
+    let y_min = a.1.max(b.1);
+    let x_max = a.2.min(b.2);
+    let y_max = a.3.min(b.3);
+    (x_min < x_max && y_min < y_max).then_some((x_min, y_min, x_max, y_max))
+}
+
+#[derive(Clone, Copy)]
+enum OutlineSource<'a> {
+    GlyphProtocol(&'a [Vec<u8>]),
+    FontFace(&'a ttf_parser::Face<'a>),
+}
+
+impl OutlineSource<'_> {
+    fn bbox(self, glyph_id: GlyphId) -> Option<(f32, f32, f32, f32)> {
+        match self {
+            OutlineSource::GlyphProtocol(glyphs) => glyphs
+                .get(glyph_id.0 as usize)
+                .filter(|bytes| !bytes.is_empty())
+                .and_then(|bytes| glyf_bbox(bytes))
+                .map(|(x_min, y_min, x_max, y_max)| {
+                    (x_min as f32, y_min as f32, x_max as f32, y_max as f32)
+                }),
+            OutlineSource::FontFace(face) => {
+                face.glyph_bounding_box(glyph_id).map(rect_to_bbox)
+            }
+        }
+    }
+}
+
+fn valid_bbox(bbox: (f32, f32, f32, f32)) -> Option<(f32, f32, f32, f32)> {
+    (bbox.0 < bbox.2 && bbox.1 < bbox.3).then_some(bbox)
+}
+
+fn transform_bbox(
+    bbox: (f32, f32, f32, f32),
+    transform: Transform,
+) -> Option<(f32, f32, f32, f32)> {
+    let (x_min, y_min, x_max, y_max) = bbox;
+    let mut points = [
+        Point::from_xy(x_min, y_min),
+        Point::from_xy(x_min, y_max),
+        Point::from_xy(x_max, y_min),
+        Point::from_xy(x_max, y_max),
+    ];
+    transform.map_points(&mut points);
+    let mut out = None;
+    for point in points {
+        if point.x.is_finite() && point.y.is_finite() {
+            out = union_bbox(out, (point.x, point.y, point.x, point.y));
+        }
+    }
+    out
+}
+
+fn painted_colr_bbox<'a>(
+    outlines: OutlineSource<'a>,
+    paint: impl FnOnce(&mut BoundsPainter<'a>) -> Option<()>,
+) -> Option<(i32, i32, i32, i32)> {
+    let mut painter = BoundsPainter {
+        outlines,
+        transforms: vec![Transform::identity()],
+        clips: vec![BoundsClip::Unbounded],
+        current_bbox: None,
+        painted_bbox: None,
+    };
+    paint(&mut painter)?;
+    painter.painted_bbox.map(bbox_to_i32)
+}
+
+fn select_base_glyph<'a>(
+    colr: &[u8],
+    outlines: OutlineSource<'a>,
+    mut paint: impl FnMut(u16, &mut BoundsPainter<'a>) -> Option<()>,
+) -> Option<(u16, Option<(i32, i32, i32, i32)>)> {
+    let base_glyphs = base_glyph_ids(colr)?;
+    let mut first = None;
+    for gid in base_glyphs {
+        first.get_or_insert(gid);
+        let bbox = painted_colr_bbox(outlines, |painter| paint(gid, painter));
+        if bbox.is_some() {
+            return Some((gid, bbox));
+        }
+    }
+    first.map(|gid| (gid, None))
+}
+
+struct BoundsPainter<'a> {
+    outlines: OutlineSource<'a>,
+    transforms: Vec<Transform>,
+    clips: Vec<BoundsClip>,
+    current_bbox: Option<(f32, f32, f32, f32)>,
+    painted_bbox: Option<(f32, f32, f32, f32)>,
+}
+
+#[derive(Clone, Copy)]
+enum BoundsClip {
+    Unbounded,
+    Empty,
+    Bbox((f32, f32, f32, f32)),
+}
+
+impl BoundsPainter<'_> {
+    fn top_ctm(&self) -> Transform {
+        *self.transforms.last().unwrap_or(&Transform::identity())
+    }
+
+    fn top_clip(&self) -> BoundsClip {
+        *self.clips.last().unwrap_or(&BoundsClip::Unbounded)
+    }
+
+    fn push_clip_bbox(&mut self, bbox: Option<(f32, f32, f32, f32)>) {
+        let clip = match (self.top_clip(), bbox) {
+            (BoundsClip::Empty, _) | (_, None) => BoundsClip::Empty,
+            (BoundsClip::Unbounded, Some(bbox)) => BoundsClip::Bbox(bbox),
+            (BoundsClip::Bbox(parent), Some(bbox)) => intersect_bbox(parent, bbox)
+                .map(BoundsClip::Bbox)
+                .unwrap_or(BoundsClip::Empty),
+        };
+        self.clips.push(clip);
+    }
+
+    fn clipped_bbox(&self, bbox: (f32, f32, f32, f32)) -> Option<(f32, f32, f32, f32)> {
+        match self.top_clip() {
+            BoundsClip::Unbounded => Some(bbox),
+            BoundsClip::Empty => None,
+            BoundsClip::Bbox(clip) => intersect_bbox(bbox, clip),
+        }
+    }
+}
+
+impl<'a> Painter<'a> for BoundsPainter<'a> {
+    fn outline_glyph(&mut self, glyph_id: GlyphId) {
+        self.current_bbox = self.outlines.bbox(glyph_id);
+    }
+
+    fn paint(&mut self, _paint: Paint<'a>) {
+        let Some(bbox) = self.current_bbox else {
+            return;
+        };
+        if let Some(transformed) =
+            transform_bbox(bbox, self.top_ctm()).and_then(|bbox| self.clipped_bbox(bbox))
+        {
+            self.painted_bbox = union_bbox(self.painted_bbox, transformed);
+        }
+    }
+
+    fn push_clip(&mut self) {
+        let transformed = self
+            .current_bbox
+            .and_then(|bbox| transform_bbox(bbox, self.top_ctm()));
+        self.push_clip_bbox(transformed);
+    }
+
+    fn push_clip_box(&mut self, clipbox: ClipBox) {
+        let bbox = (clipbox.x_min, clipbox.y_min, clipbox.x_max, clipbox.y_max);
+        self.push_clip_bbox(
+            valid_bbox(bbox).and_then(|bbox| transform_bbox(bbox, self.top_ctm())),
+        );
+    }
+
+    fn pop_clip(&mut self) {
+        if self.clips.len() > 1 {
+            self.clips.pop();
+        }
+    }
+
+    fn push_layer(&mut self, _mode: CompositeMode) {}
+
+    fn pop_layer(&mut self) {}
+
+    fn push_transform(&mut self, transform: TtfTransform) {
+        let t = Transform::from_row(
+            transform.a,
+            transform.b,
+            transform.c,
+            transform.d,
+            transform.e,
+            transform.f,
+        );
+        let ctm = self.top_ctm().pre_concat(t);
+        self.transforms.push(ctm);
+    }
+
+    fn pop_transform(&mut self) {
+        if self.transforms.len() > 1 {
+            self.transforms.pop();
+        }
+    }
 }
 
 struct Layer {
@@ -269,7 +784,7 @@ struct ColorRaster<'a> {
     transforms: Vec<Transform>,
     clips: Vec<Option<Mask>>,
     current_path: Option<Path>,
-    glyphs: &'a [Vec<u8>],
+    outlines: OutlineSource<'a>,
 }
 
 impl ColorRaster<'_> {
@@ -299,16 +814,14 @@ impl ColorRaster<'_> {
 
 impl<'a> Painter<'a> for ColorRaster<'a> {
     fn outline_glyph(&mut self, glyph_id: GlyphId) {
-        let idx = glyph_id.0 as usize;
-        let Some(bytes) = self.glyphs.get(idx) else {
-            self.current_path = None;
-            return;
+        self.current_path = match self.outlines {
+            OutlineSource::GlyphProtocol(glyphs) => {
+                glyphs.get(glyph_id.0 as usize).and_then(|bytes| {
+                    (!bytes.is_empty()).then(|| build_path(bytes)).flatten()
+                })
+            }
+            OutlineSource::FontFace(face) => build_face_path(face, glyph_id),
         };
-        if bytes.is_empty() {
-            self.current_path = None;
-            return;
-        }
-        self.current_path = build_path(bytes);
     }
 
     fn paint(&mut self, paint: Paint<'a>) {
@@ -359,11 +872,6 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
     }
 
     fn push_clip(&mut self) {
-        let Some(path) = self.current_path.clone() else {
-            // Keep the stack height balanced for the matching pop.
-            self.clips.push(self.top_clip().cloned());
-            return;
-        };
         let ctm = self.top_ctm();
         let parent = self.top_clip().cloned();
         let (pw, ph) = {
@@ -374,7 +882,9 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
             self.clips.push(parent);
             return;
         };
-        mask.fill_path(&path, FillRule::Winding, true, ctm);
+        if let Some(path) = self.current_path.clone() {
+            mask.fill_path(&path, FillRule::Winding, true, ctm);
+        }
         if let Some(par) = parent {
             intersect_masks(&mut mask, &par);
         }
@@ -390,7 +900,11 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
         let Some(rect) =
             Rect::from_ltrb(clipbox.x_min, clipbox.y_min, clipbox.x_max, clipbox.y_max)
         else {
-            self.clips.push(parent);
+            let Some(mask) = Mask::new(pw, ph) else {
+                self.clips.push(parent);
+                return;
+            };
+            self.clips.push(Some(mask));
             return;
         };
         let path = PathBuilder::from_rect(rect);
@@ -407,7 +921,9 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
     }
 
     fn pop_clip(&mut self) {
-        self.clips.pop();
+        if self.clips.len() > 1 {
+            self.clips.pop();
+        }
     }
 
     fn push_layer(&mut self, mode: CompositeMode) {
@@ -433,8 +949,15 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
     }
 
     fn pop_layer(&mut self) {
-        let Some(top) = self.layers.pop() else { return };
-        self.clips.pop();
+        if self.layers.len() <= 1 {
+            return;
+        }
+        let top = self.layers.pop().unwrap();
+        let layer_clip = if self.clips.len() > 1 {
+            self.clips.pop().flatten()
+        } else {
+            None
+        };
         let blend = composite_mode_to_blend(top.mode);
         let Some(parent) = self.layers.last_mut() else {
             // Stack imbalance — should be unreachable given
@@ -451,7 +974,7 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
                 quality: tiny_skia::FilterQuality::Nearest,
             },
             Transform::identity(),
-            None,
+            layer_clip.as_ref(),
         );
     }
 
@@ -469,8 +992,80 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
     }
 
     fn pop_transform(&mut self) {
-        self.transforms.pop();
+        if self.transforms.len() > 1 {
+            self.transforms.pop();
+        }
     }
+}
+
+fn read_u16_be(bytes: &[u8], offset: usize) -> Option<u16> {
+    let chunk: [u8; 2] = bytes.get(offset..offset.checked_add(2)?)?.try_into().ok()?;
+    Some(u16::from_be_bytes(chunk))
+}
+
+fn read_u32_be(bytes: &[u8], offset: usize) -> Option<u32> {
+    let chunk: [u8; 4] = bytes.get(offset..offset.checked_add(4)?)?.try_into().ok()?;
+    Some(u32::from_be_bytes(chunk))
+}
+
+fn base_glyph_ids(colr: &[u8]) -> Option<Vec<u16>> {
+    let version = read_u16_be(colr, 0)?;
+    let mut gids = Vec::new();
+
+    // v1 BaseGlyphList: u32 numRecords, then records of
+    // { u16 glyphID, u32 paintOffset } = 6 bytes each.
+    if version >= 1 {
+        let v1_off = read_u32_be(colr, 14).map(|offset| offset as usize);
+        if let Some(v1_off) = v1_off.filter(|&offset| offset != 0) {
+            let num_records = read_u32_be(colr, v1_off).map(|count| count as usize);
+            let records_start = v1_off.checked_add(4);
+            if let (Some(num_records), Some(records_start)) = (num_records, records_start)
+            {
+                for i in 0..num_records {
+                    let Some(rec_off) = i
+                        .checked_mul(6)
+                        .and_then(|delta| records_start.checked_add(delta))
+                    else {
+                        break;
+                    };
+                    let Some(record_end) = rec_off.checked_add(6) else {
+                        break;
+                    };
+                    if record_end > colr.len() {
+                        break;
+                    }
+                    let Some(gid) = read_u16_be(colr, rec_off) else {
+                        break;
+                    };
+                    gids.push(gid);
+                }
+            }
+        }
+    }
+
+    // v0 BaseGlyphRecord array: { u16 glyphID, u16 firstLayer, u16 numLayers } = 6 B.
+    let num_v0 = read_u16_be(colr, 2)? as usize;
+    let v0_off = read_u32_be(colr, 4)? as usize;
+    if num_v0 != 0 && v0_off != 0 {
+        for i in 0..num_v0 {
+            let Some(rec_off) =
+                i.checked_mul(6).and_then(|delta| v0_off.checked_add(delta))
+            else {
+                break;
+            };
+            let Some(record_end) = rec_off.checked_add(6) else {
+                break;
+            };
+            if record_end > colr.len() {
+                break;
+            }
+            let Some(gid) = read_u16_be(colr, rec_off) else {
+                break;
+            };
+            gids.push(gid);
+        }
+    }
+    (!gids.is_empty()).then_some(gids)
 }
 
 /// Parse the COLR header's base-glyph records and return the first
@@ -482,62 +1077,16 @@ impl<'a> Painter<'a> for ColorRaster<'a> {
 /// past those empty slots and find the first record that actually
 /// has ink. Prefers v1's `BaseGlyphList`, falls back to v0's
 /// `BaseGlyphRecord` array.
+#[cfg(test)]
 fn first_base_glyph_id(colr: &[u8], glyphs: &[Vec<u8>]) -> Option<u16> {
-    if colr.len() < 8 {
-        return None;
-    }
+    let base_glyphs = base_glyph_ids(colr)?;
+    let first = *base_glyphs.first()?;
     let is_non_empty =
         |gid: u16| -> bool { glyphs.get(gid as usize).is_some_and(|g| !g.is_empty()) };
-
-    // v1 BaseGlyphList: u32 numRecords, then records of
-    // { u16 glyphID, u32 paintOffset } = 6 bytes each.
-    if colr.len() >= 18 {
-        let v1_off =
-            u32::from_be_bytes([colr[14], colr[15], colr[16], colr[17]]) as usize;
-        if v1_off != 0 && v1_off + 4 <= colr.len() {
-            let num_records = u32::from_be_bytes([
-                colr[v1_off],
-                colr[v1_off + 1],
-                colr[v1_off + 2],
-                colr[v1_off + 3],
-            ]) as usize;
-            let mut first_gid = None;
-            for i in 0..num_records {
-                let rec_off = v1_off + 4 + i * 6;
-                if rec_off + 2 > colr.len() {
-                    break;
-                }
-                let gid = u16::from_be_bytes([colr[rec_off], colr[rec_off + 1]]);
-                first_gid.get_or_insert(gid);
-                if is_non_empty(gid) {
-                    return Some(gid);
-                }
-            }
-            // No non-empty record found. Return the first one we saw
-            // so the caller still has something; the subsequent bbox
-            // read will bail cleanly.
-            if let Some(g) = first_gid {
-                return Some(g);
-            }
-        }
-    }
-
-    // v0 BaseGlyphRecord array: { u16 glyphID, u16 firstLayer, u16 numLayers } = 6 B.
-    let num_v0 = u16::from_be_bytes([colr[2], colr[3]]) as usize;
-    let v0_off = u32::from_be_bytes([colr[4], colr[5], colr[6], colr[7]]) as usize;
-    let mut first_gid = None;
-    for i in 0..num_v0 {
-        let rec_off = v0_off + i * 6;
-        if rec_off + 2 > colr.len() {
-            break;
-        }
-        let gid = u16::from_be_bytes([colr[rec_off], colr[rec_off + 1]]);
-        first_gid.get_or_insert(gid);
-        if is_non_empty(gid) {
-            return Some(gid);
-        }
-    }
-    first_gid
+    base_glyphs
+        .into_iter()
+        .find(|&gid| is_non_empty(gid))
+        .or(Some(first))
 }
 
 fn glyf_bbox(bytes: &[u8]) -> Option<(i16, i16, i16, i16)> {
@@ -585,14 +1134,48 @@ fn build_path(bytes: &[u8]) -> Option<Path> {
     pb.finish()
 }
 
+fn build_face_path(face: &ttf_parser::Face<'_>, glyph_id: GlyphId) -> Option<Path> {
+    let mut builder = FacePathBuilder {
+        path: PathBuilder::new(),
+    };
+    face.outline_glyph(glyph_id, &mut builder)?;
+    builder.path.finish()
+}
+
+struct FacePathBuilder {
+    path: PathBuilder,
+}
+
+impl OutlineBuilder for FacePathBuilder {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.path.move_to(x, y);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.path.line_to(x, y);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.path.quad_to(x1, y1, x, y);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.path.cubic_to(x1, y1, x2, y2, x, y);
+    }
+
+    fn close(&mut self) {
+        self.path.close();
+    }
+}
+
 /// tiny-skia Pixmap pixels are premultiplied. The v4 grid color atlas
 /// expects premultiplied RGBA — its Metal/wgpu/vulkan pipelines all
 /// configure source-blend = `One`, dest-blend = `OneMinusSourceAlpha`,
-/// matching `MTLSamplerAddressMode`/system-emoji rasteriser conventions.
-/// So pass the bytes through verbatim. (The previous PR plumbed COLR
-/// glyphs through the rich-text image-cache, whose pipeline used
-/// `SourceAlpha + OneMinusSourceAlpha` and therefore wanted straight
-/// alpha — that path no longer exists in main.)
+/// matching the system-emoji rasteriser's premultiplied output. So pass
+/// the bytes through verbatim. (The previous PR plumbed COLR glyphs
+/// through the rich-text image-cache, whose pipeline used `SourceAlpha +
+/// OneMinusSourceAlpha` and therefore wanted straight alpha — that path
+/// no longer exists in main.)
 fn pixmap_to_rgba(pixmap: &Pixmap) -> Vec<u8> {
     let pixels = pixmap.pixels();
     let mut out = Vec::with_capacity(pixels.len() * 4);
@@ -768,6 +1351,8 @@ fn intersect_masks(dst: &mut Mask, src: &Mask) {
 
 #[cfg(test)]
 mod tests {
+    // Test lane: default
+
     use super::*;
 
     /// Helper: vector dot product in 2D.
@@ -793,9 +1378,9 @@ mod tests {
         let strip_bottom = em_top - strip_height;
         let mut v = Vec::new();
         v.extend_from_slice(&1i16.to_be_bytes()); // numberOfContours
-                                                  // Declare bbox as the full em — not just the inked strip — so
-                                                  // the rasterised pixmap has empty space below the strip we
-                                                  // can sample as "bottom".
+        // Declare bbox as the full em — not just the inked strip — so
+        // the rasterised pixmap has empty space below the strip we
+        // can sample as "bottom".
         v.extend_from_slice(&0i16.to_be_bytes()); // xMin
         v.extend_from_slice(&0i16.to_be_bytes()); // yMin
         v.extend_from_slice(&em_top.to_be_bytes()); // xMax
@@ -803,9 +1388,9 @@ mod tests {
         v.extend_from_slice(&3u16.to_be_bytes()); // endPtsOfContours[0] = 3 (4 points)
         v.extend_from_slice(&0u16.to_be_bytes()); // instructionLength = 0
         v.extend_from_slice(&[0x01; 4]); // 4 flags, all on-curve, full i16 deltas
-                                         // Points walk the rectangle [0, strip_bottom] → [em_top, strip_bottom]
-                                         // → [em_top, em_top] → [0, em_top]. Deltas from previous point
-                                         // (first delta is from origin (0,0)).
+        // Points walk the rectangle [0, strip_bottom] → [em_top, strip_bottom]
+        // → [em_top, em_top] → [0, em_top]. Deltas from previous point
+        // (first delta is from origin (0,0)).
         let xs = [0i16, em_top, 0, -em_top];
         let ys = [strip_bottom, 0, strip_height, 0];
         for x in &xs {
@@ -815,6 +1400,582 @@ mod tests {
             v.extend_from_slice(&y.to_be_bytes());
         }
         v
+    }
+
+    fn build_head() -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&1u16.to_be_bytes()); // majorVersion
+        v.extend_from_slice(&0u16.to_be_bytes()); // minorVersion
+        v.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // fontRevision
+        v.extend_from_slice(&0u32.to_be_bytes()); // checkSumAdjustment, patched later
+        v.extend_from_slice(&0x5F0F_3CF5u32.to_be_bytes()); // magicNumber
+        v.extend_from_slice(&0u16.to_be_bytes()); // flags
+        v.extend_from_slice(&100u16.to_be_bytes()); // unitsPerEm
+        v.extend_from_slice(&0i64.to_be_bytes()); // created
+        v.extend_from_slice(&0i64.to_be_bytes()); // modified
+        v.extend_from_slice(&0i16.to_be_bytes()); // xMin
+        v.extend_from_slice(&0i16.to_be_bytes()); // yMin
+        v.extend_from_slice(&100i16.to_be_bytes()); // xMax
+        v.extend_from_slice(&100i16.to_be_bytes()); // yMax
+        v.extend_from_slice(&0u16.to_be_bytes()); // macStyle
+        v.extend_from_slice(&8u16.to_be_bytes()); // lowestRecPPEM
+        v.extend_from_slice(&2i16.to_be_bytes()); // fontDirectionHint
+        v.extend_from_slice(&0i16.to_be_bytes()); // indexToLocFormat = short
+        v.extend_from_slice(&0i16.to_be_bytes()); // glyphDataFormat
+        v
+    }
+
+    fn build_hhea() -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&1u16.to_be_bytes()); // majorVersion
+        v.extend_from_slice(&0u16.to_be_bytes()); // minorVersion
+        v.extend_from_slice(&100i16.to_be_bytes()); // ascender
+        v.extend_from_slice(&0i16.to_be_bytes()); // descender
+        v.extend_from_slice(&0i16.to_be_bytes()); // lineGap
+        v.extend_from_slice(&100u16.to_be_bytes()); // advanceWidthMax
+        v.extend_from_slice(&0i16.to_be_bytes()); // minLeftSideBearing
+        v.extend_from_slice(&0i16.to_be_bytes()); // minRightSideBearing
+        v.extend_from_slice(&100i16.to_be_bytes()); // xMaxExtent
+        v.extend_from_slice(&1i16.to_be_bytes()); // caretSlopeRise
+        v.extend_from_slice(&0i16.to_be_bytes()); // caretSlopeRun
+        v.extend_from_slice(&0i16.to_be_bytes()); // caretOffset
+        for _ in 0..4 {
+            v.extend_from_slice(&0i16.to_be_bytes());
+        }
+        v.extend_from_slice(&0i16.to_be_bytes()); // metricDataFormat
+        v.extend_from_slice(&3u16.to_be_bytes()); // numberOfHMetrics
+        v
+    }
+
+    fn build_maxp() -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // version
+        v.extend_from_slice(&3u16.to_be_bytes()); // numGlyphs
+        v.extend_from_slice(&4u16.to_be_bytes()); // maxPoints
+        v.extend_from_slice(&1u16.to_be_bytes()); // maxContours
+        for value in [0u16, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0] {
+            v.extend_from_slice(&value.to_be_bytes());
+        }
+        v
+    }
+
+    fn build_hmtx() -> Vec<u8> {
+        let mut v = Vec::new();
+        for _ in 0..3 {
+            v.extend_from_slice(&100u16.to_be_bytes());
+            v.extend_from_slice(&0i16.to_be_bytes());
+        }
+        v
+    }
+
+    fn build_loca(glyf_len: usize) -> Vec<u8> {
+        let mut v = Vec::new();
+        for offset in [0u16, 0, 0, (glyf_len / 2) as u16] {
+            v.extend_from_slice(&offset.to_be_bytes());
+        }
+        v
+    }
+
+    fn build_colr_layer_only(version: u16) -> Vec<u8> {
+        build_colr_layer_only_with_palette(version, 0)
+    }
+
+    fn build_colr_layer_only_with_palette(version: u16, palette_index: u16) -> Vec<u8> {
+        let base_records_offset: u32 = if version == 0 { 14 } else { 34 };
+        let layer_records_offset = base_records_offset + 6;
+        let mut v = Vec::new();
+        v.extend_from_slice(&version.to_be_bytes());
+        v.extend_from_slice(&1u16.to_be_bytes()); // numBaseGlyphRecords
+        v.extend_from_slice(&base_records_offset.to_be_bytes());
+        v.extend_from_slice(&layer_records_offset.to_be_bytes());
+        v.extend_from_slice(&1u16.to_be_bytes()); // numLayerRecords
+
+        if version == 1 {
+            // v1 header tail: BaseGlyphList at the end, no v1 layer
+            // list, no clip list, no variation index map/store.
+            v.extend_from_slice(&(layer_records_offset + 4).to_be_bytes());
+            v.extend_from_slice(&0u32.to_be_bytes());
+            v.extend_from_slice(&0u32.to_be_bytes());
+            v.extend_from_slice(&0u32.to_be_bytes());
+            v.extend_from_slice(&0u32.to_be_bytes());
+        }
+
+        v.extend_from_slice(&1u16.to_be_bytes()); // base glyph id
+        v.extend_from_slice(&0u16.to_be_bytes()); // firstLayerIndex
+        v.extend_from_slice(&1u16.to_be_bytes()); // numLayers
+        v.extend_from_slice(&2u16.to_be_bytes()); // layer glyph id
+        v.extend_from_slice(&palette_index.to_be_bytes()); // palette index
+
+        if version == 1 {
+            v.extend_from_slice(&0u32.to_be_bytes()); // empty v1 BaseGlyphList
+        }
+
+        v
+    }
+
+    fn build_colr_v0_notdef_then_layer_only(palette_index: u16) -> Vec<u8> {
+        let base_records_offset = 14u32;
+        let layer_records_offset = base_records_offset + 12;
+        let mut v = Vec::new();
+        v.extend_from_slice(&0u16.to_be_bytes()); // version
+        v.extend_from_slice(&2u16.to_be_bytes()); // numBaseGlyphRecords
+        v.extend_from_slice(&base_records_offset.to_be_bytes());
+        v.extend_from_slice(&layer_records_offset.to_be_bytes());
+        v.extend_from_slice(&2u16.to_be_bytes()); // numLayerRecords
+
+        v.extend_from_slice(&0u16.to_be_bytes()); // .notdef base glyph id
+        v.extend_from_slice(&0u16.to_be_bytes()); // firstLayerIndex
+        v.extend_from_slice(&1u16.to_be_bytes()); // numLayers
+        v.extend_from_slice(&1u16.to_be_bytes()); // real wrapper base glyph id
+        v.extend_from_slice(&1u16.to_be_bytes()); // firstLayerIndex
+        v.extend_from_slice(&1u16.to_be_bytes()); // numLayers
+
+        v.extend_from_slice(&0u16.to_be_bytes()); // .notdef layer glyph id
+        v.extend_from_slice(&0u16.to_be_bytes()); // fixed palette index
+        v.extend_from_slice(&2u16.to_be_bytes()); // painted layer glyph id
+        v.extend_from_slice(&palette_index.to_be_bytes());
+
+        v
+    }
+
+    fn build_colr_v1_paint_glyph_no_clip() -> Vec<u8> {
+        let base_list_offset = 34u32;
+        let paint_offset = 10u32;
+        let mut v = Vec::new();
+        v.extend_from_slice(&1u16.to_be_bytes()); // version
+        v.extend_from_slice(&0u16.to_be_bytes()); // numBaseGlyphRecords
+        v.extend_from_slice(&0u32.to_be_bytes()); // baseGlyphRecordsOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // layerRecordsOffset
+        v.extend_from_slice(&0u16.to_be_bytes()); // numLayerRecords
+        v.extend_from_slice(&base_list_offset.to_be_bytes());
+        v.extend_from_slice(&0u32.to_be_bytes()); // layerListOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // clipListOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // varIndexMapOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // itemVariationStoreOffset
+
+        v.extend_from_slice(&1u32.to_be_bytes()); // BaseGlyphList count
+        v.extend_from_slice(&1u16.to_be_bytes()); // base glyph id
+        v.extend_from_slice(&paint_offset.to_be_bytes());
+
+        v.push(10); // PaintGlyph
+        v.extend_from_slice(&6u32.to_be_bytes()[1..]); // child paint offset
+        v.extend_from_slice(&2u16.to_be_bytes()); // painted layer glyph id
+        v.push(2); // PaintSolid
+        v.extend_from_slice(&0u16.to_be_bytes()); // palette index
+        v.extend_from_slice(&0x4000u16.to_be_bytes()); // alpha = 1.0
+        v
+    }
+
+    fn build_colr_v1_missing_outer_clip_nested_paint_glyph() -> Vec<u8> {
+        let base_list_offset = 34u32;
+        let paint_offset = 10u32;
+        let mut v = Vec::new();
+        v.extend_from_slice(&1u16.to_be_bytes()); // version
+        v.extend_from_slice(&0u16.to_be_bytes()); // numBaseGlyphRecords
+        v.extend_from_slice(&0u32.to_be_bytes()); // baseGlyphRecordsOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // layerRecordsOffset
+        v.extend_from_slice(&0u16.to_be_bytes()); // numLayerRecords
+        v.extend_from_slice(&base_list_offset.to_be_bytes());
+        v.extend_from_slice(&0u32.to_be_bytes()); // layerListOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // clipListOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // varIndexMapOffset
+        v.extend_from_slice(&0u32.to_be_bytes()); // itemVariationStoreOffset
+
+        v.extend_from_slice(&1u32.to_be_bytes()); // BaseGlyphList count
+        v.extend_from_slice(&1u16.to_be_bytes()); // base glyph id
+        v.extend_from_slice(&paint_offset.to_be_bytes());
+
+        v.push(10); // outer PaintGlyph
+        v.extend_from_slice(&6u32.to_be_bytes()[1..]); // nested child paint offset
+        v.extend_from_slice(&3u16.to_be_bytes()); // missing outer clip glyph id
+        v.push(10); // nested PaintGlyph
+        v.extend_from_slice(&6u32.to_be_bytes()[1..]); // solid child paint offset
+        v.extend_from_slice(&2u16.to_be_bytes()); // existing nested glyph id
+        v.push(2); // PaintSolid
+        v.extend_from_slice(&0u16.to_be_bytes()); // palette index
+        v.extend_from_slice(&0x4000u16.to_be_bytes()); // alpha = 1.0
+        v
+    }
+
+    fn build_cpal_red() -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&0u16.to_be_bytes()); // version
+        v.extend_from_slice(&1u16.to_be_bytes()); // numPaletteEntries
+        v.extend_from_slice(&1u16.to_be_bytes()); // numPalettes
+        v.extend_from_slice(&1u16.to_be_bytes()); // numColorRecords
+        v.extend_from_slice(&14u32.to_be_bytes()); // colorRecordsArrayOffset
+        v.extend_from_slice(&0u16.to_be_bytes()); // colorRecordIndices[0]
+        v.extend_from_slice(&[0x00, 0x00, 0xFF, 0xFF]); // BGRA red
+        v
+    }
+
+    fn checksum(data: &[u8]) -> u32 {
+        data.chunks(4).fold(0u32, |sum, chunk| {
+            let mut padded = [0u8; 4];
+            padded[..chunk.len()].copy_from_slice(chunk);
+            sum.wrapping_add(u32::from_be_bytes(padded))
+        })
+    }
+
+    fn pad4(v: &mut Vec<u8>) {
+        while v.len() % 4 != 0 {
+            v.push(0);
+        }
+    }
+
+    fn build_sfnt(mut tables: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
+        tables.sort_by_key(|(tag, _)| *tag);
+        let num_tables = tables.len() as u16;
+        let mut search_power = 1u16;
+        let mut entry_selector = 0u16;
+        while search_power.saturating_mul(2) <= num_tables {
+            search_power *= 2;
+            entry_selector += 1;
+        }
+        let search_range = search_power * 16;
+        let range_shift = num_tables * 16 - search_range;
+
+        let mut records = Vec::new();
+        let mut offset = 12 + tables.len() * 16;
+        for (tag, data) in &tables {
+            records.push((*tag, checksum(data), offset as u32, data.len() as u32));
+            offset += data.len();
+            offset = (offset + 3) & !3;
+        }
+
+        let mut font = Vec::new();
+        font.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        font.extend_from_slice(&num_tables.to_be_bytes());
+        font.extend_from_slice(&search_range.to_be_bytes());
+        font.extend_from_slice(&entry_selector.to_be_bytes());
+        font.extend_from_slice(&range_shift.to_be_bytes());
+        for (tag, sum, table_offset, len) in &records {
+            font.extend_from_slice(tag);
+            font.extend_from_slice(&sum.to_be_bytes());
+            font.extend_from_slice(&table_offset.to_be_bytes());
+            font.extend_from_slice(&len.to_be_bytes());
+        }
+        for (_, data) in &tables {
+            font.extend_from_slice(data);
+            pad4(&mut font);
+        }
+
+        let head_offset = records
+            .iter()
+            .find_map(|(tag, _, table_offset, _)| {
+                (*tag == *b"head").then_some(*table_offset)
+            })
+            .expect("test font has head table") as usize;
+        let adjustment = 0xB1B0_AFBAu32.wrapping_sub(checksum(&font));
+        font[head_offset + 8..head_offset + 12]
+            .copy_from_slice(&adjustment.to_be_bytes());
+        font
+    }
+
+    fn build_minimal_font_with_colr_and_layer_glyf(
+        colr: Vec<u8>,
+        mut glyf: Vec<u8>,
+    ) -> Vec<u8> {
+        if glyf.len() % 2 != 0 {
+            glyf.push(0);
+        }
+
+        build_sfnt(vec![
+            (*b"COLR", colr),
+            (*b"CPAL", build_cpal_red()),
+            (*b"glyf", glyf.clone()),
+            (*b"head", build_head()),
+            (*b"hhea", build_hhea()),
+            (*b"hmtx", build_hmtx()),
+            (*b"loca", build_loca(glyf.len())),
+            (*b"maxp", build_maxp()),
+        ])
+    }
+
+    fn build_minimal_font_with_colr(colr: Vec<u8>) -> Vec<u8> {
+        build_minimal_font_with_colr_and_layer_glyf(colr, glyf_top_strip(100, 100))
+    }
+
+    fn build_minimal_colr_font(colr_version: u16) -> Vec<u8> {
+        build_minimal_font_with_colr(build_colr_layer_only(colr_version))
+    }
+
+    #[test]
+    fn raster_axis_pixels_rejects_dimensions_that_cannot_roundtrip_to_payload() {
+        // Regression: rasterized payload dimensions are u16. A plain
+        // `as u16` cast silently truncated oversized tiny-skia pixmap
+        // dimensions after allocation.
+        assert!(raster_axis_pixels(u16::MAX as i32 + 1, 1.0).is_none());
+    }
+
+    #[test]
+    fn rasterize_colr_paint_rejects_oversized_bounds_before_painting() {
+        // Regression: malformed or transformed COLR bounds larger
+        // than the payload/atlas can represent must fail before
+        // painting, not allocate and return truncated dimensions.
+        let glyphs: &[Vec<u8>] = &[];
+        let raster = rasterize_colr_paint(
+            (0, 0, u16::MAX as i32 + 1, 0),
+            1.0,
+            [255, 255, 255, 255],
+            OutlineSource::GlyphProtocol(glyphs),
+            |_, _| Some(()),
+        );
+        assert!(raster.is_none());
+    }
+
+    #[test]
+    fn color_raster_empty_clip_blocks_later_outline_paint() {
+        // Regression: PaintGlyph clips child paints to the current
+        // outline. A missing outline is an empty clip, not "keep the
+        // parent clip", otherwise nested child glyphs can leak ink.
+        let glyphs = vec![glyf_top_strip(100, 100)];
+        let mut raster = ColorRaster {
+            layers: vec![Layer {
+                pixmap: Pixmap::new(16, 16).expect("pixmap allocates"),
+                mode: CompositeMode::SourceOver,
+            }],
+            transforms: vec![Transform::identity()],
+            clips: vec![None],
+            current_path: None,
+            outlines: OutlineSource::GlyphProtocol(&glyphs),
+        };
+
+        raster.push_clip();
+        raster.outline_glyph(GlyphId(0));
+        raster.paint(Paint::Solid(RgbaColor::new(255, 0, 0, 255)));
+        raster.pop_clip();
+
+        assert!(
+            raster.layers[0]
+                .pixmap
+                .pixels()
+                .iter()
+                .all(|pixel| pixel.alpha() == 0),
+            "empty clip should suppress later child paint"
+        );
+    }
+
+    #[test]
+    fn color_raster_layer_composite_respects_inherited_clip() {
+        // Regression: a pushed COLR layer inherits the current clip.
+        // Destructive blend modes like Clear must keep that clip when
+        // the layer is composited back, otherwise transparent source
+        // pixels outside the clip can erase the whole destination.
+        let glyphs: &[Vec<u8>] = &[];
+        let mut base = Pixmap::new(6, 6).expect("pixmap allocates");
+        base.fill(Color::from_rgba8(255, 0, 0, 255));
+        let mut raster = ColorRaster {
+            layers: vec![Layer {
+                pixmap: base,
+                mode: CompositeMode::SourceOver,
+            }],
+            transforms: vec![Transform::identity()],
+            clips: vec![None],
+            current_path: None,
+            outlines: OutlineSource::GlyphProtocol(glyphs),
+        };
+
+        raster.push_clip_box(ClipBox {
+            x_min: 1.0,
+            y_min: 1.0,
+            x_max: 4.0,
+            y_max: 4.0,
+        });
+        raster.push_layer(CompositeMode::Clear);
+        raster.pop_layer();
+        raster.pop_clip();
+
+        let outside = raster.layers[0].pixmap.pixel(0, 0).expect("outside pixel");
+        let inside = raster.layers[0].pixmap.pixel(2, 2).expect("inside pixel");
+        assert_eq!(outside.alpha(), 255, "outside clip should stay opaque");
+        assert_eq!(inside.alpha(), 0, "inside clip should be cleared");
+    }
+
+    #[test]
+    fn rasterize_payload_handles_colr_v0_layer_bbox_without_base_outline() {
+        // Regression: Glyph Protocol COLR payloads can mirror normal
+        // COLR fonts where the base glyph is an empty wrapper and all
+        // ink lives in layer glyphs. Without the paint-graph bbox
+        // prepass, no-ClipBox payloads fell back to the empty base
+        // glyph bbox and produced tofu.
+        let payload = crate::font::glyph_registry::StoredPayload::ColrV0 {
+            glyphs: vec![vec![], vec![], glyf_top_strip(100, 100)],
+            colr: build_colr_layer_only(0),
+            cpal: build_cpal_red(),
+        };
+
+        let raster = rasterize_payload(&payload, 100, 32, [255, 255, 255, 255])
+            .expect("COLR v0 layer-only Glyph Protocol payload rasterizes");
+
+        assert!(raster.is_color);
+        assert!(raster.data.chunks_exact(4).any(|p| p[3] > 0));
+    }
+
+    #[test]
+    fn payload_depends_on_foreground_tracks_colr_palette_index() {
+        // Regression: foreground-dependent Glyph Protocol color glyphs
+        // need a foreground-aware atlas key, while fixed CPAL payloads
+        // should keep sharing one pre-painted color atlas entry.
+        let glyphs = || vec![vec![], vec![], glyf_top_strip(100, 100)];
+        let fixed = crate::font::glyph_registry::StoredPayload::ColrV0 {
+            glyphs: glyphs(),
+            colr: build_colr_layer_only_with_palette(0, 0),
+            cpal: build_cpal_red(),
+        };
+        let foreground = crate::font::glyph_registry::StoredPayload::ColrV0 {
+            glyphs: glyphs(),
+            colr: build_colr_layer_only_with_palette(0, u16::MAX),
+            cpal: build_cpal_red(),
+        };
+
+        assert!(!payload_depends_on_foreground(&fixed));
+        assert!(payload_depends_on_foreground(&foreground));
+    }
+
+    #[test]
+    fn glyph_protocol_colr_skips_unpaintable_notdef_base_record() {
+        // Regression: font-subset COLR payloads can retain a leading
+        // empty .notdef base record before the registered glyph's empty
+        // wrapper base. Base-glyph selection must walk the paint graph,
+        // not only test the base glyph's own outline bytes.
+        let payload = crate::font::glyph_registry::StoredPayload::ColrV0 {
+            glyphs: vec![vec![], vec![], glyf_top_strip(100, 100)],
+            colr: build_colr_v0_notdef_then_layer_only(u16::MAX),
+            cpal: build_cpal_red(),
+        };
+
+        assert!(payload_depends_on_foreground(&payload));
+
+        let raster = rasterize_payload(&payload, 100, 32, [7, 47, 113, 255])
+            .expect("COLR payload selects the paintable base record");
+
+        assert!(raster.is_color);
+        assert!(raster.data.chunks_exact(4).any(|p| p[3] > 0));
+    }
+
+    #[test]
+    fn rasterize_font_glyph_handles_colr_v0_layer_bbox_without_base_outline() {
+        // Regression: normal-font COLR v0 glyphs can have an empty
+        // base glyph and put all ink in layer glyphs. Without deriving
+        // the bbox from layers, the new swash-font path returned None
+        // before it reached ttf-parser's COLR painter.
+        let font_data = build_minimal_colr_font(0);
+        let font = swash::FontRef::from_index(&font_data, 0).expect("test font parses");
+        let face = face_from_swash_font(font).expect("COLR face parses");
+        assert!(face.glyph_bounding_box(GlyphId(1)).is_none());
+        assert!(face.glyph_bounding_box(GlyphId(2)).is_some());
+        assert!(!color_glyph_depends_on_foreground(&face, GlyphId(1)).unwrap());
+
+        let raster = rasterize_font_glyph(font, 1, 32, [255, 255, 255, 255])
+            .expect("COLR v0 layer-only glyph rasterizes");
+
+        assert!(raster.is_color);
+        assert!(raster.width >= 32);
+        assert!(raster.height >= 32);
+        let alpha_pixels = raster.data.chunks_exact(4).filter(|p| p[3] > 0).count();
+        let red_pixels = raster
+            .data
+            .chunks_exact(4)
+            .filter(|p| p[3] > 0 && p[0] > p[2])
+            .count();
+        assert!(alpha_pixels > 0, "raster should contain ink");
+        assert!(red_pixels > 0, "raster should use CPAL red");
+    }
+
+    #[test]
+    fn rasterize_font_glyph_caps_oversized_colr_bbox_to_visual_size() {
+        // Regression: some packaged emoji fonts have COLR layer bounds
+        // much larger than one em. Terminal emoji rasterization should
+        // fit those glyphs back into the requested visual budget instead
+        // of letting them dominate the row.
+        let font_data = build_minimal_font_with_colr_and_layer_glyf(
+            build_colr_layer_only(0),
+            glyf_top_strip(300, 300),
+        );
+        let font = swash::FontRef::from_index(&font_data, 0).expect("test font parses");
+
+        let raster = rasterize_font_glyph(font, 1, 32, [255, 255, 255, 255])
+            .expect("oversized COLR glyph rasterizes");
+
+        assert!(raster.is_color);
+        assert!(
+            raster.width <= 34 && raster.height <= 34,
+            "32 px visual budget plus 1 px raster pad on each side should cap oversized bounds, got {}x{}",
+            raster.width,
+            raster.height
+        );
+        assert!(raster.data.chunks_exact(4).any(|p| p[3] > 0));
+    }
+
+    #[test]
+    fn rasterize_font_glyph_skips_foreground_dependent_colr() {
+        // Regression: normal-font COLR glyphs are cached by
+        // font/glyph/size only. If a graph uses paletteIndex 0xFFFF,
+        // pre-painting it into the color atlas would freeze the first
+        // foreground color for every later cell using that glyph.
+        let font_data =
+            build_minimal_font_with_colr(build_colr_layer_only_with_palette(0, u16::MAX));
+        let font = swash::FontRef::from_index(&font_data, 0).expect("test font parses");
+        let face = face_from_swash_font(font).expect("COLR face parses");
+
+        assert!(color_glyph_depends_on_foreground(&face, GlyphId(1)).unwrap());
+        assert!(
+            rasterize_font_glyph(font, 1, 32, [255, 255, 255, 255]).is_none(),
+            "foreground-dependent COLR must fall back to the existing swash path"
+        );
+    }
+
+    #[test]
+    fn rasterize_font_glyph_handles_colr_v1_table_with_v0_layer_records() {
+        // Regression: COLR v1 tables can still contain v0 base/layer
+        // records. ttf-parser falls back to those when no v1 record
+        // exists for the glyph, so the bbox fallback must accept
+        // table version 1 instead of rejecting it as non-v0.
+        let font_data = build_minimal_colr_font(1);
+        let font = swash::FontRef::from_index(&font_data, 0).expect("test font parses");
+
+        let raster = rasterize_font_glyph(font, 1, 32, [255, 255, 255, 255])
+            .expect("COLR v1 table with v0 records rasterizes");
+
+        assert!(raster.is_color);
+        assert!(raster.data.chunks_exact(4).any(|p| p[3] > 0));
+    }
+
+    #[test]
+    fn rasterize_font_glyph_respects_missing_paintglyph_clip_outline() {
+        // Regression: the bounds prepass must follow PaintGlyph clip
+        // semantics too. If the outer clip glyph has no outline, a
+        // nested child PaintGlyph must not make the base glyph look
+        // paintable.
+        let font_data = build_minimal_font_with_colr(
+            build_colr_v1_missing_outer_clip_nested_paint_glyph(),
+        );
+        let font = swash::FontRef::from_index(&font_data, 0).expect("test font parses");
+
+        assert!(
+            rasterize_font_glyph(font, 1, 32, [255, 255, 255, 255]).is_none(),
+            "missing outer PaintGlyph outline should clip nested child paint"
+        );
+    }
+
+    #[test]
+    fn rasterize_font_glyph_handles_colr_v1_paint_glyph_without_clipbox() {
+        // Regression: v1 PaintGlyph graphs do not require a top-level
+        // ClipBox. The rasterizer must derive bounds by walking the
+        // paint graph, otherwise an empty base outline makes the
+        // paintable glyph look unrasterizable.
+        let font_data = build_minimal_font_with_colr(build_colr_v1_paint_glyph_no_clip());
+        let font = swash::FontRef::from_index(&font_data, 0).expect("test font parses");
+        let face = face_from_swash_font(font).expect("COLR face parses");
+        assert!(face.glyph_bounding_box(GlyphId(1)).is_none());
+        assert!(face.glyph_bounding_box(GlyphId(2)).is_some());
+
+        let raster = rasterize_font_glyph(font, 1, 32, [255, 255, 255, 255])
+            .expect("COLR v1 PaintGlyph without ClipBox rasterizes");
+
+        assert!(raster.is_color);
+        assert!(raster.data.chunks_exact(4).any(|p| p[3] > 0));
     }
 
     #[test]
@@ -961,7 +2122,7 @@ mod tests {
         out.extend_from_slice(&0u32.to_be_bytes());
         out.extend_from_slice(&0u16.to_be_bytes());
         // base_glyph_list_offset — points right after the v1 header
-        // (32 bytes total: 14 v0 + 4 (v1_base) + 4 (v1_layer) +
+        // (34 bytes total: 14 v0 + 4 (v1_base) + 4 (v1_layer) +
         // 4 (v1_clip) + 4 (varindex) + 4 (variationstore)).
         let list_off: u32 = 34;
         out.extend_from_slice(&list_off.to_be_bytes());
@@ -1017,6 +2178,15 @@ mod tests {
         // < 8 bytes: nothing to parse.
         assert_eq!(first_base_glyph_id(&[], &[]), None);
         assert_eq!(first_base_glyph_id(&[0, 0, 0, 0, 0, 0, 0, 0], &[]), None);
+    }
+
+    #[test]
+    fn base_glyph_ids_falls_back_to_v0_when_v1_list_offset_is_invalid() {
+        // Defends: COLR v1 tables can still carry v0 records. Bad v1
+        // BaseGlyphList metadata should not hide valid v0 base records.
+        let mut colr = build_colr_layer_only(1);
+        colr[14..18].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert_eq!(base_glyph_ids(&colr), Some(vec![1]));
     }
 
     #[test]

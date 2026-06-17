@@ -76,6 +76,7 @@ in
           ./Cargo.lock
           ./Cargo.toml
           ./conformance/shaders/ghostty_cursor_probe.glsl
+          ./misc/mars_terminal_icon.png
         ]
         ++ (map (x: ./. + "/${x}") cargoToml.workspace.members));
     };
