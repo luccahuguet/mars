@@ -6,7 +6,7 @@ delivery, cursor animation, WGPU backend selection, or the desktop wrapper.
 Automated package checks:
 
 ```sh
-tools/yazelix_event_mode_smoke.sh ./result_yazelix_terminal_package
+tools/yazelix_event_mode_smoke.sh ./result_mars_package
 ```
 
 The script verifies that the packaged config does not default to

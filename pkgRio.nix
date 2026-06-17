@@ -8,7 +8,7 @@
   serenityos-emoji-font,
   twitter-color-emoji,
   unwrapped,
-  pname ? "yazelix-terminal",
+  pname ? "mars",
   packageProfile ? "release",
   packageChecked ? true,
   ...
@@ -55,9 +55,9 @@
       family = emojiFontPresets.${name}.family;
       config_roots = emojiFontPresets.${name}.configRoots;
     });
-  yzxtermPackageMetadata = {
+  marsPackageMetadata = {
     schema_version = 1;
-    terminal = "yazelix-terminal";
+    terminal = "mars";
     package_name = pname;
     package_profile = packageProfile;
     checked_package = packageChecked;
@@ -82,9 +82,8 @@
     shader_asset_root = "share/yazelix-terminal/shaders";
     config_roots = configRoots;
     wrapper_commands = {
-      terminal = "bin/yazelix-terminal";
-      desktop = "bin/yazelix-terminal-desktop";
-      rio_compat = "bin/rio";
+      terminal = "bin/mars";
+      desktop = "bin/mars-desktop";
     };
     wrapper_env = {
       profile = "YAZELIX_TERMINAL_PROFILE";
@@ -96,7 +95,7 @@
       appearance = "YAZELIX_TERMINAL_APPEARANCE";
       emoji_font = "YAZELIX_TERMINAL_EMOJI_FONT";
     };
-    main_yazelix_boundary = "Select package/profile by metadata; do not parse yzxterm configs or shader files.";
+    main_yazelix_boundary = "Select package/profile by metadata; do not parse Mars config or shader files.";
   };
 
   inherit (lib.fileset) unions toSource;
@@ -222,33 +221,32 @@ in
         render_yazelix_profile_set "$out/share/yazelix-terminal/emoji/serenityos" \
           "${emojiFontPresets.serenityos.fontDir}" \
           "${emojiFontPresets.serenityos.family}"
-        printf '%s\n' '${builtins.toJSON yzxtermPackageMetadata}' > "$out/share/yazelix-terminal/package-metadata.json"
+        printf '%s\n' '${builtins.toJSON marsPackageMetadata}' > "$out/share/yazelix-terminal/package-metadata.json"
         chmod 644 "$out/share/yazelix-terminal/package-metadata.json"
 
-        makeWrapper "${unwrapped}/bin/rio" "$out/bin/rio" \
+        makeWrapper "${unwrapped}/bin/rio" "$out/bin/mars" \
           --set YAZELIX_TERMINAL_CHILD_ENV_SANITIZE 1 \
           --set YAZELIX_TERMINAL_LD_LIBRARY_PATH_PREFIX "${lib.makeLibraryPath rlinkLibs}" \
           --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath rlinkLibs}"
-        ln -s "$out/bin/rio" "$out/bin/yazelix-terminal"
-        substitute misc/yazelix_terminal_desktop.sh "$out/bin/yazelix-terminal-desktop" \
-          --replace-fail "@yazelix_terminal_binary@" "$out/bin/yazelix-terminal" \
+        substitute misc/yazelix_terminal_desktop.sh "$out/bin/mars-desktop" \
+          --replace-fail "@yazelix_terminal_binary@" "$out/bin/mars" \
           --replace-fail "@yazelix_terminal_config_home@" "$out/share/yazelix-terminal" \
           --replace-fail "@yazelix_terminal_baseline_config_home@" "$out/share/yazelix-terminal/baseline" \
           --replace-fail "@yazelix_terminal_shader_config_home@" "$out/share/yazelix-terminal/profiles/shaders" \
           --replace-fail "@yazelix_terminal_emoji_config_home@" "$out/share/yazelix-terminal/emoji"
-        chmod 755 "$out/bin/yazelix-terminal-desktop"
+        chmod 755 "$out/bin/mars-desktop"
 
         install -dm 755 "$out/share/applications"
         substitute misc/rio.desktop "$out/share/applications/yazelix-terminal.desktop" \
-          --replace-fail "TryExec=rio" "TryExec=$out/bin/yazelix-terminal-desktop" \
-          --replace-fail "Exec=rio" "Exec=$out/bin/yazelix-terminal-desktop" \
+          --replace-fail "TryExec=rio" "TryExec=$out/bin/mars-desktop" \
+          --replace-fail "Exec=rio" "Exec=$out/bin/mars-desktop" \
           --replace-fail "Icon=rio" "Icon=yazelix-terminal" \
           --replace-fail "Name=Rio" "Name=Mars Terminal" \
           --replace-fail "StartupWMClass=Rio" "StartupWMClass=yazelix-terminal"$'\n'"StartupNotify=true"
 
         # Install terminfo files
-        install -dm 755 "$terminfo/share/terminfo/r/"
-        tic -xe xterm-rio,rio,rio-direct -o "$terminfo/share/terminfo" misc/rio.terminfo
+        install -dm 755 "$terminfo/share/terminfo/m/" "$terminfo/share/terminfo/r/"
+        tic -xe xterm-mars,mars,mars-direct,xterm-rio,rio,rio-direct -o "$terminfo/share/terminfo" misc/rio.terminfo
         mkdir -p $out/nix-support
         echo "$terminfo" >> $out/nix-support/propagated-user-env-packages
 
@@ -263,7 +261,7 @@ in
 
     passthru = {
       inherit unwrapped;
-      inherit yzxtermPackageMetadata;
+      inherit marsPackageMetadata;
       runtimeDependencies = rlinkLibs;
       buildInputs = unwrapped.buildInputs or [];
       nativeBuildInputs = unwrapped.nativeBuildInputs or [];
@@ -276,6 +274,6 @@ in
       license = lib.licenses.mit;
       platforms = lib.platforms.unix;
       changelog = "https://github.com/raphamorim/rio/blob/master/CHANGELOG.md";
-      mainProgram = "yazelix-terminal";
+      mainProgram = "mars";
     };
   }

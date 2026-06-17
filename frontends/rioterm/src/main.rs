@@ -43,9 +43,10 @@ use windows_sys::Win32::System::Console::{
 };
 
 const LOG_LEVEL_ENV: &str = "RIO_LOG_LEVEL";
-const RIO_TERM_PROGRAM: &str = "rio";
-const YAZELIX_TERMINAL_HOST_ENV: &str = "YAZELIX_TERMINAL_HOST";
-const YAZELIX_TERMINAL_HOST: &str = "yazelix-terminal";
+const MARS_TERM_PROGRAM: &str = "mars";
+const MARS_TERMINAL_HOST_ENV: &str = "MARS_TERMINAL_HOST";
+const MARS_TERMINAL_HOST: &str = "mars";
+const LEGACY_YAZELIX_TERMINAL_HOST_ENV: &str = "YAZELIX_TERMINAL_HOST";
 const INHERITED_TERMINAL_IDENTITY_ENV: &[&str] = &[
     "ALACRITTY_LOG",
     "ALACRITTY_SOCKET",
@@ -78,13 +79,28 @@ const INHERITED_TERMINAL_IDENTITY_ENV: &[&str] = &[
 #[derive(Debug, PartialEq, Eq)]
 struct ChildTerminalIdentity {
     term_program: &'static str,
-    yazelix_terminal_host: Option<&'static str>,
+    mars_terminal_host: Option<&'static str>,
 }
 
 fn child_terminal_identity(yazelix_mode: bool) -> ChildTerminalIdentity {
     ChildTerminalIdentity {
-        term_program: RIO_TERM_PROGRAM,
-        yazelix_terminal_host: yazelix_mode.then_some(YAZELIX_TERMINAL_HOST),
+        term_program: MARS_TERM_PROGRAM,
+        mars_terminal_host: yazelix_mode.then_some(MARS_TERMINAL_HOST),
+    }
+}
+
+#[cfg(unix)]
+fn select_terminfo(terminfo_exists: impl Fn(&str) -> bool) -> &'static str {
+    if terminfo_exists("xterm-mars") {
+        "xterm-mars"
+    } else if terminfo_exists("mars") {
+        "mars"
+    } else if terminfo_exists("xterm-rio") {
+        "xterm-rio"
+    } else if terminfo_exists("rio") {
+        "rio"
+    } else {
+        "xterm-256color"
     }
 }
 
@@ -106,17 +122,7 @@ pub fn setup_environment_variables(
 
     #[cfg(unix)]
     {
-        let terminfo = match (
-            teletypewriter::terminfo_exists("xterm-rio"),
-            teletypewriter::terminfo_exists("rio"),
-        ) {
-            // In case `xterm-rio` exists we prioritize it
-            (true, _) => "xterm-rio",
-            // If is only `rio` installed (which was the default for versions under 0.2.27)
-            (false, true) => "rio",
-            // If none, then fallback to `xterm-256color`
-            (false, false) => "xterm-256color",
-        };
+        let terminfo = select_terminfo(teletypewriter::terminfo_exists);
 
         let span = tracing::span!(tracing::Level::INFO, "setup_environment_variables");
         let _guard = span.enter();
@@ -125,15 +131,16 @@ pub fn setup_environment_variables(
     }
 
     // TERM/TERM_PROGRAM are capability signals consumed by tools like Yazi.
-    // Yazelix host identity lives in its own marker so child tools still
-    // detect the Rio protocol surface.
+    // Mars owns product identity; Rio compatibility remains in terminfo aliases
+    // and upstream-compatible config/protocol behavior.
     let identity = child_terminal_identity(yazelix_mode);
     std::env::set_var("TERM_PROGRAM", identity.term_program);
     std::env::set_var("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
-    if let Some(host) = identity.yazelix_terminal_host {
-        std::env::set_var(YAZELIX_TERMINAL_HOST_ENV, host);
+    std::env::remove_var(LEGACY_YAZELIX_TERMINAL_HOST_ENV);
+    if let Some(host) = identity.mars_terminal_host {
+        std::env::set_var(MARS_TERMINAL_HOST_ENV, host);
     } else {
-        std::env::remove_var(YAZELIX_TERMINAL_HOST_ENV);
+        std::env::remove_var(MARS_TERMINAL_HOST_ENV);
     }
 
     std::env::set_var("COLORTERM", "truecolor");
@@ -395,15 +402,54 @@ mod tests {
     }
 
     #[test]
-    // Defends: Child applications detect Rio protocols while Yazelix host mode remains visible separately.
-    fn yazelix_mode_keeps_rio_child_terminal_identity() {
+    // Defends: Child applications see Mars-owned identity while compatibility remains in terminfo/protocol behavior.
+    fn yazelix_mode_uses_mars_child_terminal_identity() {
         assert_eq!(
             child_terminal_identity(true),
             ChildTerminalIdentity {
-                term_program: "rio",
-                yazelix_terminal_host: Some("yazelix-terminal"),
+                term_program: "mars",
+                mars_terminal_host: Some("mars"),
             }
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    // Defends: Mars terminfo is preferred while Rio aliases remain a compatibility fallback.
+    fn terminfo_selection_prefers_mars_before_rio_aliases() {
+        let has_xterm_mars = |candidate: &str| candidate == "xterm-mars";
+        let has_mars = |candidate: &str| candidate == "mars";
+        let has_xterm_rio = |candidate: &str| candidate == "xterm-rio";
+        let has_rio = |candidate: &str| candidate == "rio";
+        let has_none = |_candidate: &str| false;
+
+        assert_eq!(select_terminfo(has_xterm_mars), "xterm-mars");
+        assert_eq!(select_terminfo(has_mars), "mars");
+        assert_eq!(select_terminfo(has_xterm_rio), "xterm-rio");
+        assert_eq!(select_terminfo(has_rio), "rio");
+        assert_eq!(select_terminfo(has_none), "xterm-256color");
+    }
+
+    #[test]
+    // Regression: stale pre-Mars host markers must not leak into child processes beside MARS_TERMINAL_HOST.
+    fn setup_environment_scrubs_legacy_yazelix_terminal_host_marker() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_mars_host = std::env::var(MARS_TERMINAL_HOST_ENV).ok();
+        let previous_legacy_host = std::env::var(LEGACY_YAZELIX_TERMINAL_HOST_ENV).ok();
+
+        std::env::set_var(MARS_TERMINAL_HOST_ENV, "stale-mars");
+        std::env::set_var(LEGACY_YAZELIX_TERMINAL_HOST_ENV, "stale-yazelix");
+
+        setup_environment_variables(&rio_backend::config::Config::default(), true);
+
+        assert_eq!(
+            std::env::var(MARS_TERMINAL_HOST_ENV).as_deref(),
+            Ok(MARS_TERMINAL_HOST)
+        );
+        assert!(std::env::var_os(LEGACY_YAZELIX_TERMINAL_HOST_ENV).is_none());
+
+        restore_env(MARS_TERMINAL_HOST_ENV, previous_mars_host);
+        restore_env(LEGACY_YAZELIX_TERMINAL_HOST_ENV, previous_legacy_host);
     }
 
     #[test]

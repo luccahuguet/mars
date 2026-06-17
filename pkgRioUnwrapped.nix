@@ -23,7 +23,7 @@
   withWayland ? !stdenv.isDarwin,
   wayland,
   shaderc,
-  pname ? "yazelix-terminal-unwrapped",
+  pname ? "mars-unwrapped",
   buildType ? "release",
   doCheck ? true,
   ...

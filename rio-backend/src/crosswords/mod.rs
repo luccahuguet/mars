@@ -4469,7 +4469,7 @@ impl<U: EventListener> Handler for Crosswords<U> {
     fn report_version(&mut self) {
         trace!("Reporting terminal version (XTVERSION)");
         let version = env!("CARGO_PKG_VERSION");
-        let text = format!("\x1bP>|Rio {version}\x1b\\");
+        let text = format!("\x1bP>|Mars {version}\x1b\\");
         self.event_proxy
             .send_event(RioEvent::PtyWrite(self.route_id, text), self.window_id);
     }
@@ -9625,17 +9625,17 @@ mod tests {
         // Verify the event is PtyWrite with the correct format
         match &captured_events[0] {
             RioEvent::PtyWrite(_route_id, text) => {
-                // Expected format: DCS > | Rio {version} ST
+                // Expected format: DCS > | Mars {version} ST
                 // DCS = \x1bP, ST = \x1b\\
                 assert!(
-                    text.starts_with("\x1bP>|Rio "),
-                    "Should start with DCS>|Rio"
+                    text.starts_with("\x1bP>|Mars "),
+                    "Should start with DCS>|Mars"
                 );
                 assert!(text.ends_with("\x1b\\"), "Should end with ST");
 
                 // Extract version from the response
                 let version = env!("CARGO_PKG_VERSION");
-                let expected = format!("\x1bP>|Rio {}\x1b\\", version);
+                let expected = format!("\x1bP>|Mars {}\x1b\\", version);
                 assert_eq!(
                     text, &expected,
                     "XTVERSION response should match expected format"

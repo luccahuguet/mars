@@ -40,7 +40,7 @@
         fastUnwrappedPackageFor = rust-toolchain:
           pkgs.callPackage ./pkgRioUnwrapped.nix {
             inherit rust-toolchain;
-            pname = "yazelix-terminal-fast-unwrapped";
+            pname = "mars-fast-unwrapped";
             buildType = "fast";
             doCheck = false;
           };
@@ -53,7 +53,7 @@
         fastPackageFor = unwrapped:
           pkgs.callPackage ./pkgRio.nix {
             inherit unwrapped;
-            pname = "yazelix-terminal-fast";
+            pname = "mars-fast";
             packageProfile = "fast";
             packageChecked = false;
           };
@@ -69,7 +69,7 @@
         fastPackage = fastPackageFor fastUnwrappedPackage;
         appFor = package: {
           type = "app";
-          program = "${package}/bin/yazelix-terminal";
+          program = "${package}/bin/mars";
         };
         protocolConformanceTool = pkgs.rustPlatform.buildRustPackage {
           pname = "yazelix-protocol-conformance";
@@ -104,49 +104,47 @@
         };
 
         overlayAttrs = {
-          yazelix-terminal = self'.packages."yazelix-terminal";
-          yazelix-terminal-unwrapped = self'.packages."yazelix-terminal-unwrapped";
-          yazelix-terminal-fast = self'.packages."yazelix-terminal-fast";
-          rio = self'.packages."yazelix-terminal";
-          rio-unwrapped = self'.packages."yazelix-terminal-unwrapped";
-          rio-fast = self'.packages."yazelix-terminal-fast";
+          mars = self'.packages.mars;
+          mars-unwrapped = self'.packages."mars-unwrapped";
+          mars-fast = self'.packages."mars-fast";
+          mars-fast-unwrapped = self'.packages."mars-fast-unwrapped";
         };
         packages = {
           default = defaultPackage;
-          yazelix-terminal = defaultPackage;
-          yazelix-terminal-unwrapped = defaultUnwrappedPackage;
-          yazelix-terminal-fast = fastPackage;
-          yazelix-terminal-fast-unwrapped = fastUnwrappedPackage;
-          rio = defaultPackage;
-          rio-unwrapped = defaultUnwrappedPackage;
-          rio-fast = fastPackage;
-          rio-fast-unwrapped = fastUnwrappedPackage;
-          yazelix-terminal-msrv = msrvPackage;
-          yazelix-terminal-msrv-unwrapped = msrvUnwrappedPackage;
-          yazelix-terminal-stable = stablePackage;
-          yazelix-terminal-stable-unwrapped = stableUnwrappedPackage;
-          yazelix-terminal-nightly = nightlyPackage;
-          yazelix-terminal-nightly-unwrapped = nightlyUnwrappedPackage;
-          rio-msrv = msrvPackage;
-          rio-msrv-unwrapped = msrvUnwrappedPackage;
-          rio-stable = stablePackage;
-          rio-stable-unwrapped = stableUnwrappedPackage;
-          rio-nightly = nightlyPackage;
-          rio-nightly-unwrapped = nightlyUnwrappedPackage;
+          mars = defaultPackage;
+          mars-unwrapped = defaultUnwrappedPackage;
+          mars-fast = fastPackage;
+          mars-fast-unwrapped = fastUnwrappedPackage;
+          mars-msrv = msrvPackage;
+          mars-msrv-unwrapped = msrvUnwrappedPackage;
+          mars-stable = stablePackage;
+          mars-stable-unwrapped = stableUnwrappedPackage;
+          mars-nightly = nightlyPackage;
+          mars-nightly-unwrapped = nightlyUnwrappedPackage;
           yazelix-protocol-conformance = protocolConformanceTool;
         };
         apps = {
-          default = appFor self'.packages."yazelix-terminal";
-          yazelix-terminal = appFor self'.packages."yazelix-terminal";
-          yazelix-terminal-fast = appFor self'.packages."yazelix-terminal-fast";
-          rio = appFor self'.packages.rio;
-          rio-fast = appFor self'.packages."rio-fast";
+          default = appFor self'.packages.mars;
+          mars = appFor self'.packages.mars;
+          mars-fast = appFor self'.packages."mars-fast";
           yazelix-protocol-conformance = toolAppFor protocolConformanceTool;
         };
         checks = {
-          package = self'.packages."yazelix-terminal";
-          package_layout = pkgs.runCommand "yazelix-terminal-package-layout" {} ''
-            package=${self'.packages."yazelix-terminal"}
+          package = self'.packages.mars;
+          package_layout = pkgs.runCommand "mars-package-layout" {} ''
+            package=${self'.packages.mars}
+            for path in bin/mars bin/mars-desktop; do
+              if [ ! -x "$package/$path" ]; then
+                echo "missing executable package layout file: $path" >&2
+                exit 1
+              fi
+            done
+            for stale_path in bin/rio bin/yazelix-terminal bin/yazelix-terminal-desktop; do
+              if [ -e "$package/$stale_path" ]; then
+                echo "stale package layout file still exists: $stale_path" >&2
+                exit 1
+              fi
+            done
             config_paths="\
               share/yazelix-terminal/config.toml \
               share/yazelix-terminal/baseline/config.toml \
@@ -175,7 +173,7 @@
             done
             touch "$out"
           '';
-          conformance = pkgs.runCommand "yazelix-terminal-conformance" {} ''
+          conformance = pkgs.runCommand "mars-conformance" {} ''
             cd ${./.}
             ${protocolConformanceTool}/bin/yazelix-protocol-conformance verify
             touch "$out"

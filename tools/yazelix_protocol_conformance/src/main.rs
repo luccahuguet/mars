@@ -654,7 +654,7 @@ fn validate_package_metadata_sources(root: &Path) -> Result<()> {
             vec![
                 r#"packageProfile ? "release""#,
                 "packageChecked ? true",
-                "yzxtermPackageMetadata",
+                "marsPackageMetadata",
                 "package_profile = packageProfile",
                 "checked_package = packageChecked",
                 "supported_appearance_modes",
@@ -993,7 +993,7 @@ fn command_launch_cpu_screenshot(
         .arg("-c")
         .arg(rio_bin)
         .arg("--app-id")
-        .arg("yazelix-terminal-protocol-conformance")
+        .arg("mars-protocol-conformance")
         .arg("--title-placeholder")
         .arg("Mars Terminal Protocol Conformance")
         .arg("-e")
@@ -1002,7 +1002,7 @@ fn command_launch_cpu_screenshot(
         .arg("--norc")
         .arg("-c")
         .arg(format!(
-            "printf 'mars terminal protocol conformance\nyazelix-terminal package surface\nCPU renderer screenshot probe\nPID $$\n'; sleep {sleep_seconds}"
+            "printf 'mars terminal protocol conformance\nmars package surface\nCPU renderer screenshot probe\nPID $$\n'; sleep {sleep_seconds}"
         ))
         .current_dir(root)
         .env("RIO_CONFIG_HOME", &config_dir);
@@ -1041,7 +1041,7 @@ fn command_launch_wgpu_shader_screenshot(
         .arg("-c")
         .arg(rio_bin)
         .arg("--app-id")
-        .arg("yazelix-terminal-shader-probe")
+        .arg("mars-shader-probe")
         .arg("--title-placeholder")
         .arg("Mars Terminal Shader Probe")
         .arg("-e")
@@ -1050,7 +1050,7 @@ fn command_launch_wgpu_shader_screenshot(
         .arg("--norc")
         .arg("-c")
         .arg(format!(
-            "printf 'mars terminal shader probe\nyazelix-terminal package surface\nGhostty cursor uniforms via WGPU\nPID $$\n'; sleep {sleep_seconds}"
+            "printf 'mars terminal shader probe\nmars package surface\nGhostty cursor uniforms via WGPU\nPID $$\n'; sleep {sleep_seconds}"
         ))
         .current_dir(root)
         .env("RIO_CONFIG_HOME", &config_dir)

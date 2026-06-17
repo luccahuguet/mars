@@ -54,16 +54,16 @@ outputs on pushes to `main` and manual runs:
 
 ```sh
 nix build \
-  .#packages.x86_64-linux.yazelix-terminal \
-  .#packages.x86_64-linux.yazelix-terminal-fast
+  .#packages.x86_64-linux.mars \
+  .#packages.x86_64-linux.mars-fast
 ```
 
 To push from a local machine for testing:
 
 ```sh
 export CACHIX_AUTH_TOKEN='...'
-nix build .#yazelix-terminal -o result_yazelix_terminal_package
-cachix push luccahuguet-yazelix-terminal result_yazelix_terminal_package
+nix build .#mars -o result_mars_package
+cachix push luccahuguet-yazelix-terminal result_mars_package
 ```
 
 ## User Setup
@@ -101,14 +101,14 @@ After CI has pushed a build for the current revision, verify substitution from a
 machine that has the cache configured:
 
 ```sh
-nix build .#yazelix-terminal \
+nix build .#mars \
   --option substituters 'https://cache.nixos.org https://luccahuguet-yazelix-terminal.cachix.org' \
   --option trusted-public-keys 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= luccahuguet-yazelix-terminal.cachix.org-1:NwYldFPOxjg4cjLoU9jZW9rrd/Jj60PzksvRXhDy574=' \
   --print-build-logs
 ```
 
-Expected result: Nix downloads the `yazelix-terminal` and
-`yazelix-terminal-unwrapped` paths instead of compiling `rioterm` locally.
+Expected result: Nix downloads the `mars` and `mars-unwrapped` paths instead
+of compiling `rioterm` locally.
 
 If Nix still builds locally, check:
 

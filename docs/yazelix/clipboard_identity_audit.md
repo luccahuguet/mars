@@ -7,15 +7,13 @@ Current protocol state:
 - OSC 52 stores require valid base64 and valid UTF-8
 - OSC 52 stores reject encoded payloads above 2 MiB and decoded payloads above
   1 MiB
-- XTVERSION replies as `Rio <version>` because the terminal core is still Rio
-- Yazelix host mode keeps `TERM_PROGRAM=rio` so child applications detect the
-  Rio protocol surface
-- Yazelix host mode sets `YAZELIX_TERMINAL_HOST=yazelix-terminal` for
-  fork-specific detection
+- XTVERSION replies as `Mars <version>`
+- Yazelix host mode sets `TERM_PROGRAM=mars` for product identity
+- Yazelix host mode sets `MARS_TERMINAL_HOST=mars` for fork-specific detection
 - Yazelix host mode defaults the Wayland app id / X11 class to
   `yazelix-terminal`
-- `TERM` still follows Rio's packaged terminfo discovery:
-  `xterm-rio`, `rio`, then `xterm-256color`
+- `TERM` prefers Mars packaged terminfo while keeping Rio aliases:
+  `xterm-mars`, `mars`, `xterm-rio`, `rio`, then `xterm-256color`
 
 Open audit items:
 
@@ -24,5 +22,5 @@ Open audit items:
   are implemented
 - OSC 52 read/write should grow an explicit user policy surface before this
   fork is used as a daily-driver terminal
-- XTVERSION/DA naming should stay conservative until the fork has its own
-  packaged terminfo and release identity
+- DA naming should stay conservative until Mars has broader ecosystem
+  registration evidence beyond the packaged terminfo aliases

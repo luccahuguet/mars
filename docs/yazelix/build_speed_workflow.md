@@ -52,11 +52,11 @@ Use the fast package when validating local desktop entries, wrapper scripts, or
 launcher behavior before paying for the full release profile:
 
 ```sh
-nix build .#yazelix-terminal-fast -o result_yazelix_terminal_fast_package
+nix build .#mars-fast -o result_mars_fast_package
 ```
 
-`yazelix-terminal-fast` has the same wrapped desktop package shape as
-`yazelix-terminal`, but its unwrapped Rust derivation uses Cargo profile `fast`
+`mars-fast` has the same wrapped desktop package shape as
+`mars`, but its unwrapped Rust derivation uses Cargo profile `fast`
 and sets `doCheck = false`. The fast profile disables LTO, avoids packed full
 debug info, uses many codegen units, and keeps only modest `opt-level = 1`
 optimization. It is for maintainer smoke testing, not release evidence.
@@ -71,21 +71,21 @@ nix run .#yzxterm_fast -- launch
 ```
 
 The normal main-repo `#runtime_yzxterm` and Home Manager default path still use
-the checked `yazelix-terminal` package and remain the release gate.
+the checked `mars` package and remain the release gate.
 
-Wrapper-only changes should rebuild only the cheap `yazelix-terminal` wrapper
-derivation. The Rust compile lives in `yazelix-terminal-unwrapped`, while the
+Wrapper-only changes should rebuild only the cheap `mars` wrapper
+derivation. The Rust compile lives in `mars-unwrapped`, while the
 desktop file, icon, terminfo, app-id wrapper, and graphics-wrapper launcher live
-in `yazelix-terminal`.
+in `mars`.
 
 ## Release Gate
 
 Use the checked package before claiming package correctness:
 
 ```sh
-nix build .#yazelix-terminal -o result_yazelix_terminal_package
-desktop-file-validate result_yazelix_terminal_package/share/applications/yazelix-terminal.desktop
-result_yazelix_terminal_package/bin/yazelix-terminal --version
+nix build .#mars -o result_mars_package
+desktop-file-validate result_mars_package/share/applications/yazelix-terminal.desktop
+result_mars_package/bin/mars --version
 ```
 
 Use the protocol conformance harness when parser/protocol behavior changed:

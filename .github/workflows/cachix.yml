@@ -44,18 +44,18 @@ jobs:
           pushFilter: '(-source$|\.drv$)'
       - name: Check Cachix write access
         run: |
-          probe_path="$(nix eval --raw --expr 'builtins.toFile "yazelix-terminal-cachix-write-probe" "ok\n"')"
+          probe_path="$(nix eval --raw --expr 'builtins.toFile "mars-cachix-write-probe" "ok\n"')"
           cachix push luccahuguet-yazelix-terminal "$probe_path"
       - name: Build terminal packages
         run: |
           nix build \
-            .#packages.x86_64-linux.yazelix-terminal \
-            .#packages.x86_64-linux.yazelix-terminal-fast \
+            .#packages.x86_64-linux.mars \
+            .#packages.x86_64-linux.mars-fast \
             --no-link \
             --print-out-paths \
             --max-jobs auto \
             --build-max-jobs auto \
-            | tee "$RUNNER_TEMP/yazelix-terminal-paths"
+            | tee "$RUNNER_TEMP/mars-paths"
       - name: Push terminal packages
         run: |
-          xargs -r cachix push luccahuguet-yazelix-terminal < "$RUNNER_TEMP/yazelix-terminal-paths"
+          xargs -r cachix push luccahuguet-yazelix-terminal < "$RUNNER_TEMP/mars-paths"

@@ -1,8 +1,11 @@
-xterm-rio,
+xterm-mars|Mars terminal xterm entry,
     use=rio+base,
 
-rio,
-    use=xterm-rio,
+xterm-rio|Rio compatibility alias for xterm-mars,
+    use=xterm-mars,
+
+mars|Mars terminal,
+    use=xterm-mars,
     rs1=\Ec\E]104\007,
     ccc,
     colors#0x100, pairs#0x7FFF,
@@ -102,3 +105,12 @@ rio+base,
     Sync=\EP=%p1%ds\E\\,
     XF, kxIN=\E[I, kxOUT=\E[O,
     BD=\E[?2004l, BE=\E[?2004h, PE=\E[201~, PS=\E[200~,
+
+mars-direct|Mars terminal direct-color alias,
+    use=mars,
+
+rio|Rio compatibility alias for Mars,
+    use=mars,
+
+rio-direct|Rio direct-color compatibility alias for Mars,
+    use=mars,

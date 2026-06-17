@@ -2,7 +2,7 @@
 
 Born from Rio. Built for Mars
 
-Mars Terminal is an experimental Yazelix-led Rio fork. Current package and integration surfaces still use `yazelix-terminal` and `yzxterm` while the rename stays staged
+Mars Terminal is an experimental Yazelix-led Rio fork. The child package surface uses `mars`; main Yazelix still consumes it through the staged `yzxterm` runtime variant while the wider runtime rename stays staged
 
 Mars explores a first-party Rust terminal path with Yazelix-controlled package metadata, profiles, protocols, notifications, Kitty graphics, and cursor-shader boundaries. It aims to support useful modern terminal protocols broadly, stay aligned with Kitty protocol specs where they define the surface, use Ghostty-inspired behavior and quality targets, and keep development contract-driven and agent-friendly
 
@@ -11,7 +11,7 @@ Mars explores a first-party Rust terminal path with Yazelix-controlled package m
 | Upstream project | Rio |
 | Fork category | Experimental active Rio fork |
 | Why this fork exists | Yazelix needs a Rust terminal it can evolve as a first-party runtime, with broad protocol coverage, runtime integration, tighter control, customization, and contract-driven validation |
-| Current Yazelix delta | `yazelix-terminal` and `yzxterm` package/profile names, desktop wrapper, package metadata passthru, generated profile templates, Rio trail defaults, packaged emoji/Nerd Font glyph fallback, `yazelix-cursors` shader support, BELL/terminal notification behavior, Kitty graphics support, and Ghostty-compatible shader ABI |
+| Current Yazelix delta | `mars` package names, the staged `yzxterm` main-runtime profile, desktop wrapper, package metadata passthru, generated profile templates, Rio trail defaults, packaged emoji/Nerd Font glyph fallback, `yazelix-cursors` shader support, BELL/terminal notification behavior, Kitty graphics support, and Ghostty-compatible shader ABI |
 | Non-goals | This fork does not own the full Yazelix workspace, Zellij/Yazi/Helix integration policy, or compatibility shims in the main repo |
 | Standalone support | Supported for experimental users through the flake package and app outputs; normal Yazelix users consume it through main-repo runtime outputs |
 | Upstream sync cadence | Monthly while dogfooding, and before any yzxterm release-gate decision |
@@ -35,25 +35,23 @@ or Home Manager rebuild.
 
 ## Yazelix Package Surface
 
-The flake exposes the Yazelix-owned package and app names while keeping `rio`
-aliases for compatibility:
+The flake exposes Mars-owned package and app names:
 
 ```sh
-nix build .#yazelix-terminal -o result_yazelix_terminal_package
-nix run .#yazelix-terminal -- --version
+nix build .#mars -o result_mars_package
+nix run .#mars -- --version
 ```
 
 Useful package outputs:
 
-- `.#yazelix-terminal`: checked package with the desktop wrapper and full checks
-- `.#yazelix-terminal-fast`: same wrapper shape using the maintainer fast Cargo profile for local iteration
-- `.#yazelix-terminal-unwrapped`: unwrapped Rio-derived binary
-- `.#rio`: compatibility alias to `.#yazelix-terminal`
+- `.#mars`: checked package with the desktop wrapper and full checks
+- `.#mars-fast`: same wrapper shape using the maintainer fast Cargo profile for local iteration
+- `.#mars-unwrapped`: unwrapped Rio-derived binary
 
 The package installs:
 
-- `bin/yazelix-terminal`
-- `bin/yazelix-terminal-desktop`
+- `bin/mars`
+- `bin/mars-desktop`
 - `share/applications/yazelix-terminal.desktop`
 - `share/yazelix-terminal/config.toml`
 - `share/yazelix-terminal/baseline/config.toml`
@@ -124,8 +122,9 @@ Wrapper override knobs:
 `--yazelix` host mode keeps Zellij, Yazi, and Helix as the workspace stack while
 the terminal owns modern rendering and terminal protocols. In host mode:
 
-- child applications still see Rio-compatible terminal identity for capability detection
-- `YAZELIX_TERMINAL_HOST=yazelix-terminal` marks the fork-specific host
+- child applications see Mars-owned terminal identity through `TERM_PROGRAM=mars`
+- packaged terminfo prefers `xterm-mars` and `mars` while keeping `xterm-rio` and `rio` aliases for Rio-compatible capability detection
+- `MARS_TERMINAL_HOST=mars` marks the fork-specific host
 - inherited terminal identity markers are scrubbed before spawning the child
 - Rio native split/config-editor ownership is disabled for Yazelix sessions
 
@@ -150,9 +149,9 @@ placements. Stack validation notes live in
 Release-oriented checks:
 
 ```sh
-nix build .#yazelix-terminal -o result_yazelix_terminal_package
-desktop-file-validate result_yazelix_terminal_package/share/applications/yazelix-terminal.desktop
-result_yazelix_terminal_package/bin/yazelix-terminal --version
+nix build .#mars -o result_mars_package
+desktop-file-validate result_mars_package/share/applications/yazelix-terminal.desktop
+result_mars_package/bin/mars --version
 nix run .#yazelix-protocol-conformance -- verify
 ```
 

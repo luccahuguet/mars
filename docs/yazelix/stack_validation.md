@@ -1,7 +1,7 @@
 # Yazelix Stack Validation
 
 This note records the current validation state for running Yazelix inside
-`yazelix-terminal` host mode.
+Mars host mode.
 
 ## Environment
 
@@ -12,12 +12,12 @@ This note records the current validation state for running Yazelix inside
 
 ## Terminal Identity
 
-`--yazelix` mode uses Rio's terminal identity for child capability detection:
+`--yazelix` mode uses Mars product identity with Rio-compatible terminfo aliases:
 
-- `TERM=rio`
-- `TERM_PROGRAM=rio`
+- `TERM=xterm-mars` when packaged terminfo is available
+- `TERM_PROGRAM=mars`
 - `TERM_PROGRAM_VERSION=0.4.6`
-- `YAZELIX_TERMINAL_HOST=yazelix-terminal`
+- `MARS_TERMINAL_HOST=mars`
 
 The host mode scrubs inherited terminal identity markers such as Ghostty,
 Kitty, WezTerm, Alacritty, Konsole, Windows Terminal, and inherited
@@ -83,10 +83,10 @@ nix develop -c cargo test -p rioterm --features 'rio-window/x11 rio-window/wayla
 nix develop -c cargo test -p rio-backend --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' kitty_virtual -- --nocapture
 nix develop -c cargo test -p sugarloaf --features 'rio-window/x11 rio-window/wayland rio-window/wayland-dlopen' image_shaders_use_origin_size_source_rect -- --nocapture
 nix develop -c cargo build -p rioterm --features wgpu
-nix build .#yazelix-terminal -o result_yazelix_terminal_package
+nix build .#mars -o result_mars_package
 nix run .#yazelix-protocol-conformance -- verify
 git diff --check
 ```
 
 The native desktop package was also smoke-tested with direct Yazi image and PDF
-fixture directories under `result_yazelix_terminal_package/bin/yazelix-terminal-desktop`.
+fixture directories under `result_mars_package/bin/mars-desktop`.

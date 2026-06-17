@@ -7,7 +7,7 @@ die() {
 }
 
 usage() {
-  printf 'usage: %s /path/to/yazelix-terminal-package\n' "$0" >&2
+  printf 'usage: %s /path/to/mars-package\n' "$0" >&2
   printf '   or: YAZELIX_TERMINAL_PACKAGE=/path/to/package %s\n' "$0" >&2
 }
 
@@ -20,7 +20,7 @@ fi
 config="$package_dir/share/yazelix-terminal/config.toml"
 baseline_config="$package_dir/share/yazelix-terminal/baseline/config.toml"
 shader_config="$package_dir/share/yazelix-terminal/profiles/shaders/config.toml"
-wrapper="$package_dir/bin/yazelix-terminal-desktop"
+wrapper="$package_dir/bin/mars-desktop"
 
 [ -r "$config" ] || die "packaged config is not readable: $config"
 [ -r "$baseline_config" ] || die "packaged baseline config is not readable: $baseline_config"
