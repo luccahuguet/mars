@@ -1378,9 +1378,9 @@ mod tests {
         let strip_bottom = em_top - strip_height;
         let mut v = Vec::new();
         v.extend_from_slice(&1i16.to_be_bytes()); // numberOfContours
-        // Declare bbox as the full em — not just the inked strip — so
-        // the rasterised pixmap has empty space below the strip we
-        // can sample as "bottom".
+                                                  // Declare bbox as the full em — not just the inked strip — so
+                                                  // the rasterised pixmap has empty space below the strip we
+                                                  // can sample as "bottom".
         v.extend_from_slice(&0i16.to_be_bytes()); // xMin
         v.extend_from_slice(&0i16.to_be_bytes()); // yMin
         v.extend_from_slice(&em_top.to_be_bytes()); // xMax
@@ -1388,9 +1388,9 @@ mod tests {
         v.extend_from_slice(&3u16.to_be_bytes()); // endPtsOfContours[0] = 3 (4 points)
         v.extend_from_slice(&0u16.to_be_bytes()); // instructionLength = 0
         v.extend_from_slice(&[0x01; 4]); // 4 flags, all on-curve, full i16 deltas
-        // Points walk the rectangle [0, strip_bottom] → [em_top, strip_bottom]
-        // → [em_top, em_top] → [0, em_top]. Deltas from previous point
-        // (first delta is from origin (0,0)).
+                                         // Points walk the rectangle [0, strip_bottom] → [em_top, strip_bottom]
+                                         // → [em_top, em_top] → [0, em_top]. Deltas from previous point
+                                         // (first delta is from origin (0,0)).
         let xs = [0i16, em_top, 0, -em_top];
         let ys = [strip_bottom, 0, strip_height, 0];
         for x in &xs {

@@ -1295,8 +1295,8 @@ fn rasterize_swash_glyph(
     wght_variation: Option<f32>,
 ) -> Option<SwashRawGlyph> {
     use swash::scale::{
-        Render, Source, StrikeWith,
         image::{Content, Image as GlyphImage},
+        Render, Source, StrikeWith,
     };
     use swash::zeno::{Angle, Format, Transform};
     use swash::{FontRef, Setting};

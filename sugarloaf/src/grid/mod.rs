@@ -32,8 +32,8 @@ pub mod webgpu;
 use crate::context::{Context, ContextType};
 
 pub use atlas::{
-    AtlasSlot, GlyphKey, RasterizedGlyph, premultiply_straight_rgba_in_place,
-    swash_color_source_needs_premultiply,
+    premultiply_straight_rgba_in_place, swash_color_source_needs_premultiply, AtlasSlot,
+    GlyphKey, RasterizedGlyph,
 };
 pub use cell::{CellBg, CellText, GridUniforms, MAX_CURSOR_REVERSE_CELLS};
 

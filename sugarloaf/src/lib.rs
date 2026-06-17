@@ -15,12 +15,12 @@ pub mod text;
 /// downstream crates have one stable place to import from.
 pub mod glyph_protocol {
     pub use crate::font::glyph_registry::{
-        CUSTOM_GLYPH_FONT_ID, CUSTOM_GLYPH_FONT_ID_U32, GLOSSARY_CAPACITY, GlyphRegistry,
-        RegisterRejection, RegisteredGlyph, StoredPayload, is_pua, pack_atlas_glyph_id,
+        is_pua, pack_atlas_glyph_id, GlyphRegistry, RegisterRejection, RegisteredGlyph,
+        StoredPayload, CUSTOM_GLYPH_FONT_ID, CUSTOM_GLYPH_FONT_ID_U32, GLOSSARY_CAPACITY,
     };
     pub use crate::renderer::image_cache::colr_raster::{
-        RasterizedPayload, payload_depends_on_foreground, rasterize_font_glyph,
-        rasterize_payload,
+        payload_depends_on_foreground, rasterize_font_glyph, rasterize_payload,
+        RasterizedPayload,
     };
 }
 
@@ -37,16 +37,16 @@ pub use swash::{Attributes, Stretch, Style, Weight};
 
 pub use crate::font_cache::ResolvedGlyph;
 pub use crate::sugarloaf::{
-    Color, Colorspace, Sugarloaf, SugarloafBackend, SugarloafErrors, SugarloafRenderer,
-    SugarloafWindow, SugarloafWindowSize, SugarloafWithErrors,
     graphics::{
         ColorType, Graphic, GraphicData, GraphicDataEntry, GraphicId, GraphicOverlay,
-        Graphics, MAX_GRAPHIC_DIMENSIONS, ResizeCommand, ResizeParameter,
+        Graphics, ResizeCommand, ResizeParameter, MAX_GRAPHIC_DIMENSIONS,
     },
     primitives::{
-        Corners, CursorKind, ImageProperties, Quad, Rect, SugarCursor,
-        is_private_user_area,
+        is_private_user_area, Corners, CursorKind, ImageProperties, Quad, Rect,
+        SugarCursor,
     },
+    Color, Colorspace, Sugarloaf, SugarloafBackend, SugarloafErrors, SugarloafRenderer,
+    SugarloafWindow, SugarloafWindowSize, SugarloafWithErrors,
 };
 // `Filter` is the librashader CRT/scanline-filter wrapper — wgpu-only.
 #[cfg(feature = "wgpu")]
