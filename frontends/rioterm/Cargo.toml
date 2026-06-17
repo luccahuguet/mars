@@ -118,7 +118,7 @@ assets = [
     ["../../target/release/rio", "usr/local/bin/", "755"],
     ["../../misc/rio.desktop", "usr/share/applications/", "644"],
     ["../../misc/rio.terminfo", "usr/share/info/", "644"],
-    ["../../misc/mars_terminal_icon.png", "usr/share/icons/hicolor/1024x1024/apps/rio.png", "644"],
+    ["../../misc/mars_terminal_icon.png", "usr/share/icons/hicolor/1024x1024/apps/mars.png", "644"],
     ["../../README.md", "usr/share/doc/rio/", "644"],
     ["../../LICENSE", "usr/share/doc/rio/", "664"]
 ]

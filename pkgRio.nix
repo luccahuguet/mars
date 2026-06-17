@@ -129,8 +129,6 @@ in
         runHook preInstall
 
         install -D -m 644 misc/mars_terminal_icon.png \
-                          $out/share/icons/hicolor/1024x1024/apps/rio.png
-        install -D -m 644 misc/mars_terminal_icon.png \
                           $out/share/icons/hicolor/1024x1024/apps/mars.png
         install -D -m 644 sugarloaf/src/font/resources/SymbolsNerdFontMono/SymbolsNerdFontMono-Regular.ttf \
                           $out/share/mars/fonts/SymbolsNerdFontMono-Regular.ttf

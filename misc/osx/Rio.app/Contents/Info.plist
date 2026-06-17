@@ -91,7 +91,7 @@
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleIconFile</key>
-  <string>icon</string>
+  <string>mars</string>
   <key>MDItemKeywords</key>
   <string>Terminal</string>
   <key>CFBundleShortVersionString</key>
