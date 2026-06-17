@@ -1,7 +1,8 @@
 # Yzxterm Package Metadata
 
-Yazelix Terminal exposes explicit metadata so main Yazelix can select packages
-and profiles without parsing yzxterm config files or shader assets.
+Mars Terminal's current package surface exposes explicit metadata so main
+Yazelix can select packages and profiles without parsing yzxterm config files
+or shader assets.
 
 The metadata is available in two forms:
 

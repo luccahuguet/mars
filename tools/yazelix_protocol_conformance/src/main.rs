@@ -995,14 +995,14 @@ fn command_launch_cpu_screenshot(
         .arg("--app-id")
         .arg("yazelix-terminal-protocol-conformance")
         .arg("--title-placeholder")
-        .arg("Yazelix Terminal Protocol Conformance")
+        .arg("Mars Terminal Protocol Conformance")
         .arg("-e")
         .arg("bash")
         .arg("--noprofile")
         .arg("--norc")
         .arg("-c")
         .arg(format!(
-            "printf 'yazelix-terminal protocol conformance\nCPU renderer screenshot probe\nPID $$\n'; sleep {sleep_seconds}"
+            "printf 'mars terminal protocol conformance\nyazelix-terminal package surface\nCPU renderer screenshot probe\nPID $$\n'; sleep {sleep_seconds}"
         ))
         .current_dir(root)
         .env("RIO_CONFIG_HOME", &config_dir);
@@ -1043,14 +1043,14 @@ fn command_launch_wgpu_shader_screenshot(
         .arg("--app-id")
         .arg("yazelix-terminal-shader-probe")
         .arg("--title-placeholder")
-        .arg("Yazelix Terminal Shader Probe")
+        .arg("Mars Terminal Shader Probe")
         .arg("-e")
         .arg("bash")
         .arg("--noprofile")
         .arg("--norc")
         .arg("-c")
         .arg(format!(
-            "printf 'yazelix-terminal shader probe\nGhostty cursor uniforms via WGPU\nPID $$\n'; sleep {sleep_seconds}"
+            "printf 'mars terminal shader probe\nyazelix-terminal package surface\nGhostty cursor uniforms via WGPU\nPID $$\n'; sleep {sleep_seconds}"
         ))
         .current_dir(root)
         .env("RIO_CONFIG_HOME", &config_dir)

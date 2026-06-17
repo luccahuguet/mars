@@ -244,7 +244,7 @@ write_resolved_config() {
   rm -f "$dst.template.tmp"
   if grep -q "@yazelix_terminal_" "$dst.tmp"; then
     rm -f "$dst.tmp"
-    die "unresolved Yazelix Terminal config placeholder in $src"
+    die "unresolved Mars Terminal config placeholder in $src"
   fi
   mv "$dst.tmp" "$dst"
   chmod 600 "$dst"
@@ -415,7 +415,7 @@ binary="$(select_binary)"
 configure_rio_config
 export YAZELIX_TERMINAL_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 app_id="${YAZELIX_TERMINAL_LOCAL_APP_ID:-yazelix-terminal-local}"
-title="${YAZELIX_TERMINAL_LOCAL_TITLE:-Yazelix Terminal Local}"
+title="${YAZELIX_TERMINAL_LOCAL_TITLE:-Mars Terminal Local}"
 
 if graphics_wrapper="$(find_graphics_wrapper)"; then
   exec "$graphics_wrapper" "$binary" --app-id "$app_id" --title-placeholder "$title" "$@"

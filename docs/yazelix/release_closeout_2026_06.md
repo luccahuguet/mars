@@ -1,13 +1,14 @@
-# Yazelix Terminal Release Closeout
+# Mars Terminal Release Closeout
 
 Date: 2026-06-07
 
 Status: experimental release gate closed for dogfooding.
 
-Decision: keep `yazelix-terminal` / `yzxterm` as an opt-in experimental
-first-party terminal path. It is credible enough to package, document,
-dogfood, benchmark, and compare seriously against Ghostty and WezTerm. It is
-not the default Yazelix terminal and is not stable-promotion ready.
+Decision: keep Mars Terminal's current `yazelix-terminal` / `yzxterm` surface
+as an opt-in experimental first-party terminal path. It is credible enough to
+package, document, dogfood, benchmark, and compare seriously against Ghostty
+and WezTerm. It is not the default Yazelix terminal and is not
+stable-promotion ready.
 
 Ghostty remains the mature default. WezTerm remains the stable alternate.
 `yzxterm` is the protocol-forward Yazelix-owned path.

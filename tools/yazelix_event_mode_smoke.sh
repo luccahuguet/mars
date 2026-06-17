@@ -135,7 +135,7 @@ if grep -Eq '^[[:space:]]*trail-cursor[[:space:]]*=' "$baseline_game_config"; th
   die "baseline game-mode config should not enable trail-cursor"
 fi
 
-printf 'Yazelix Terminal event-mode package smoke passed\n'
+printf 'Mars Terminal event-mode package smoke passed\n'
 printf '%s\n' '- packaged config does not default to renderer.strategy = "game"'
 printf '%s\n' '- packaged configs keep confirm-before-quit enabled'
 printf '%s\n' '- packaged default uses Rio trail-cursor without custom shaders'

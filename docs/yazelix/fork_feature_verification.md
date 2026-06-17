@@ -1,10 +1,10 @@
-# Yazelix Terminal Fork-Owned Feature Verification
+# Mars Terminal Fork-Owned Feature Verification
 
 Status: fork-owned additions are tracked by row with focused verification
 evidence.
 
 This file is only for behavior, tooling, policy, or documentation that the
-`yazelix-terminal` fork adds on top of the Rio base commit
+Mars Terminal's current `yazelix-terminal` fork adds on top of the Rio base commit
 `7e18dde1c90182a5170a7cca7779544967d7291c`.
 
 If a row describes inherited Rio behavior, unchanged terminal behavior, a

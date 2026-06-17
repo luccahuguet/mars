@@ -1,5 +1,5 @@
 {
-  description = "Yazelix Terminal | A Rio-derived GPU terminal emulator";
+  description = "Mars Terminal | A Rio-derived GPU terminal emulator";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

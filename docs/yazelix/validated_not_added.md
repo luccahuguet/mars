@@ -3,15 +3,15 @@
 This file is intentionally separate from
 `docs/yazelix/fork_feature_verification.md`.
 
-Rows here must not be counted as Yazelix Terminal features. They are evidence
+Rows here must not be counted as Mars Terminal features. They are evidence
 that the fork checked inherited Rio behavior, confirmed an environment property,
 measured a baseline, audited a source boundary, or explicitly deferred support.
 
 ## Rules
 
-- If Yazelix Terminal implements, packages, or changes behavior, record it in
+- If Mars Terminal implements, packages, or changes behavior, record it in
   `fork_feature_verification.md`
-- If Yazelix Terminal only verifies, measures, audits, or defers behavior,
+- If Mars Terminal only verifies, measures, audits, or defers behavior,
   record it here
 - Parser-only behavior is not runtime support
 - A benchmark result is not a feature
@@ -54,7 +54,7 @@ features. The harness itself is a fork-owned tooling addition and is recorded in
 
 | Surface | What was audited or bounded | Evidence |
 | --- | --- | --- |
-| Full arbitrary-MIME OSC 5522 | Current Ghostty `main` parses OSC 5522 but leaves runtime handling unimplemented; Yazelix Terminal implements only the text/plain-compatible OSC 5522 runtime slice. Full Kitty arbitrary-MIME support still requires a MIME-tagged platform clipboard provider beyond the current `copypasta` `String` boundary | Source audit of Ghostty `c4eba3da3`; `docs/yazelix/kitty_rich_clipboard_provider.md`; `nix run .#yazelix-protocol-conformance -- verify`; `git diff --check` |
+| Full arbitrary-MIME OSC 5522 | Current Ghostty `main` parses OSC 5522 but leaves runtime handling unimplemented; Mars Terminal implements only the text/plain-compatible OSC 5522 runtime slice. Full Kitty arbitrary-MIME support still requires a MIME-tagged platform clipboard provider beyond the current `copypasta` `String` boundary | Source audit of Ghostty `c4eba3da3`; `docs/yazelix/kitty_rich_clipboard_provider.md`; `nix run .#yazelix-protocol-conformance -- verify`; `git diff --check` |
 
 ## Explicitly Deferred Runtime Support
 

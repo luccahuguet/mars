@@ -1,12 +1,12 @@
 # Cursor Animation Architecture
 
-Status: active policy for Yazelix Terminal dogfooding.
+Status: active policy for Mars Terminal dogfooding.
 
 Date: 2026-06-02.
 
 ## Decision
 
-Rio's native `trail-cursor` is the primary Yazelix Terminal cursor animation.
+Rio's native `trail-cursor` is the primary Mars Terminal cursor animation.
 It stays enabled in the packaged `full`/`default` profile.
 
 Ghostty-compatible `custom-shader` cursor presets remain supported, packaged,
@@ -98,7 +98,7 @@ The implemented integration is:
   `iPreviousCursor == iCurrentCursor` for externally animated cursor motion.
 - Wider OSC 66 cursor extents and shader-only configurations keep the existing
   Ghostty previous/current cursor transition behavior.
-- `YAZELIX_TERMINAL_RIO_TRAIL` is defined only by the Yazelix Terminal shader
+- `YAZELIX_TERMINAL_RIO_TRAIL` is defined only by the Mars Terminal shader
   wrapper. Yazelix cursor shaders must guard all Rio-specific uniform reads with
   `#if defined(YAZELIX_TERMINAL_RIO_TRAIL)` so the same generated shader files
   remain valid in Ghostty.

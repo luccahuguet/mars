@@ -1,6 +1,10 @@
-# yazelix-terminal Lineage And Guardrails
+# Mars Terminal Lineage And Guardrails
 
-This repository is an experimental Rio-derived terminal intended to evaluate whether Yazelix can get a Rust terminal to Ghostty-grade behavior.
+Mars Terminal is an experimental Rio-derived terminal intended to evaluate
+whether Yazelix can get a Rust terminal to Ghostty-grade behavior.
+
+The current package and integration surfaces still use `yazelix-terminal` and
+`yzxterm` while the public project name moves toward Mars Terminal.
 
 It is not yet a supported Yazelix runtime component.
 

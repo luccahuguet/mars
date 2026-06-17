@@ -1,8 +1,9 @@
 # Upstream Rio Sync Workflow
 
-Status: repeatable maintenance workflow for the `yazelix-terminal` Rio fork.
+Status: repeatable maintenance workflow for Mars Terminal's current
+`yazelix-terminal` Rio fork.
 
-This document covers Rio-to-yazelix-terminal sync work. It is narrower than
+This document covers Rio-to-Mars sync work. It is narrower than
 `source_absorption_workflow.md`: Rio is the fork base, so direct code ports are
 allowed, but the fork has enough local behavior that blind merges are no longer
 the default safe move.
@@ -33,7 +34,7 @@ Classify every upstream commit before editing code:
 | Class | Definition | Default action |
 | --- | --- | --- |
 | upstream-compatible correctness | Bug fix, platform fix, protocol fix, or dependency-independent cleanup that can fit the fork without changing Yazelix behavior | Port in a focused commit with tests |
-| fork-owned feature | Behavior added by Yazelix Terminal on top of Rio, such as shader ABI, protocol harnesses, yzxterm packaging, host mode, custom cursor policy, or Beads/docs | Keep local; compare for conflicts but do not overwrite |
+| fork-owned feature | Behavior added by Mars Terminal on top of Rio, such as shader ABI, protocol harnesses, yzxterm packaging, host mode, custom cursor policy, or Beads/docs | Keep local; compare for conflicts but do not overwrite |
 | packaging/runtime integration | Nix, packaged config, runtime profile, Home Manager handoff, or main Yazelix lock consumption | Own in Yazelix/main release transaction; do not expect Rio upstream to match |
 | experimental surface | Shader experiments, UI experiments, benchmarks, screenshots, or maintainer-only diagnostics | Keep isolated; delete or graduate before broad sync |
 | broad upstream UI/architecture | Tab drag, island layout, title ownership, platform chrome, or renderer/module reorganizations | Evaluate separately; adapt only after local seams are ready |

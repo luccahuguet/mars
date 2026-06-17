@@ -110,7 +110,7 @@ Command used:
 RIO_CONFIG_HOME=/home/lucca/pjs/yazelix-terminal/artifacts/baseline/rio_cpu_config \
   target/debug/rio \
   --app-id yazelix-terminal-baseline \
-  --title-placeholder "Yazelix Terminal Baseline" \
+  --title-placeholder "Mars Terminal Baseline" \
   -e bash -lc 'printf "yazelix-terminal baseline\nrioterm 0.4.6\nCPU renderer\nPID $$\n"; sleep 20'
 ```
 

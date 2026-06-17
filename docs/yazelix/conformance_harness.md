@@ -12,8 +12,9 @@ The harness has three explicit scopes:
   Kitty, or other terminals
 
 Protocol authority and comparison targets are separate. Kitty owns Kitty
-protocol specs. Ghostty is the primary behavior and quality target for yzxterm.
-WezTerm is the mature independent terminal-engine comparison target.
+protocol specs. Ghostty is the primary behavior and quality target for Mars
+Terminal's current yzxterm package surface. WezTerm is the mature independent
+terminal-engine comparison target.
 
 ## Commands
 

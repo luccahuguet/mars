@@ -5,11 +5,11 @@ Shared Yazelix agent workflow and release policy live in the main repo:
 - https://github.com/luccahuguet/yazelix/blob/main/AGENTS.md
 - In sibling local checkouts, read `../yazelix/AGENTS.md` first
 
-Only Yazelix Terminal-specific guidance belongs here.
+Only Mars Terminal-specific guidance belongs here.
 
 ## Local Scope
 
-- This repository is the experimental Rio-derived `yazelix-terminal` workspace.
+- This repository is the experimental Rio-derived Mars Terminal workspace; current package and integration surfaces still use `yazelix-terminal` and `yzxterm`.
 - Use Rio upstream as the implementation base and keep the fork delta reviewable.
 - Treat Ghostty as the primary behavior and quality target.
 - Treat WezTerm as a mature terminal-engine comparison target.

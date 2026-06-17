@@ -1,6 +1,6 @@
 # Event-Mode Smoke Checklist
 
-Use this after a packaged Yazelix Terminal build when changing renderer event
+Use this after a packaged Mars Terminal build when changing renderer event
 delivery, cursor animation, WGPU backend selection, or the desktop wrapper.
 
 Automated package checks:
@@ -18,7 +18,7 @@ starts a no-effects config and composes with the game-mode diagnostic path.
 
 Manual session smoke:
 
-1. Open the `Yazelix Terminal` desktop launcher.
+1. Open the Mars Terminal desktop launcher.
 2. Type after the terminal has been idle for a few seconds.
 3. Run `yzx enter`.
 4. Create and walk Zellij panes.

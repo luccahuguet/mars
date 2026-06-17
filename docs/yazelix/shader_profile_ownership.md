@@ -1,11 +1,12 @@
-# Yazelix Terminal Shader Profile Ownership
+# Mars Terminal Shader Profile Ownership
 
 This document records which cursor shader and profile assets are owned by
-`yazelix-terminal` and which inputs may come from main Yazelix.
+Mars Terminal's current `yazelix-terminal` package surface and which inputs may
+come from main Yazelix.
 
 ## Ownership Boundary
 
-`yazelix-terminal` owns every Rio-aware shader behavior detail:
+Mars Terminal owns every Rio-aware shader behavior detail:
 
 - the packaged Rio config profiles under `share/yazelix-terminal`
 - the packaged emoji fallback profile roots under `share/yazelix-terminal/emoji`
@@ -16,7 +17,7 @@ This document records which cursor shader and profile assets are owned by
 
 Main Yazelix must not infer Rio shader behavior from config paths, shader file
 names, or generated GLSL internals. It may only select stable user-facing
-profiles and cursor settings that `yazelix-terminal` exposes as supported.
+profiles and cursor settings that Mars Terminal exposes as supported.
 
 ## Packaged Profiles
 
@@ -77,4 +78,4 @@ The full yzxterm shader uniform contract is documented in
 
 The default profile intentionally does not enable `custom-shader`. The shader
 profile is opt-in because it is a compatibility and visual-diagnostic surface,
-not the default Yazelix Terminal cursor animation path.
+not the default Mars Terminal cursor animation path.

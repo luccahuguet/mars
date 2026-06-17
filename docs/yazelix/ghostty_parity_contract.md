@@ -1,12 +1,13 @@
 # Ghostty Parity Contract
 
-Status: experimental target for the `yazelix-terminal` Rio fork.
+Status: experimental target for Mars Terminal, currently packaged through the
+`yazelix-terminal` Rio fork surface.
 
-This contract defines when `yazelix-terminal` is good enough to replace
-Ghostty as the preferred terminal surface for Yazelix. The goal is not to
-clone Ghostty's application shell. The goal is to make Rio's Rust/WebGPU
-terminal core reach the visual, protocol, and reliability level Yazelix needs,
-while keeping Zellij/Yazi/Helix as the workspace stack.
+This contract defines when Mars Terminal is good enough to replace Ghostty as
+the preferred terminal surface for Yazelix. The goal is not to clone Ghostty's
+application shell. The goal is to make Rio's Rust/WebGPU terminal core reach
+the visual, protocol, and reliability level Yazelix needs, while keeping
+Zellij/Yazi/Helix as the workspace stack.
 
 ## Source Baseline
 

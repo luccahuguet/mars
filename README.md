@@ -1,27 +1,28 @@
-# Yazelix Terminal Fork
+# Mars Terminal
 
-Yazelix Terminal is an experimental active Yazelix fork of Rio for dogfooding a
-first-party Rust terminal path with Yazelix-controlled package metadata,
-profiles, protocols, notifications, Kitty graphics, and cursor-shader
-boundaries.
+Born from Rio. Built for Mars
+
+Mars Terminal is an experimental Yazelix-led Rio fork. Current package and integration surfaces still use `yazelix-terminal` and `yzxterm` while the rename stays staged
+
+Mars explores a first-party Rust terminal path with Yazelix-controlled package metadata, profiles, protocols, notifications, Kitty graphics, and cursor-shader boundaries. It aims to support useful modern terminal protocols broadly, stay aligned with Kitty protocol specs where they define the surface, use Ghostty-inspired behavior and quality targets, and keep development contract-driven and agent-friendly
 
 | Field | Value |
 | --- | --- |
 | Upstream project | Rio |
-| Fork category | Experimental active fork |
-| Why this fork exists | Yazelix needs a Rust terminal it can evolve as a first-party runtime, with protocol coverage and runtime integration that Ghostty cannot expose to Yazelix directly |
+| Fork category | Experimental active Rio fork |
+| Why this fork exists | Yazelix needs a Rust terminal it can evolve as a first-party runtime, with broad protocol coverage, runtime integration, tighter control, customization, and contract-driven validation |
 | Current Yazelix delta | `yazelix-terminal` and `yzxterm` package/profile names, desktop wrapper, package metadata passthru, generated profile templates, Rio trail defaults, packaged emoji/Nerd Font glyph fallback, `yazelix-cursors` shader support, BELL/terminal notification behavior, Kitty graphics support, and Ghostty-compatible shader ABI |
 | Non-goals | This fork does not own the full Yazelix workspace, Zellij/Yazi/Helix integration policy, or compatibility shims in the main repo |
 | Standalone support | Supported for experimental users through the flake package and app outputs; normal Yazelix users consume it through main-repo runtime outputs |
 | Upstream sync cadence | Monthly while dogfooding, and before any yzxterm release-gate decision |
-| Promotion/removal gate | Promote only after release-profile validation proves real user value; upstream or delete local terminal deltas that become Rio-owned |
+| Maturity policy | Keep Mars experimental until the checked package proves useful in real Yazelix workflows; upstream generally useful fixes to Rio when appropriate, and drop local patches once Rio owns the behavior |
 
 The fork status, feature ledger, and verification evidence live in
 [`docs/yazelix/fork_feature_verification.md`](docs/yazelix/fork_feature_verification.md).
 Build-speed guidance lives in
 [`docs/yazelix/build_speed_workflow.md`](docs/yazelix/build_speed_workflow.md).
 Cachix setup lives in [`docs/yazelix/cachix.md`](docs/yazelix/cachix.md).
-Yazelix Terminal shader/profile ownership lives in
+Mars Terminal shader/profile ownership lives in
 [`docs/yazelix/shader_profile_ownership.md`](docs/yazelix/shader_profile_ownership.md).
 The yzxterm shader ABI lives in
 [`docs/yazelix/shader_abi.md`](docs/yazelix/shader_abi.md).
@@ -66,9 +67,9 @@ The desktop wrapper sets the standalone app id to `yazelix-terminal`, or uses
 own desktop entry. It searches for available Nix graphics wrappers and maps
 Yazelix-owned config directories into Rio's supported `RIO_CONFIG_HOME`
 contract only for the terminal process. It ignores ambient host
-`RIO_CONFIG_HOME`; use `YAZELIX_TERMINAL_CONFIG` for an explicit Yazelix
-Terminal config override. Child shells launched by the packaged wrapper do not
-inherit Yazelix Terminal's private `RIO_CONFIG_HOME` or package loader paths,
+`RIO_CONFIG_HOME`; use `YAZELIX_TERMINAL_CONFIG` for an explicit Mars Terminal
+config override. Child shells launched by the packaged wrapper do not
+inherit Mars Terminal's private `RIO_CONFIG_HOME` or package loader paths,
 so plain host `rio` invocations keep using the user's host Rio defaults.
 The packaged config asks before quitting, disables native window decorations,
 sets the terminal font size to `17.0`, and uses the default event renderer
@@ -89,7 +90,7 @@ not keep a stale shader glow alive.
 packaged profile root before launch. Invalid values fail clearly.
 `YAZELIX_TERMINAL_APPEARANCE=light` or `auto` selects the packaged light or
 adaptive dark/light pair. The default remains `dark` for continuity.
-Yazelix Terminal owns these profile assets and Rio-aware shader details; main
+Mars Terminal owns these profile assets and Rio-aware shader details; main
 Yazelix should select stable profile names rather than generate or inspect
 Rio-specific shader config.
 `YAZELIX_TERMINAL_RENDER_STRATEGY=game` is kept as an explicit diagnostic

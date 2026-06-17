@@ -1,4 +1,4 @@
-// Generated for Yazelix Terminal from a vendored Ghostty cursor effect template
+// Generated for Mars Terminal from a vendored Ghostty cursor effect template
 // Source repository: https://github.com/sahaj-b/ghostty-cursor-shaders
 // Effect: rectangle_boom
 // Color source: vec4(0.000, 0.902, 1.000, 1.0)

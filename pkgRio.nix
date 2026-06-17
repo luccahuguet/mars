@@ -173,7 +173,7 @@ in
 
           chmod 644 "$dst"
           if grep -q "@yazelix_terminal_" "$dst"; then
-            echo "unresolved Yazelix Terminal config placeholder in $dst" >&2
+            echo "unresolved Mars Terminal config placeholder in $dst" >&2
             exit 1
           fi
         }
@@ -243,7 +243,7 @@ in
           --replace-fail "TryExec=rio" "TryExec=$out/bin/yazelix-terminal-desktop" \
           --replace-fail "Exec=rio" "Exec=$out/bin/yazelix-terminal-desktop" \
           --replace-fail "Icon=rio" "Icon=yazelix-terminal" \
-          --replace-fail "Name=Rio" "Name=Yazelix Terminal" \
+          --replace-fail "Name=Rio" "Name=Mars Terminal" \
           --replace-fail "StartupWMClass=Rio" "StartupWMClass=yazelix-terminal"$'\n'"StartupNotify=true"
 
         # Install terminfo files

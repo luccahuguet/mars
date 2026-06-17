@@ -1,4 +1,4 @@
-// Generated for Yazelix Terminal with cursor settings.glow = medium
+// Generated for Mars Terminal with cursor settings.glow = medium
 const float YAZELIX_TRAIL_GLOW_STRENGTH = 0.5;
 const float YAZELIX_TRAIL_GLOW_WIDTH_SCALE = 0.5;
 const float YAZELIX_CURSOR_GLOW_STRENGTH = 0.5;

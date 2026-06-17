@@ -1,7 +1,7 @@
 # Cachix Cache
 
-Yazelix Terminal uses the Cachix cache `luccahuguet-yazelix-terminal` for
-Linux package builds.
+Mars Terminal currently uses the Cachix cache `luccahuguet-yazelix-terminal`
+for Linux package builds.
 
 ## Trust Model
 
