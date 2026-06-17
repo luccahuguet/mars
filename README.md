@@ -2,9 +2,11 @@
 
 Born from Rio. Built for Mars
 
-Mars Terminal is an experimental Yazelix-led Rio fork. The child package surface uses `mars`; main Yazelix still consumes it through the staged `yzxterm` runtime variant while the wider runtime rename stays staged
+Mars Terminal is an experimental Yazelix-led, Rio-derived Rust terminal emulator, forked from [Rio](https://github.com/raphamorim/rio) by [Raphael Amorim](https://github.com/raphamorim). The child package surface uses `mars`; main Yazelix still consumes it through the staged `yzxterm` runtime variant while the wider runtime rename stays staged
 
-Mars explores a first-party Rust terminal path with Yazelix-controlled package metadata, profiles, protocols, notifications, Kitty graphics, and cursor-shader boundaries. It aims to support useful modern terminal protocols broadly, stay aligned with Kitty protocol specs where they define the surface, use Ghostty-inspired behavior and quality targets, and keep development contract-driven and agent-friendly
+Mars explores a first-party terminal path with Yazelix-controlled package metadata, profiles, protocols, notifications, Kitty graphics, and cursor-shader boundaries. It aims to support useful modern terminal protocols broadly, stay aligned with Kitty protocol specs where they define the surface, and use Ghostty-inspired behavior and quality targets
+
+The project optimizes for solving issues quickly and iterating fast. It is strongly agent-engineered: contracts, focused validation, and reviewable evidence should make rapid terminal work safer instead of slower
 
 | Field | Value |
 | --- | --- |
@@ -60,40 +62,10 @@ The package installs:
 - `share/yazelix-terminal/emoji/serenityos/config.toml`
 - `share/yazelix-terminal/package-metadata.json`
 
-The desktop wrapper sets the standalone app id to `yazelix-terminal`, or uses
-`YAZELIX_TERMINAL_APP_ID` when a parent runtime needs the window to match its
-own desktop entry. It searches for available Nix graphics wrappers and maps
-Yazelix-owned config directories into Rio's supported `RIO_CONFIG_HOME`
-contract only for the terminal process. It ignores ambient host
-`RIO_CONFIG_HOME`; use `YAZELIX_TERMINAL_CONFIG` for an explicit Mars Terminal
-config override. Child shells launched by the packaged wrapper do not
-inherit Mars Terminal's private `RIO_CONFIG_HOME` or package loader paths,
-so plain host `rio` invocations keep using the user's host Rio defaults.
-The packaged config asks before quitting, disables native window decorations,
-sets the terminal font size to `17.0`, and uses the default event renderer
-strategy with WebGPU, Rio's native trail cursor effect, and a readable 650 ms
-cursor blink. It also maps private-use icon glyphs to
-`Symbols Nerd Font Mono`, selected text-style status symbols to packaged
-`Noto Sans Symbols 2`, and common emoji/status symbol ranges to the selected
-packaged emoji fallback. `noto` remains the default, while `twitter` and
-`serenityos` provide free alternate emoji font presets for visual dogfooding.
-`YAZELIX_TERMINAL_PROFILE=baseline` selects the same packaged font, window, and
-WebGPU baseline without custom shaders or trail cursor effects for performance
-comparisons, while keeping the same cursor blink policy.
-`YAZELIX_TERMINAL_PROFILE=shaders` selects the packaged Ghostty-compatible
-cursor shader stack for compatibility and visual diagnostics. Shader cursor
-visibility follows the renderer's effective blink state, so blink-off frames do
-not keep a stale shader glow alive.
-`YAZELIX_TERMINAL_EMOJI_FONT=twitter` or `serenityos` selects the matching
-packaged profile root before launch. Invalid values fail clearly.
-`YAZELIX_TERMINAL_APPEARANCE=light` or `auto` selects the packaged light or
-adaptive dark/light pair. The default remains `dark` for continuity.
-Mars Terminal owns these profile assets and Rio-aware shader details; main
-Yazelix should select stable profile names rather than generate or inspect
-Rio-specific shader config.
-`YAZELIX_TERMINAL_RENDER_STRATEGY=game` is kept as an explicit diagnostic
-override and composes with each profile.
-Package metadata for main Yazelix and other consumers is documented in
+The packaged wrapper keeps Mars isolated from host Rio config, provides stable
+profiles for full, baseline, and shader-heavy runs, and exposes explicit
+override knobs for Yazelix and standalone dogfooding. Package metadata for main
+Yazelix and other consumers is documented in
 [`docs/yazelix/package_metadata.md`](docs/yazelix/package_metadata.md).
 
 Wrapper override knobs:
