@@ -272,17 +272,37 @@ impl GraphicData {
         view_width: usize,
         view_height: usize,
     ) -> (usize, usize) {
+        self.compute_display_dimensions_for_source(
+            self.width,
+            self.height,
+            cell_width,
+            cell_height,
+            view_width,
+            view_height,
+        )
+    }
+
+    /// Compute display dimensions using an image subsection as the intrinsic size.
+    pub fn compute_display_dimensions_for_source(
+        &self,
+        source_width: usize,
+        source_height: usize,
+        cell_width: usize,
+        cell_height: usize,
+        view_width: usize,
+        view_height: usize,
+    ) -> (usize, usize) {
         let resize = match self.resize {
             Some(resize) => resize,
-            None => return (self.width, self.height),
+            None => return (source_width, source_height),
         };
 
         if (resize.width == ResizeParameter::Auto
             && resize.height == ResizeParameter::Auto)
-            || self.height == 0
-            || self.width == 0
+            || source_height == 0
+            || source_width == 0
         {
-            return (self.width, self.height);
+            return (source_width, source_height);
         }
 
         let mut width = match resize.width {
@@ -300,17 +320,17 @@ impl GraphicData {
         };
 
         if width == 0 || height == 0 {
-            return (self.width, self.height);
+            return (source_width, source_height);
         }
 
         if resize.width == ResizeParameter::Auto {
-            width =
-                (self.width as f64 * height as f64 / self.height as f64).round() as usize;
+            width = (source_width as f64 * height as f64 / source_height as f64).round()
+                as usize;
         }
 
         if resize.height == ResizeParameter::Auto {
-            height =
-                (self.height as f64 * width as f64 / self.width as f64).round() as usize;
+            height = (source_height as f64 * width as f64 / source_width as f64).round()
+                as usize;
         }
 
         width = cmp::min(width, MAX_GRAPHIC_DIMENSIONS[0]);
@@ -318,11 +338,11 @@ impl GraphicData {
 
         if resize.preserve_aspect_ratio {
             // Preserve aspect ratio: fit within width x height
-            let scale_w = width as f64 / self.width as f64;
-            let scale_h = height as f64 / self.height as f64;
+            let scale_w = width as f64 / source_width as f64;
+            let scale_h = height as f64 / source_height as f64;
             let scale = scale_w.min(scale_h);
-            width = (self.width as f64 * scale).round() as usize;
-            height = (self.height as f64 * scale).round() as usize;
+            width = (source_width as f64 * scale).round() as usize;
+            height = (source_height as f64 * scale).round() as usize;
         }
 
         (width, height)

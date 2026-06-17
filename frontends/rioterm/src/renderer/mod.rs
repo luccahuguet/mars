@@ -581,6 +581,16 @@ impl Renderer {
                     let screen_lines = rc.screen_lines as i64;
 
                     for p in &rc.kitty_placements {
+                        let Some(source_rect) =
+                            rc.kitty_images.get(&p.image_id).and_then(|image| {
+                                p.normalized_source_rect(
+                                    image.data.width as u32,
+                                    image.data.height as u32,
+                                )
+                            })
+                        else {
+                            continue;
+                        };
                         let screen_row = p.dest_row - (history_size - display_offset);
                         let image_bottom_row = screen_row + p.rows as i64;
                         // Cull only if fully off-screen (like )
@@ -598,8 +608,7 @@ impl Renderer {
                             width: p.pixel_width as f32,
                             height: p.pixel_height as f32,
                             z_index: p.z_index,
-                            source_rect:
-                                rio_backend::sugarloaf::GraphicOverlay::FULL_SOURCE_RECT,
+                            source_rect,
                         });
                     }
                 }
@@ -1039,13 +1048,23 @@ impl Renderer {
                 Some(i) => i,
                 None => return,
             };
+            let Some(source) = rio_backend::ansi::graphics::KittySourceRect::new(
+                vp.x,
+                vp.y,
+                vp.width,
+                vp.height,
+                img.data.width as u32,
+                img.data.height as u32,
+            ) else {
+                return;
+            };
 
             let geom = match rio_backend::ansi::kitty_virtual::compute_run_geometry(
                 &run,
                 vp.columns,
                 vp.rows,
-                img.data.width as u32,
-                img.data.height as u32,
+                source.width,
+                source.height,
                 cell_width,
                 cell_height,
                 origin_x,
@@ -1056,6 +1075,11 @@ impl Renderer {
                 Some(g) => g,
                 None => return,
             };
+            let source_rect = source.normalized_subrect(
+                img.data.width as u32,
+                img.data.height as u32,
+                geom.source_rect,
+            );
 
             overlays.push(rio_backend::sugarloaf::GraphicOverlay {
                 image_id: run.image_id,
@@ -1064,7 +1088,7 @@ impl Renderer {
                 width: geom.width,
                 height: geom.height,
                 z_index,
-                source_rect: geom.source_rect,
+                source_rect,
             });
         }
     }

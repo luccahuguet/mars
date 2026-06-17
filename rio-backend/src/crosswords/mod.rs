@@ -27,6 +27,7 @@ pub mod vi_mode;
 use crate::ansi::graphics::GraphicCell;
 use crate::ansi::graphics::Graphics;
 use crate::ansi::graphics::KittyPlacement;
+use crate::ansi::graphics::KittySourceRect;
 use crate::ansi::graphics::TextureRef;
 use crate::ansi::graphics::UpdateQueues;
 use crate::ansi::mode::NamedMode;
@@ -6058,10 +6059,23 @@ impl<U: EventListener> Crosswords<U> {
             return;
         }
 
-        // Compute display dimensions
+        let Some(source_rect) = KittySourceRect::new(
+            placement.x,
+            placement.y,
+            placement.width,
+            placement.height,
+            graphic_data.width as u32,
+            graphic_data.height as u32,
+        ) else {
+            return;
+        };
+
+        // Compute display dimensions from the selected source rectangle.
         let view_width = cell_width * self.grid.columns();
         let view_height = cell_height * self.grid.screen_lines();
-        let (display_w, display_h) = graphic_data.compute_display_dimensions(
+        let (display_w, display_h) = graphic_data.compute_display_dimensions_for_source(
+            source_rect.width as usize,
+            source_rect.height as usize,
             cell_width,
             cell_height,
             view_width,
@@ -6090,17 +6104,10 @@ impl<U: EventListener> Crosswords<U> {
 
         // Memory is managed in store_kitty_image (eviction happens there)
 
-        // Compute cursor position for placement
-        let dest_col = if placement.x > 0 {
-            placement.x as usize
-        } else {
-            self.grid.cursor.pos.col.0
-        };
-        let cursor_row = if placement.y > 0 {
-            placement.y as i32
-        } else {
-            self.grid.cursor.pos.row.0
-        };
+        // Direct placements are anchored at the current cursor; lowercase
+        // x/y/w/h describe the source rectangle, not destination cells.
+        let dest_col = self.grid.cursor.pos.col.0;
+        let cursor_row = self.grid.cursor.pos.row.0;
         // Absolute row = history_size + screen-relative row
         let dest_row = self.history_size() as i64 + cursor_row as i64;
 
@@ -6228,6 +6235,8 @@ impl<U: EventListener> Crosswords<U> {
             rows: placement.rows,
             x: placement.x,
             y: placement.y,
+            width: placement.width,
+            height: placement.height,
         };
         self.graphics
             .kitty_virtual_placements
@@ -6245,20 +6254,30 @@ impl<U: EventListener> Crosswords<U> {
         }
 
         let dimensions = transmitted
-            .map(|image| {
-                (
-                    image.display_width.unwrap_or(image.width) as u32,
-                    image.display_height.unwrap_or(image.height) as u32,
+            .and_then(|image| {
+                KittySourceRect::new(
+                    placement.x,
+                    placement.y,
+                    placement.width,
+                    placement.height,
+                    image.width as u32,
+                    image.height as u32,
                 )
+                .map(|rect| (rect.width, rect.height))
             })
             .or_else(|| {
                 self.graphics
                     .get_kitty_image(placement.image_id)
-                    .map(|image| {
-                        (
-                            image.data.display_width.unwrap_or(image.data.width) as u32,
-                            image.data.display_height.unwrap_or(image.data.height) as u32,
+                    .and_then(|image| {
+                        KittySourceRect::new(
+                            placement.x,
+                            placement.y,
+                            placement.width,
+                            placement.height,
+                            image.data.width as u32,
+                            image.data.height as u32,
                         )
+                        .map(|rect| (rect.width, rect.height))
                     })
             });
         let Some((width, height)) = dimensions else {
@@ -6311,6 +6330,32 @@ mod tests {
         let size = CrosswordsSize::new(4, 4);
         let window_id = crate::event::WindowId::from(0);
         Crosswords::new(size, CursorShape::Block, VoidListener {}, window_id, 0, 10)
+    }
+
+    fn store_test_kitty_image<U: EventListener>(
+        cw: &mut Crosswords<U>,
+        image_id: u32,
+        width: usize,
+        height: usize,
+    ) {
+        use sugarloaf::{ColorType, GraphicData, GraphicId};
+
+        cw.graphics.store_kitty_image(
+            image_id,
+            None,
+            GraphicData {
+                id: GraphicId::new(image_id as u64),
+                width,
+                height,
+                color_type: ColorType::Rgba,
+                pixels: vec![255; width * height * 4],
+                is_opaque: true,
+                resize: None,
+                display_width: None,
+                display_height: None,
+                transmit_time: std::time::Instant::now(),
+            },
+        );
     }
 
     fn make_capturing_crosswords(
@@ -10293,5 +10338,111 @@ mod tests {
 
         // Cursor must be untouched.
         assert_eq!(cw.grid.cursor.pos, cursor_before);
+    }
+
+    #[test]
+    // Regression: direct Kitty x/y/w/h crop the source image and must not move the placement.
+    fn direct_kitty_source_rect_uses_cursor_destination_and_crop_size() {
+        use crate::ansi::kitty_graphics_protocol::PlacementRequest;
+
+        let size = CrosswordsSize::new(40, 20);
+        let window_id = crate::event::WindowId::from(0);
+        let mut cw = Crosswords::new(
+            size,
+            CursorShape::Block,
+            VoidListener {},
+            window_id,
+            0,
+            10_000,
+        );
+        cw.graphics.cell_width = 10.0;
+        cw.graphics.cell_height = 20.0;
+        cw.grid.cursor.pos = Pos::new(Line(2), Column(4));
+
+        store_test_kitty_image(&mut cw, 7, 100, 80);
+
+        cw.place_graphic(PlacementRequest {
+            image_id: 7,
+            placement_id: 0,
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+            columns: 0,
+            rows: 0,
+            z_index: 0,
+            virtual_placement: false,
+            unicode_placeholder: 0,
+            cursor_movement: 1,
+            cell_x_offset: 0,
+            cell_y_offset: 0,
+        });
+
+        let placement = cw
+            .graphics
+            .kitty_placements
+            .values()
+            .next()
+            .expect("placement must exist");
+        assert_eq!(placement.dest_col, 4);
+        assert_eq!(placement.dest_row, cw.history_size() as i64 + 2);
+        assert_eq!(placement.source_x, 10);
+        assert_eq!(placement.source_y, 20);
+        assert_eq!(placement.source_width, 30);
+        assert_eq!(placement.source_height, 40);
+        assert_eq!(placement.pixel_width, 30);
+        assert_eq!(placement.pixel_height, 40);
+        assert_eq!(placement.columns, 3);
+        assert_eq!(placement.rows, 2);
+    }
+
+    #[test]
+    // Regression: virtual Kitty placements infer their grid from the source crop.
+    fn virtual_kitty_source_rect_infers_grid_from_crop_size() {
+        use crate::ansi::kitty_graphics_protocol::PlacementRequest;
+
+        let size = CrosswordsSize::new(40, 20);
+        let window_id = crate::event::WindowId::from(0);
+        let mut cw = Crosswords::new(
+            size,
+            CursorShape::Block,
+            VoidListener {},
+            window_id,
+            0,
+            10_000,
+        );
+        cw.graphics.cell_width = 10.0;
+        cw.graphics.cell_height = 20.0;
+
+        store_test_kitty_image(&mut cw, 8, 100, 80);
+
+        cw.place_graphic(PlacementRequest {
+            image_id: 8,
+            placement_id: 9,
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+            columns: 0,
+            rows: 0,
+            z_index: 0,
+            virtual_placement: true,
+            unicode_placeholder: 0,
+            cursor_movement: 1,
+            cell_x_offset: 0,
+            cell_y_offset: 0,
+        });
+
+        let placement = cw
+            .graphics
+            .kitty_virtual_placements
+            .get(&(8, 9))
+            .expect("virtual placement must exist");
+        assert_eq!(placement.x, 10);
+        assert_eq!(placement.y, 20);
+        assert_eq!(placement.width, 30);
+        assert_eq!(placement.height, 40);
+        assert_eq!(placement.columns, 3);
+        assert_eq!(placement.rows, 2);
     }
 }

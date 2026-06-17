@@ -125,6 +125,212 @@ pub struct KittyPlacement {
     pub transmit_time: std::time::Instant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KittySourceRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl KittySourceRect {
+    pub fn new(
+        source_x: u32,
+        source_y: u32,
+        source_width: u32,
+        source_height: u32,
+        image_width: u32,
+        image_height: u32,
+    ) -> Option<Self> {
+        if image_width == 0 || image_height == 0 {
+            return None;
+        }
+        if source_x >= image_width || source_y >= image_height {
+            return None;
+        }
+
+        let remaining_width = image_width - source_x;
+        let remaining_height = image_height - source_y;
+        let width = if source_width == 0 {
+            remaining_width
+        } else {
+            source_width.min(remaining_width)
+        };
+        let height = if source_height == 0 {
+            remaining_height
+        } else {
+            source_height.min(remaining_height)
+        };
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        Some(Self {
+            x: source_x,
+            y: source_y,
+            width,
+            height,
+        })
+    }
+
+    fn normalized(self, image_width: u32, image_height: u32) -> [f32; 4] {
+        [
+            self.x as f32 / image_width as f32,
+            self.y as f32 / image_height as f32,
+            self.width as f32 / image_width as f32,
+            self.height as f32 / image_height as f32,
+        ]
+    }
+
+    pub fn normalized_subrect(
+        self,
+        image_width: u32,
+        image_height: u32,
+        subrect: [f32; 4],
+    ) -> [f32; 4] {
+        let base = self.normalized(image_width, image_height);
+        [
+            base[0] + subrect[0] * base[2],
+            base[1] + subrect[1] * base[3],
+            subrect[2] * base[2],
+            subrect[3] * base[3],
+        ]
+    }
+}
+
+impl KittyPlacement {
+    pub fn source_rect(
+        &self,
+        image_width: u32,
+        image_height: u32,
+    ) -> Option<KittySourceRect> {
+        KittySourceRect::new(
+            self.source_x,
+            self.source_y,
+            self.source_width,
+            self.source_height,
+            image_width,
+            image_height,
+        )
+    }
+
+    /// Normalized source rectangle for the placement as `[u0, v0, width, height]`.
+    ///
+    /// Kitty `x`/`y`/`w`/`h` placement fields crop the source image in pixels.
+    /// Missing `w`/`h` means "use the rest of the image" from the source origin.
+    pub fn normalized_source_rect(
+        &self,
+        image_width: u32,
+        image_height: u32,
+    ) -> Option<[f32; 4]> {
+        self.source_rect(image_width, image_height)
+            .map(|rect| rect.normalized(image_width, image_height))
+    }
+}
+
+#[cfg(test)]
+// Test lane: default
+mod kitty_placement_tests {
+    use super::*;
+
+    fn placement(
+        source_x: u32,
+        source_y: u32,
+        source_width: u32,
+        source_height: u32,
+    ) -> KittyPlacement {
+        KittyPlacement {
+            image_id: 1,
+            placement_id: 0,
+            source_x,
+            source_y,
+            source_width,
+            source_height,
+            dest_col: 0,
+            dest_row: 0,
+            columns: 1,
+            rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            cell_x_offset: 0,
+            cell_y_offset: 0,
+            z_index: 0,
+            transmit_time: std::time::Instant::now(),
+        }
+    }
+
+    fn assert_rect_close(actual: [f32; 4], expected: [f32; 4]) {
+        for (&actual, &expected) in actual.iter().zip(expected.iter()) {
+            assert!(
+                (actual - expected).abs() < 0.000_001,
+                "expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    // Regression: direct Kitty placements must propagate their crop rect into the renderer.
+    fn normalized_source_rect_uses_origin_and_size() {
+        assert_rect_close(
+            placement(10, 20, 100, 50)
+                .normalized_source_rect(400, 200)
+                .unwrap(),
+            [0.025, 0.1, 0.25, 0.25],
+        );
+    }
+
+    #[test]
+    // Defends: omitted source width/height means the remaining image extent.
+    fn normalized_source_rect_defaults_missing_size_to_remaining_image() {
+        assert_rect_close(
+            placement(10, 20, 0, 0)
+                .normalized_source_rect(100, 80)
+                .unwrap(),
+            [0.1, 0.25, 0.9, 0.75],
+        );
+    }
+
+    #[test]
+    // Defends: oversized source rectangles are clipped instead of sampling outside the texture.
+    fn normalized_source_rect_clips_to_image_bounds() {
+        assert_rect_close(
+            placement(90, 70, 50, 50)
+                .normalized_source_rect(100, 80)
+                .unwrap(),
+            [0.9, 0.875, 0.1, 0.125],
+        );
+        assert_eq!(
+            placement(90, 70, 50, 50).source_rect(100, 80),
+            Some(KittySourceRect {
+                x: 90,
+                y: 70,
+                width: 10,
+                height: 10,
+            })
+        );
+    }
+
+    #[test]
+    // Defends: virtual row-run source rects are remapped from crop-local to full texture coordinates.
+    fn source_rect_normalizes_subrect_within_crop() {
+        let rect = placement(10, 20, 30, 40).source_rect(100, 80).unwrap();
+        assert_rect_close(
+            rect.normalized_subrect(100, 80, [0.25, 0.5, 0.5, 0.25]),
+            [0.175, 0.5, 0.15, 0.125],
+        );
+    }
+
+    #[test]
+    // Defends: invalid crop origins do not produce draw commands.
+    fn normalized_source_rect_rejects_out_of_bounds_origin() {
+        assert_eq!(
+            placement(100, 0, 0, 0).normalized_source_rect(100, 80),
+            None
+        );
+        assert_eq!(placement(0, 80, 0, 0).normalized_source_rect(100, 80), None);
+    }
+}
+
 /// Virtual placement metadata for Kitty graphics protocol
 /// Stored separately from direct graphics in cells
 #[derive(Debug, Clone, PartialEq)]
@@ -135,6 +341,8 @@ pub struct VirtualPlacement {
     pub rows: u32,
     pub x: u32,
     pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Per-screen Kitty graphics state.
