@@ -12,6 +12,8 @@ Mars explores a first-party terminal path with strong Nix packaging, Yazelix-con
 
 The project optimizes for solving issues quickly and iterating fast. It is strongly agent-engineered: contracts, focused validation, and reviewable evidence should make rapid terminal work safer instead of slower
 
+If a fix or feature is useful to Rio users, we are happy to help upstreaming it back to Rio
+
 | Field | Value |
 | --- | --- |
 | Upstream project | Rio |
