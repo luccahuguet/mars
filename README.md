@@ -1,5 +1,9 @@
 # Mars Terminal
 
+<p align="center">
+  <img src="misc/mars_terminal_icon.png" alt="Mars Terminal icon" width="180">
+</p>
+
 Born from Rio. Built for Mars
 
 Mars Terminal is an experimental Yazelix-led, Rio-derived Rust terminal emulator, forked from [Rio](https://github.com/raphamorim/rio). The child package surface uses `mars`; main Yazelix still consumes it through the staged `yzxterm` runtime variant while the wider runtime rename stays staged
