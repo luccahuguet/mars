@@ -4,7 +4,7 @@ Born from Rio. Built for Mars
 
 Mars Terminal is an experimental Yazelix-led, Rio-derived Rust terminal emulator, forked from [Rio](https://github.com/raphamorim/rio) by [Raphael Amorim](https://github.com/raphamorim). The child package surface uses `mars`; main Yazelix still consumes it through the staged `yzxterm` runtime variant while the wider runtime rename stays staged
 
-Mars explores a first-party terminal path with Yazelix-controlled package metadata, profiles, protocols, notifications, Kitty graphics, and cursor-shader boundaries. It aims to support useful modern terminal protocols broadly, stay aligned with Kitty protocol specs where they define the surface, and use Ghostty-inspired behavior and quality targets
+Mars explores a first-party terminal path with strong Nix packaging, Yazelix-controlled package metadata, profiles, protocols, notifications, Kitty graphics, and cursor-shader boundaries. It aims to support useful modern terminal protocols broadly, stay aligned with Kitty protocol specs where they define the surface, and use Ghostty-inspired behavior and quality targets
 
 The project optimizes for solving issues quickly and iterating fast. It is strongly agent-engineered: contracts, focused validation, and reviewable evidence should make rapid terminal work safer instead of slower
 
