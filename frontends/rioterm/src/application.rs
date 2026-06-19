@@ -2,7 +2,7 @@ use crate::event::{ClickState, EventPayload, EventProxy, RioEvent, RioEventType}
 use crate::graphics_namespace::atlas_image_id;
 use crate::ime::Preedit;
 use crate::renderer::utils::update_colors_based_on_theme;
-use crate::router::{routes::RoutePath, Router};
+use crate::router::{routes::RoutePath, Route, Router};
 use crate::scheduler::{Scheduler, TimerId, Topic};
 use crate::screen::touch::on_touch;
 use crate::watcher::configuration_file_updates;
@@ -44,6 +44,55 @@ fn kitty_notification_close_reply(protocol_id: &str, payload: &str) -> String {
 
 fn is_confirmable_quit_event(event: &RioEvent) -> bool {
     matches!(event, RioEvent::Exit | RioEvent::Quit)
+}
+
+fn route_redraw_allowed(config: &rio_backend::config::Config, route: &Route<'_>) -> bool {
+    if config.renderer.disable_unfocused_render && !route.window.is_focused {
+        return false;
+    }
+
+    if config.renderer.disable_occluded_render
+        && route.window.is_occluded
+        && !route.window.needs_render_after_occlusion
+    {
+        return false;
+    }
+
+    true
+}
+
+fn clear_render_after_occlusion(route: &mut Route<'_>) {
+    if route.window.needs_render_after_occlusion {
+        route.window.needs_render_after_occlusion = false;
+    }
+}
+
+fn mark_route_content_dirty(route: &mut Route<'_>, route_id: usize) -> bool {
+    let Some(ctx_item) = route.window.screen.ctx_mut().get_by_route_id(route_id) else {
+        return false;
+    };
+
+    ctx_item.val.renderable_content.pending_update.set_dirty();
+    true
+}
+
+fn schedule_or_request_route_redraw(
+    scheduler: &mut Scheduler,
+    route: &mut Route<'_>,
+    window_id: WindowId,
+    route_id: usize,
+) {
+    if let Some(wait_duration) = route.window.wait_until() {
+        let timer_id = TimerId::new(Topic::RenderRoute, route_id);
+        let event = EventPayload::new(RioEventType::Rio(RioEvent::Render), window_id);
+
+        if !scheduler.scheduled(timer_id) {
+            scheduler.schedule(event, wait_duration, false, timer_id);
+        }
+    } else {
+        clear_render_after_occlusion(route);
+        route.request_redraw();
+    }
 }
 
 pub struct Application<'a> {
@@ -318,80 +367,23 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         match event.payload {
             RioEventType::Rio(RioEvent::Render) => {
                 if let Some(route) = self.router.routes.get_mut(&window_id) {
-                    // Skip rendering for unfocused windows if configured
-                    if self.config.renderer.disable_unfocused_render
-                        && !route.window.is_focused
-                    {
-                        return;
+                    if route_redraw_allowed(&self.config, route) {
+                        clear_render_after_occlusion(route);
+                        route.request_redraw();
                     }
-
-                    // Skip rendering for occluded windows if configured, unless we need to render after occlusion
-                    if self.config.renderer.disable_occluded_render
-                        && route.window.is_occluded
-                        && !route.window.needs_render_after_occlusion
-                    {
-                        return;
-                    }
-
-                    // Clear the one-time render flag if it was set
-                    if route.window.needs_render_after_occlusion {
-                        route.window.needs_render_after_occlusion = false;
-                    }
-
-                    route.request_redraw();
                 }
             }
             RioEventType::Rio(RioEvent::RenderRoute(route_id)) => {
                 if self.config.renderer.strategy.is_event_based() {
                     if let Some(route) = self.router.routes.get_mut(&window_id) {
-                        // Skip rendering for unfocused windows if configured
-                        if self.config.renderer.disable_unfocused_render
-                            && !route.window.is_focused
-                        {
-                            return;
-                        }
-
-                        // Skip rendering for occluded windows if configured, unless we need to render after occlusion
-                        if self.config.renderer.disable_occluded_render
-                            && route.window.is_occluded
-                            && !route.window.needs_render_after_occlusion
-                        {
-                            return;
-                        }
-
-                        // Clear the one-time render flag if it was set
-                        if route.window.needs_render_after_occlusion {
-                            route.window.needs_render_after_occlusion = false;
-                        }
-
-                        // Mark the renderable content as needing to render
-                        if let Some(ctx_item) =
-                            route.window.screen.ctx_mut().get_by_route_id(route_id)
-                        {
-                            ctx_item.val.renderable_content.pending_update.set_dirty();
-                        }
-
-                        // Check if we need to throttle based on timing
-                        if let Some(wait_duration) = route.window.wait_until() {
-                            // We need to wait before rendering again
-                            let timer_id = TimerId::new(Topic::RenderRoute, route_id);
-                            let event = EventPayload::new(
-                                RioEventType::Rio(RioEvent::Render),
+                        if route_redraw_allowed(&self.config, route) {
+                            mark_route_content_dirty(route, route_id);
+                            schedule_or_request_route_redraw(
+                                &mut self.scheduler,
+                                route,
                                 window_id,
+                                route_id,
                             );
-
-                            // Only schedule if not already scheduled
-                            if !self.scheduler.scheduled(timer_id) {
-                                self.scheduler.schedule(
-                                    event,
-                                    wait_duration,
-                                    false,
-                                    timer_id,
-                                );
-                            }
-                        } else {
-                            // We can render immediately
-                            route.request_redraw();
                         }
                     }
                 }
@@ -400,25 +392,15 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             RioEventType::Rio(RioEvent::TerminalDamaged(route_id)) => {
                 if self.config.renderer.strategy.is_event_based() {
                     if let Some(route) = self.router.routes.get_mut(&window_id) {
-                        if self.config.renderer.disable_unfocused_render
-                            && !route.window.is_focused
+                        if route_redraw_allowed(&self.config, route)
+                            && mark_route_content_dirty(route, route_id)
                         {
-                            return;
-                        }
-                        if self.config.renderer.disable_occluded_render
-                            && route.window.is_occluded
-                            && !route.window.needs_render_after_occlusion
-                        {
-                            return;
-                        }
-
-                        if let Some(ctx_item) =
-                            route.window.screen.ctx_mut().get_by_route_id(route_id)
-                        {
-                            // Just mark dirty — damage will be extracted from
-                            // the terminal when the renderer locks it.
-                            ctx_item.val.renderable_content.pending_update.set_dirty();
-                            route.request_redraw();
+                            schedule_or_request_route_redraw(
+                                &mut self.scheduler,
+                                route,
+                                window_id,
+                                route_id,
+                            );
                         }
                     }
                 }
