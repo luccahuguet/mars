@@ -110,6 +110,12 @@ Normal terminal sessions do not create this log. If the env var is present and
 the log cannot be opened or written, Rio fails fast because benchmark evidence
 must not silently degrade.
 
+PTY-reader tracing is separately gated by `MARS_PERF_TRACE=pty`. When enabled,
+the PTY reader emits one-second JSON summaries to stderr with read throughput,
+parser batch timing, terminal-lock misses, forced terminal-lock waits, and
+damage event decisions. Benchmark `stderr.log` captures these lines when the
+trace is enabled around a frame run.
+
 The stdlib harness wraps the frame log with process sampling and artifact
 generation:
 
