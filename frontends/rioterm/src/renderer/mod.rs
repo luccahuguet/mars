@@ -7,7 +7,7 @@ pub mod search;
 pub mod trail_cursor;
 pub mod utils;
 
-use rio_backend::event::TerminalDamage;
+use rio_backend::event::{Msg, TerminalDamage};
 use taffy::NodeId;
 
 use crate::context::renderable::{PendingUpdate, RenderableContent};
@@ -550,6 +550,7 @@ impl Renderer {
                 metrics.terminal_snapshot_duration +=
                     terminal_snapshot_started_at.elapsed();
                 drop(terminal);
+                let _ = context.messenger.channel.send(Msg::TerminalDamageConsumed);
             }
 
             // Recalculate image overlay positions every frame when placements

@@ -31,6 +31,9 @@ pub enum Msg {
     /// Data that should be written to the PTY.
     Input(Cow<'static, [u8]>),
 
+    /// The renderer consumed terminal damage and the PTY reader may resume.
+    TerminalDamageConsumed,
+
     #[allow(dead_code)]
     Shutdown,
 

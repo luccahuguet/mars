@@ -3906,43 +3906,66 @@ impl Screen<'_> {
                 let origin_x = panel_rect[0] + scaled_margin.left;
                 let origin_y = panel_rect[1] + scaled_margin.top;
 
-                let cursor = &self.context_manager.current().renderable_content.cursor;
-                let cursor_row = cursor.state.pos.row.0 as usize;
-                let cursor_col = cursor.state.pos.col.0;
+                let renderable_content =
+                    &self.context_manager.current().renderable_content;
+                let cursor = &renderable_content.cursor;
+                let terminal_cursor_visible =
+                    cursor.state.content != rio_backend::ansi::CursorShape::Hidden;
+                let cursor_blink_visible = !renderable_content.has_blinking_enabled
+                    || renderable_content.is_blinking_cursor_visible;
 
-                // Cursor position in physical pixels.
-                let cursor_px_x = origin_x + cursor_col as f32 * cell_width;
-                let cursor_px_y = origin_y + cursor_row as f32 * cell_height;
+                if terminal_cursor_visible {
+                    let cursor_row = cursor.state.pos.row.0 as usize;
+                    let cursor_col = cursor.state.pos.col.0;
 
-                self.renderer
-                    .trail_cursor
-                    .set_route(current_item.val.route_id);
-                self.renderer.trail_cursor.set_destination(
-                    cursor_px_x,
-                    cursor_px_y,
-                    cell_width,
-                    cell_height,
-                );
-                self.renderer.trail_cursor.animate(cell_width, cell_height);
+                    // Cursor position in physical pixels.
+                    let cursor_px_x = origin_x + cursor_col as f32 * cell_width;
+                    let cursor_px_y = origin_y + cursor_row as f32 * cell_height;
 
-                let cursor_color = self.renderer.named_colors.cursor;
-                self.renderer.trail_cursor.draw(
-                    &mut self.sugarloaf,
-                    scale_factor,
-                    cursor_color,
-                );
-
-                #[cfg(feature = "wgpu")]
-                {
-                    rio_trail_cursor_state = self
-                        .renderer
+                    self.renderer
                         .trail_cursor
-                        .shader_state(cell_width, cell_height);
-                    rio_trail_snapshot_stage = if rio_trail_cursor_state.is_some() {
-                        "snapshot"
+                        .set_route(current_item.val.route_id);
+                    self.renderer.trail_cursor.set_destination(
+                        cursor_px_x,
+                        cursor_px_y,
+                        cell_width,
+                        cell_height,
+                    );
+                    self.renderer.trail_cursor.animate(cell_width, cell_height);
+
+                    if cursor_blink_visible {
+                        let cursor_color = self.renderer.named_colors.cursor;
+                        self.renderer.trail_cursor.draw(
+                            &mut self.sugarloaf,
+                            scale_factor,
+                            cursor_color,
+                        );
+
+                        #[cfg(feature = "wgpu")]
+                        {
+                            rio_trail_cursor_state = self
+                                .renderer
+                                .trail_cursor
+                                .shader_state(cell_width, cell_height);
+                            rio_trail_snapshot_stage = if rio_trail_cursor_state.is_some()
+                            {
+                                "snapshot"
+                            } else {
+                                "shader_state_none"
+                            };
+                        }
                     } else {
-                        "shader_state_none"
-                    };
+                        #[cfg(feature = "wgpu")]
+                        {
+                            rio_trail_snapshot_stage = "cursor_blink_hidden";
+                        }
+                    }
+                } else {
+                    self.renderer.trail_cursor.reset();
+                    #[cfg(feature = "wgpu")]
+                    {
+                        rio_trail_snapshot_stage = "cursor_hidden";
+                    }
                 }
             } else {
                 #[cfg(feature = "wgpu")]

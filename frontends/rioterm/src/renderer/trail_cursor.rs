@@ -277,6 +277,25 @@ impl TrailCursor {
         }
     }
 
+    pub fn reset(&mut self) {
+        for corner in &mut self.corners {
+            corner.spring_x.reset();
+            corner.spring_y.reset();
+            corner.prev_dest_x = -1e6;
+            corner.prev_dest_y = -1e6;
+            corner.x = 0.0;
+            corner.y = 0.0;
+        }
+        self.prev_dest_cx = -1e6;
+        self.prev_dest_cy = -1e6;
+        self.jump_from_cx = -1e6;
+        self.jump_from_cy = -1e6;
+        self.jumped = false;
+        self.snap_next_jump = false;
+        self.first_frame = true;
+        self.animating = false;
+    }
+
     /// Update the cursor destination.  Called once per frame **before**
     /// `animate()`.  Sets the `jumped` flag when the destination changes
     /// (matching neovide's `update_cursor_destination`).
@@ -573,7 +592,7 @@ fn cursor_jump_should_snap(
     };
 
     if jump_y <= ONE_ROW_WARP_MAX_VERTICAL_CELLS {
-        return false;
+        return jump_x > WARP_MOVE_MAX_CELLS;
     }
 
     if jump_x <= VERTICAL_RELOCATION_MAX_HORIZONTAL_CELLS
@@ -658,7 +677,24 @@ mod tests {
     }
 
     #[test]
-    fn one_row_long_column_warp_keeps_trail_animation() {
+    fn moderate_one_row_column_move_keeps_trail_animation() {
+        let cell_width = 10.0;
+        let cell_height = 20.0;
+        let mut cursor = TrailCursor::new();
+        seed_cursor(&mut cursor, cell_width, cell_height);
+
+        cursor.set_destination(cell_width * 8.0, cell_height, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
+
+        assert!(cursor.is_animating());
+        assert!(cursor
+            .corners
+            .iter()
+            .any(|corner| corner.anim_length == ANIMATION_LENGTH));
+    }
+
+    #[test]
+    fn extreme_one_row_column_warp_snaps_without_trail_animation() {
         let cell_width = 10.0;
         let cell_height = 20.0;
         let mut cursor = TrailCursor::new();
@@ -667,11 +703,34 @@ mod tests {
         cursor.set_destination(cell_width * 40.0, cell_height, cell_width, cell_height);
         cursor.animate(cell_width, cell_height);
 
+        assert!(!cursor.is_animating());
+        assert_eq!(cursor.corners[0].x, cell_width * 40.0);
+        assert_eq!(cursor.corners[0].y, cell_height);
+        assert_eq!(cursor.corners[2].x, cell_width * 41.0);
+        assert_eq!(cursor.corners[2].y, cell_height * 2.0);
+    }
+
+    #[test]
+    fn reset_clears_animation_and_makes_next_destination_snap() {
+        let cell_width = 10.0;
+        let cell_height = 20.0;
+        let mut cursor = TrailCursor::new();
+        seed_cursor(&mut cursor, cell_width, cell_height);
+
+        cursor.set_destination(cell_width * 2.0, 0.0, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
         assert!(cursor.is_animating());
-        assert!(cursor
-            .corners
-            .iter()
-            .any(|corner| corner.anim_length == ANIMATION_LENGTH));
+
+        cursor.reset();
+        assert!(!cursor.is_animating());
+
+        cursor.set_destination(cell_width * 4.0, cell_height, cell_width, cell_height);
+        cursor.animate(cell_width, cell_height);
+        assert!(!cursor.is_animating());
+        assert_eq!(cursor.corners[0].x, cell_width * 4.0);
+        assert_eq!(cursor.corners[0].y, cell_height);
+        assert_eq!(cursor.corners[2].x, cell_width * 5.0);
+        assert_eq!(cursor.corners[2].y, cell_height * 2.0);
     }
 
     #[test]
@@ -714,7 +773,7 @@ mod tests {
     fn diagonal_redraw_jump_exceeds_snap_threshold() {
         assert!(cursor_jump_should_snap(5.0, 10.0, 405.0, 810.0, 10.0, 20.0));
         assert!(!cursor_jump_should_snap(5.0, 10.0, 5.0, 30.0, 10.0, 20.0));
-        assert!(!cursor_jump_should_snap(5.0, 10.0, 405.0, 30.0, 10.0, 20.0));
+        assert!(cursor_jump_should_snap(5.0, 10.0, 405.0, 30.0, 10.0, 20.0));
         assert!(cursor_jump_should_snap(5.0, 10.0, 5.0, 210.0, 10.0, 20.0));
     }
 }

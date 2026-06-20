@@ -76,6 +76,19 @@ fn mark_route_content_dirty(route: &mut Route<'_>, route_id: usize) -> bool {
     true
 }
 
+fn mark_current_grid_content_dirty(route: &mut Route<'_>) {
+    for context in route
+        .window
+        .screen
+        .ctx_mut()
+        .current_grid_mut()
+        .contexts_mut()
+        .values_mut()
+    {
+        context.val.renderable_content.pending_update.set_dirty();
+    }
+}
+
 fn schedule_or_request_route_redraw(
     scheduler: &mut Scheduler,
     route: &mut Route<'_>,
@@ -1997,6 +2010,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 route.window.is_focused = focused;
 
                 if has_regained_focus {
+                    mark_current_grid_content_dirty(route);
                     route.request_redraw();
                 }
 
@@ -2010,6 +2024,8 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 // If window was occluded and is now visible, mark for one-time render
                 if was_occluded && !occluded {
                     route.window.needs_render_after_occlusion = true;
+                    mark_current_grid_content_dirty(route);
+                    route.request_redraw();
                 }
             }
 

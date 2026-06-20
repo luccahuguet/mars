@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::Arc;
-use std::thread::{Builder, JoinHandle};
+use std::thread::{self, Builder, JoinHandle};
 use std::time::{Duration, Instant};
 use tracing::error;
 
@@ -34,7 +34,8 @@ where
 
 const READ_BUFFER_SIZE: usize = 0x10_0000;
 /// Max bytes to read from the PTY while the terminal is locked.
-const MAX_LOCKED_READ: usize = u16::MAX as usize;
+const MAX_LOCKED_READ: usize = 1024;
+const RENDER_BACKPRESSURE_TIMEOUT: Duration = Duration::from_millis(16);
 const PERF_TRACE_ENV: &str = "MARS_PERF_TRACE";
 const PTY_PERF_REPORT_INTERVAL: Duration = Duration::from_secs(1);
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
@@ -62,6 +63,8 @@ struct PtyPerfCounters {
     damage_skipped_sync_count: u64,
     damage_skipped_in_flight_count: u64,
     damage_skipped_no_damage_count: u64,
+    render_backpressure_pause_count: u64,
+    render_backpressure_timeout_count: u64,
 }
 
 impl PtyPerfCounters {
@@ -71,6 +74,8 @@ impl PtyPerfCounters {
             && self.parser_batch_count == 0
             && self.damage_check_count == 0
             && self.damage_skipped_sync_count == 0
+            && self.render_backpressure_pause_count == 0
+            && self.render_backpressure_timeout_count == 0
     }
 }
 
@@ -246,6 +251,22 @@ impl PtyPerfTrace {
     }
 
     #[inline]
+    fn record_render_backpressure_pause(&mut self) {
+        if self.enabled {
+            self.counters.render_backpressure_pause_count += 1;
+            self.maybe_report();
+        }
+    }
+
+    #[inline]
+    fn record_render_backpressure_timeout(&mut self) {
+        if self.enabled {
+            self.counters.render_backpressure_timeout_count += 1;
+            self.maybe_report();
+        }
+    }
+
+    #[inline]
     fn record_unprocessed(&mut self, unprocessed: usize) {
         self.counters.max_unprocessed_bytes =
             self.counters.max_unprocessed_bytes.max(unprocessed);
@@ -297,7 +318,9 @@ impl PtyPerfTrace {
                 "\"max_locked_processed_bytes\":{},\"damage_check_count\":{},",
                 "\"damage_sent_count\":{},\"damage_skipped_sync_count\":{},",
                 "\"damage_skipped_in_flight_count\":{},",
-                "\"damage_skipped_no_damage_count\":{}}}"
+                "\"damage_skipped_no_damage_count\":{},",
+                "\"render_backpressure_pause_count\":{},",
+                "\"render_backpressure_timeout_count\":{}}}"
             ),
             std::process::id(),
             self.route_id,
@@ -330,7 +353,9 @@ impl PtyPerfTrace {
             counters.damage_sent_count,
             counters.damage_skipped_sync_count,
             counters.damage_skipped_in_flight_count,
-            counters.damage_skipped_no_damage_count
+            counters.damage_skipped_no_damage_count,
+            counters.render_backpressure_pause_count,
+            counters.render_backpressure_timeout_count
         );
 
         self.last_report = now;
@@ -368,6 +393,13 @@ fn average(total: u128, count: u64) -> u128 {
     } else {
         total / u128::from(count)
     }
+}
+
+fn next_timeout(a: Option<Instant>, b: Option<Instant>) -> Option<Duration> {
+    a.into_iter()
+        .chain(b)
+        .min()
+        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
 }
 
 struct PeekableReceiver<T> {
@@ -413,6 +445,7 @@ pub struct State {
     write_list: VecDeque<Cow<'static, [u8]>>,
     writing: Option<Writing>,
     parser: handler::Processor,
+    pty_read_paused_until: Option<Instant>,
 }
 
 impl State {
@@ -436,6 +469,39 @@ impl State {
     #[inline]
     fn needs_write(&self) -> bool {
         self.writing.is_some() || !self.write_list.is_empty()
+    }
+
+    #[inline]
+    fn pty_read_paused(&self) -> bool {
+        self.pty_read_paused_until.is_some()
+    }
+
+    #[inline]
+    fn pause_pty_read_for_render(&mut self) {
+        self.pty_read_paused_until = Some(Instant::now() + RENDER_BACKPRESSURE_TIMEOUT);
+    }
+
+    #[inline]
+    fn resume_pty_read(&mut self) {
+        self.pty_read_paused_until = None;
+    }
+
+    #[inline]
+    fn pty_read_pause_deadline(&self) -> Option<Instant> {
+        self.pty_read_paused_until
+    }
+
+    #[inline]
+    fn resume_pty_read_if_due(&mut self, now: Instant) -> bool {
+        if self
+            .pty_read_paused_until
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.resume_pty_read();
+            true
+        } else {
+            false
+        }
     }
 
     #[inline]
@@ -510,6 +576,7 @@ where
     ) -> io::Result<()> {
         let mut unprocessed = 0;
         let mut processed = 0;
+        let read_limit = MAX_LOCKED_READ.min(buf.len());
 
         // Reserve the next terminal lock for PTY reading.
         let _terminal_lease = Some(self.terminal.lease());
@@ -517,45 +584,49 @@ where
 
         loop {
             // Read from the PTY.
-            match self.pty.reader().read(&mut buf[unprocessed..]) {
-                // This is received on Windows/macOS when no more data is readable from the PTY.
-                Ok(0) if unprocessed == 0 => {
-                    perf_trace.record_read_zero(unprocessed);
-                    break;
-                }
-                Ok(got) => {
-                    if got == 0 {
+            if unprocessed < read_limit {
+                match self.pty.reader().read(&mut buf[unprocessed..read_limit]) {
+                    // This is received on Windows/macOS when no more data is readable from the PTY.
+                    Ok(0) if unprocessed == 0 => {
                         perf_trace.record_read_zero(unprocessed);
-                    } else {
-                        unprocessed += got;
-                        perf_trace.record_read_bytes(got, unprocessed);
+                        break;
                     }
+                    Ok(got) => {
+                        if got == 0 {
+                            perf_trace.record_read_zero(unprocessed);
+                        } else {
+                            unprocessed += got;
+                            perf_trace.record_read_bytes(got, unprocessed);
+                        }
+                    }
+                    Err(err) => match err.kind() {
+                        ErrorKind::Interrupted => {
+                            perf_trace.record_read_interrupted(unprocessed);
+                            // Go back to mio if we're caught up on parsing and the PTY would block.
+                            if unprocessed == 0 {
+                                break;
+                            }
+                        }
+                        ErrorKind::WouldBlock => {
+                            perf_trace.record_read_would_block(unprocessed);
+                            // Go back to mio if we're caught up on parsing and the PTY would block.
+                            if unprocessed == 0 {
+                                break;
+                            }
+                        }
+                        _ => return Err(err),
+                    },
                 }
-                Err(err) => match err.kind() {
-                    ErrorKind::Interrupted => {
-                        perf_trace.record_read_interrupted(unprocessed);
-                        // Go back to mio if we're caught up on parsing and the PTY would block.
-                        if unprocessed == 0 {
-                            break;
-                        }
-                    }
-                    ErrorKind::WouldBlock => {
-                        perf_trace.record_read_would_block(unprocessed);
-                        // Go back to mio if we're caught up on parsing and the PTY would block.
-                        if unprocessed == 0 {
-                            break;
-                        }
-                    }
-                    _ => return Err(err),
-                },
             }
 
             // Attempt to lock the terminal.
             let terminal = match &mut terminal {
                 Some(terminal) => terminal,
                 None => terminal.insert(match self.terminal.try_lock_unfair() {
-                    // Force block if we are at the buffer size limit.
-                    None if unprocessed >= READ_BUFFER_SIZE => {
+                    // Force block once this read cycle has accumulated a
+                    // full parser batch; otherwise keep collecting bytes
+                    // without taking the terminal lock.
+                    None if unprocessed >= read_limit => {
                         perf_trace.record_lock_miss(unprocessed);
                         let lock_wait_start = perf_trace.now();
                         let terminal = self.terminal.lock_unfair();
@@ -588,25 +659,25 @@ where
         // Notify renderer that new damage is available.
         // Only send if no event is already in flight — the renderer will
         // extract all accumulated damage when it locks the terminal.
+        let mut should_pause_after_parse = false;
         if processed > 0 {
-            if state.parser.sync_bytes_count() < processed {
-                if let Some(ref mut term) = terminal {
-                    if term.damage_event_in_flight {
-                        perf_trace.record_damage_in_flight_skipped();
-                    } else if term.peek_damage_event().is_some() {
-                        term.damage_event_in_flight = true;
-                        self.event_proxy.send_event(
-                            RioEvent::TerminalDamaged(self.route_id),
-                            self.window_id,
-                        );
-                        perf_trace.record_damage_sent();
-                    } else {
-                        perf_trace.record_damage_no_damage_skipped();
-                    }
-                }
-            } else {
+            if state.parser.sync_pending() {
+                // Synchronized output defers render notifications, but it
+                // still performs parser/model work. Backpressure it too.
                 perf_trace.record_damage_sync_skipped();
+                should_pause_after_parse = true;
+            } else {
+                if let Some(ref mut term) = terminal {
+                    should_pause_after_parse =
+                        self.notify_renderer_if_damaged(&mut **term, perf_trace);
+                }
             }
+        }
+        drop(terminal);
+        if should_pause_after_parse {
+            state.pause_pty_read_for_render();
+            perf_trace.record_render_backpressure_pause();
+            thread::yield_now();
         }
 
         Ok(())
@@ -619,6 +690,7 @@ where
         while let Some(msg) = self.receiver.recv() {
             match msg {
                 Msg::Input(input) => state.write_list.push_back(input),
+                Msg::TerminalDamageConsumed => state.resume_pty_read(),
                 Msg::Resize(window_size) => {
                     let _ = self.pty.set_winsize(window_size);
                 }
@@ -685,6 +757,29 @@ where
         self.sender.clone()
     }
 
+    #[inline]
+    fn notify_renderer_if_damaged(
+        &self,
+        terminal: &mut Crosswords<U>,
+        perf_trace: &mut PtyPerfTrace,
+    ) -> bool {
+        if terminal.peek_damage_event().is_none() {
+            perf_trace.record_damage_no_damage_skipped();
+            return false;
+        }
+
+        if terminal.damage_event_in_flight {
+            perf_trace.record_damage_in_flight_skipped();
+        } else {
+            terminal.damage_event_in_flight = true;
+            self.event_proxy
+                .send_event(RioEvent::TerminalDamaged(self.route_id), self.window_id);
+            perf_trace.record_damage_sent();
+        }
+
+        true
+    }
+
     pub fn spawn(mut self) -> JoinHandle<(Self, State)> {
         spawn_named("PTY reader", move || {
             let mut state = State::default();
@@ -714,10 +809,8 @@ where
 
             'event_loop: loop {
                 // Wakeup the event loop when a synchronized update timeout was reached.
-                let handler = state.parser.sync_timeout();
-                let timeout = handler
-                    .sync_timeout()
-                    .map(|st| st.saturating_duration_since(Instant::now()));
+                let sync_timeout = state.parser.sync_timeout().sync_timeout();
+                let timeout = next_timeout(sync_timeout, state.pty_read_pause_deadline());
 
                 events.clear();
                 if let Err(err) = self.poll.poll(&mut events, timeout) {
@@ -730,23 +823,28 @@ where
                     }
                 }
 
-                // Handle synchronized update timeout.
+                // Handle synchronized update and PTY backpressure timeouts.
                 if events.is_empty() && self.receiver.peek().is_none() {
-                    let mut terminal = self.terminal.lock();
-                    state.parser.stop_sync(&mut *terminal);
-
-                    // Notify renderer if damage available and no event in flight
-                    if !terminal.damage_event_in_flight
-                        && terminal.peek_damage_event().is_some()
-                    {
-                        terminal.damage_event_in_flight = true;
-                        self.event_proxy.send_event(
-                            RioEvent::TerminalDamaged(self.route_id),
-                            self.window_id,
-                        );
+                    let now = Instant::now();
+                    if state.resume_pty_read_if_due(now) {
+                        pty_perf_trace.record_render_backpressure_timeout();
                     }
 
-                    continue;
+                    if sync_timeout.is_some_and(|deadline| now >= deadline) {
+                        let mut terminal = self.terminal.lock();
+                        state.parser.stop_sync(&mut *terminal);
+                        let should_yield_after_damage = self.notify_renderer_if_damaged(
+                            &mut *terminal,
+                            &mut pty_perf_trace,
+                        );
+                        drop(terminal);
+
+                        if should_yield_after_damage {
+                            state.pause_pty_read_for_render();
+                            pty_perf_trace.record_render_backpressure_pause();
+                            thread::yield_now();
+                        }
+                    }
                 }
 
                 // Handle channel events, if there are any.
@@ -794,24 +892,26 @@ where
                                 continue;
                             }
                             if event.readiness().is_readable() {
-                                if let Err(err) = self.pty_read(
-                                    &mut state,
-                                    &mut buf,
-                                    &mut pty_perf_trace,
-                                ) {
-                                    // On Linux, a `read` on the master side of a PTY can fail
-                                    // with `EIO` if the client side hangs up.  In that case,
-                                    // just loop back round for the inevitable `Exited` event.
-                                    #[cfg(target_os = "linux")]
-                                    if err.raw_os_error() == Some(libc::EIO) {
-                                        continue;
-                                    }
+                                if !state.pty_read_paused() {
+                                    if let Err(err) = self.pty_read(
+                                        &mut state,
+                                        &mut buf,
+                                        &mut pty_perf_trace,
+                                    ) {
+                                        // On Linux, a `read` on the master side of a PTY can fail
+                                        // with `EIO` if the client side hangs up.  In that case,
+                                        // just loop back round for the inevitable `Exited` event.
+                                        #[cfg(target_os = "linux")]
+                                        if err.raw_os_error() == Some(libc::EIO) {
+                                            continue;
+                                        }
 
-                                    error!(
-                                        "Error reading from PTY in event loop: {}",
-                                        err
-                                    );
-                                    break 'event_loop;
+                                        error!(
+                                            "Error reading from PTY in event loop: {}",
+                                            err
+                                        );
+                                        break 'event_loop;
+                                    }
                                 }
                             }
 
@@ -826,15 +926,24 @@ where
                     }
                 }
 
-                // Register write interest if necessary.
-                let mut interest = Ready::readable();
-                if state.needs_write() {
-                    interest.insert(Ready::writable());
+                // Register read/write interest if necessary. With one-shot
+                // polling, skipping the reregister is the least surprising
+                // way to keep PTY reads paused without passing an empty
+                // readiness mask down to the OS selector.
+                let needs_write = state.needs_write();
+                if !state.pty_read_paused() || needs_write {
+                    let mut interest = Ready::empty();
+                    if !state.pty_read_paused() {
+                        interest.insert(Ready::readable());
+                    }
+                    if needs_write {
+                        interest.insert(Ready::writable());
+                    }
+
+                    self.pty
+                        .reregister(&self.poll, interest, poll_opts)
+                        .unwrap();
                 }
-                // Reregister with new interest.
-                self.pty
-                    .reregister(&self.poll, interest, poll_opts)
-                    .unwrap();
             }
 
             // The evented instances are not dropped here so deregister them explicitly.
