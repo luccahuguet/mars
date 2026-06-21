@@ -1,0 +1,4 @@
+Mars parser smoke fixture
+plain text line 1
+plain text line 2 with numbers 0123456789 and punctuation ;:?!
+printable control examples for external corpus parity: ESC [ 31 m red ESC [ 0 m

@@ -94,6 +94,53 @@ Corpus replay manifests include corpus path, size, SHA-256, seed,
 generator version, terminal rows/columns, line count, and copied metadata.
 Corpus generation is not part of timed measurement.
 
+## Parser Throughput Benchmark
+
+Run the parser-only benchmark without starting Mars, a PTY, Zellij, or the renderer:
+
+```sh
+cargo run -p rio-backend --bin mars-parser-bench --release \
+  --features rio-window/x11,rio-window/wayland -- \
+  --corpus rio-backend/fixtures/parser_smoke.txt \
+  --rows 24 \
+  --columns 80 \
+  --chunk-size 4096 \
+  --iterations 10
+```
+
+Debug builds are not representative. Use `--release` or a benchmark profile for
+numbers you intend to compare.
+
+For a larger escape-heavy corpus, generate input once and then benchmark that
+same file:
+
+```sh
+tools/mars_perf_gate.py --generate-corpus /tmp/mars_parser_osc.bin \
+  --corpus-kind osc_control \
+  --corpus-seed 7 \
+  --corpus-lines 80000 \
+  --corpus-rows 44 \
+  --corpus-columns 132
+
+cargo run -p rio-backend --bin mars-parser-bench --release \
+  --features rio-window/x11,rio-window/wayland -- \
+  --corpus /tmp/mars_parser_osc.bin \
+  --rows 44 \
+  --columns 132 \
+  --chunk-size 4096 \
+  --iterations 5
+```
+
+The output records corpus path, corpus bytes, rows, columns, chunk size,
+iterations, elapsed nanoseconds, bytes per second, and parser action counts.
+Rows and columns are recorded for corpus comparability; this benchmark measures
+only the escape parser and does not allocate a terminal grid.
+
+To compare Mars against upstream Rio, apply the benchmark commit alone to a
+`rio-upstream/main` worktree, generate one corpus file, and run the exact same
+`mars-parser-bench` command in both worktrees. Compare only release-mode output
+from the same machine and same corpus path/hash.
+
 Add hardware-counter evidence when the host has `perf`:
 
 ```sh

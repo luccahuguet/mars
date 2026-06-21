@@ -1,4 +1,6 @@
 pub mod ansi;
+#[doc(hidden)]
+pub mod benchmarks;
 pub mod clipboard;
 pub mod codepoint_width;
 pub mod config;
