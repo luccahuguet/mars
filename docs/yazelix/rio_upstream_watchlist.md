@@ -4,6 +4,18 @@ Review date: 2026-06-21
 
 These upstream Rio issues affect Mars dogfooding decisions. Treat them as context before creating Mars-specific Beads. Create a Mars Bead only when local evidence shows the behavior still reproduces in Mars after the clean rebuild baseline.
 
+Before editing Rio-owned source, refresh this context for the current bug instead of relying only on the table below:
+
+```sh
+gh issue list --repo raphamorim/rio --state all --search '<symptom or protocol keywords>'
+git fetch rio-upstream main
+base=$(git merge-base HEAD rio-upstream/main)
+git log --oneline "$base"..rio-upstream/main -- <suspect-rio-paths>
+git log --oneline --grep='<keyword>' "$base"..rio-upstream/main
+```
+
+Record the issue query, result, and upstream commit range in the Bead or `docs/yazelix/change_scorecard.md`.
+
 ## Startup, GPU, And Vulkan
 
 | Issue | Relevance To Mars |

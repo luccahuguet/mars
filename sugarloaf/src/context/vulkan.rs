@@ -1453,6 +1453,8 @@ fn create_swapchain(
         image_count = caps.max_image_count;
     }
 
+    let composite_alpha = choose_composite_alpha(caps.supported_composite_alpha);
+
     let create_info = vk::SwapchainCreateInfoKHR::default()
         .surface(surface)
         .min_image_count(image_count)
@@ -1465,7 +1467,7 @@ fn create_swapchain(
         )
         .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
         .pre_transform(caps.current_transform)
-        .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+        .composite_alpha(composite_alpha)
         .present_mode(present_mode)
         .clipped(true)
         .old_swapchain(old);
@@ -1504,6 +1506,20 @@ fn create_swapchain(
         images,
         views,
     )
+}
+
+fn choose_composite_alpha(
+    supported: vk::CompositeAlphaFlagsKHR,
+) -> vk::CompositeAlphaFlagsKHR {
+    if supported.contains(vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED) {
+        vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED
+    } else if supported.contains(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED) {
+        vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+    } else if supported.contains(vk::CompositeAlphaFlagsKHR::INHERIT) {
+        vk::CompositeAlphaFlagsKHR::INHERIT
+    } else {
+        vk::CompositeAlphaFlagsKHR::OPAQUE
+    }
 }
 
 fn create_frames(

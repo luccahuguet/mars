@@ -1,4 +1,5 @@
 {
+  imagemagick,
   lib,
   makeWrapper,
   rioPackage,
@@ -8,7 +9,10 @@
 symlinkJoin {
   name = "mars";
   paths = [rioPackage];
-  nativeBuildInputs = [makeWrapper];
+  nativeBuildInputs = [
+    imagemagick
+    makeWrapper
+  ];
 
   postBuild = ''
     rm -f "$out/bin/rio"
@@ -24,8 +28,13 @@ symlinkJoin {
       --replace-fail "TryExec=mars" "TryExec=$out/bin/mars" \
       --replace-fail "Exec=mars" "Exec=$out/bin/mars"
 
-    install -D -m 644 "${./misc/mars_terminal_icon.png}" \
-      "$out/share/icons/hicolor/1024x1024/apps/mars.png"
+    for size in 16 24 32 48 64 128 256 512 1024; do
+      install -d "$out/share/icons/hicolor/''${size}x''${size}/apps"
+      magick "${./misc/mars_terminal_icon.png}" -resize "''${size}x''${size}" \
+        "$out/share/icons/hicolor/''${size}x''${size}/apps/mars.png"
+    done
+    install -D -m 644 "$out/share/icons/hicolor/512x512/apps/mars.png" \
+      "$out/share/pixmaps/mars.png"
   '';
 
   passthru =

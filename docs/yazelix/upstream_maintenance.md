@@ -38,7 +38,22 @@ Editing a Rio-owned source file is allowed only when:
 - The behavior is required for a current Mars feature
 - The change is smaller than an additive alternative
 - The reason is recorded in a Bead
+- Ghostty and WezTerm equivalent behavior has been inspected before editing
+- Rio GitHub issues have been searched for the same symptom or protocol area
+- Newer upstream Rio commits have been checked for an existing fix
 - A focused test or dogfooding artifact protects the behavior
+
+Before editing, record the exact checks in the Bead or scorecard. Prefer:
+
+```sh
+gh issue list --repo raphamorim/rio --state all --search '<symptom or protocol keywords>'
+git fetch rio-upstream main
+base=$(git merge-base HEAD rio-upstream/main)
+git log --oneline "$base"..rio-upstream/main -- <suspect-rio-paths>
+git log --oneline --grep='<keyword>' "$base"..rio-upstream/main
+```
+
+If GitHub or network access is unavailable, record that explicitly and keep the change blocked unless the maintainer accepts the risk.
 
 ## Mars-Owned Hooks
 
@@ -83,4 +98,6 @@ git diff --name-status rio-upstream/main
 
 The expected early diff should be Mars-owned wrapper, docs, config, icon, and gate files. Any Rio-owned source file in that diff needs a current Bead explaining why it exists.
 
-Every Mars-owned code or runtime-behavior commit also needs a row in `docs/yazelix/change_scorecard.md` explaining why the commit exists, which Rio-owned files it touches, how it was verified, and the expected upstream merge cost. Pure documentation-only commits are exempt.
+Every Mars-owned code or runtime-behavior commit also needs a row in `docs/yazelix/change_scorecard.md` explaining why the commit exists, which Rio-owned files it touches, how it was verified, the expected upstream merge cost, and whether it is the smallest, simplest, surgical, non-invasive path. Pure documentation-only commits are exempt.
+
+For Rio-owned source edits, the verification notes must include the Ghostty and WezTerm paths or docs checked before the edit, the Rio GitHub issue query/result, and the upstream commit range checked. If a terminal has no equivalent path, Rio has no matching issue, or newer Rio has no matching fix, say so in the row.

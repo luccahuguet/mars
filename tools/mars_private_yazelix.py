@@ -18,8 +18,9 @@ def main() -> int:
         return 1
 
     mars_binary = os.environ.get("MARS_BINARY", "mars")
+    args = sys.argv[1:] or ["-e", "yzx", "enter"]
     os.environ["MARS_CONFIG_HOME"] = str(config_home)
-    os.execvp(mars_binary, [mars_binary, *sys.argv[1:]])
+    os.execvp(mars_binary, [mars_binary, *args])
     return 127
 
 

@@ -23,8 +23,8 @@ After a local Mars package or binary exists, launch it with:
 tools/mars_private_yazelix.py
 ```
 
-The launcher sets `MARS_CONFIG_HOME`. The config owns startup through
-`[shell] program = "yzx"` and `args = ["start"]`. Use
+The launcher sets `MARS_CONFIG_HOME` and starts Yazelix with
+`mars -e yzx enter`. The config stays terminal-only. Use
 `MARS_BINARY=/path/to/mars` when testing a build artifact directly.
 
 ## Artifact Rule
@@ -75,7 +75,7 @@ Run repeated samples with:
 tools/mars_perf_gate.py --suite --seconds 20 --repeat 3
 ```
 
-The runner does not compute its own statistics. Compare repeated run directories and use the `pidstat` summaries as the primary measurement source.
+The runner only computes small `ps` fallback summaries. Compare repeated run directories and use `pidstat`/`perf` artifacts as the primary measurement source when those tools are available.
 
 Add hardware-counter evidence when the host has `perf`:
 

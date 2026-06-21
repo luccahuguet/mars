@@ -26,6 +26,7 @@ Every Mars feature follows a small-change rule:
 - Plan the feature in a Bead before implementation
 - Prefer config, wrapper, package, desktop, or docs changes before Rio source edits
 - Add one focused feature at a time
+- Before changing Rio-owned source, inspect Ghostty and WezTerm equivalents, search Rio GitHub issues, and check newer upstream Rio commits for an existing fix
 - Review the diff against `rio-upstream/main` before closing the work
 - Keep verification proportional to risk, with reproducible artifacts for renderer, PTY, parser, event-loop, shader, or window behavior
 
@@ -39,7 +40,7 @@ Feature design should answer:
 ## First Milestones
 
 1. `mars`: exact Rio behavior with Mars identity
-2. `mars-yazelix`: private launcher/config root that runs `yzx start`
+2. `mars-yazelix`: private launcher/config root that starts `yzx enter` through the launch command, not terminal TOML
 3. Reproducible performance gate: idle CPU, scroll/render stress, PTY flood, and bounded Yazelix screen workloads
 4. Config isolation: Mars uses a clear Mars-owned config path, but the TOML stays Rio-compatible until a measured Mars-only feature needs different config
 
@@ -54,3 +55,5 @@ Feature design should answer:
 ## Gate
 
 Any change touching PTY reading, parser batching, renderer invalidation, compositor scheduling, event-loop behavior, or shaders needs a Bead and fresh reproducible artifacts before it ships.
+
+Any Rio-owned code change needs a pre-edit comparison against Ghostty and WezTerm behavior. It also needs a Rio GitHub issue search and a check of newer `rio-upstream/main` commits since the Mars base. If a project has no equivalent implementation or Rio has no matching issue or newer fix, record that explicitly instead of treating the check as satisfied.

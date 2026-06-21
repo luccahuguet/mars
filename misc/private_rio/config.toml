@@ -7,9 +7,8 @@ scrollback-history-limit = 0
 force-theme = "dark"
 enable-scroll-bar = false
 
-[shell]
-program = "yzx"
-args = ["start"]
+[effects]
+trail-cursor = true
 
 [window]
 width = 960
@@ -24,8 +23,16 @@ padding = [0.0]
 border-width = 0.0
 
 [fonts]
-family = "FiraCode Nerd Font"
+family = "FiraCode Nerd Font Mono"
 size = 18.0
+symbol-map = [
+  { start = "E000", end = "F900", font-family = "Symbols Nerd Font Mono" },
+  { start = "F0000", end = "F3000", font-family = "Symbols Nerd Font Mono" },
+  { start = "1F5B0", end = "1F5C0", font-family = "Noto Sans Symbols2" },
+  { start = "2600", end = "276F", font-family = "Noto Color Emoji" },
+  { start = "1F000", end = "1F5B0", font-family = "Noto Color Emoji" },
+  { start = "1F5C0", end = "1FB00", font-family = "Noto Color Emoji" },
+]
 
 [colors]
 background = "#111416"
