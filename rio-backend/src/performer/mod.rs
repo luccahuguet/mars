@@ -168,6 +168,7 @@ where
 
     #[inline]
     fn pty_read(&mut self, state: &mut State, buf: &mut [u8]) -> io::Result<()> {
+        let read_started = crate::perf_metrics::start_timer();
         let mut unprocessed = 0;
         let mut processed = 0;
 
@@ -206,9 +207,16 @@ where
             };
 
             // Parse the incoming bytes.
-            state.parser.advance(&mut **terminal, &buf[..unprocessed]);
+            let batch_bytes = unprocessed;
+            let parser_started = crate::perf_metrics::start_timer();
+            state.parser.advance(&mut **terminal, &buf[..batch_bytes]);
+            crate::perf_metrics::record_parser_batch(
+                self.route_id,
+                batch_bytes,
+                crate::perf_metrics::elapsed_us(parser_started),
+            );
 
-            processed += unprocessed;
+            processed += batch_bytes;
             unprocessed = 0;
 
             // Assure we're not blocking the terminal too long unnecessarily.
@@ -230,6 +238,14 @@ where
                     );
                 }
             }
+        }
+
+        if processed > 0 {
+            crate::perf_metrics::record_pty_read(
+                self.route_id,
+                processed,
+                crate::perf_metrics::elapsed_us(read_started),
+            );
         }
 
         Ok(())

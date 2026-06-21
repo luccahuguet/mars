@@ -3617,6 +3617,7 @@ impl Screen<'_> {
     }
 
     pub(crate) fn render(&mut self) -> Option<crate::context::renderable::WindowUpdate> {
+        let frame_started = rio_backend::perf_metrics::start_timer();
         let current_route = self.context_manager.current_route();
         let (grid_cols, grid_rows) = {
             let terminal = self.context_manager.current().terminal.lock();
@@ -3661,9 +3662,16 @@ impl Screen<'_> {
             }
         }
 
+        let snapshot_started = rio_backend::perf_metrics::start_timer();
         let (window_update, any_panel_dirty) = self
             .renderer
             .run(&mut self.sugarloaf, &mut self.context_manager);
+        let snapshot_us = rio_backend::perf_metrics::elapsed_us(snapshot_started);
+        rio_backend::perf_metrics::record_render_snapshot(
+            current_route,
+            snapshot_us,
+            any_panel_dirty,
+        );
         let has_animation = self.renderer.needs_redraw();
         let visual_bell_frame = self.visual_bell_frame();
         let should_present = any_panel_dirty
@@ -3751,6 +3759,9 @@ impl Screen<'_> {
         // rebuild only those rows.
         // Unchanged rows keep their CellBg + CellText resident in
         // the grid's CPU state, which is re-uploaded verbatim.
+        let grid_emit_started = rio_backend::perf_metrics::start_timer();
+        let grid_emit_us;
+        let present_us;
         {
             struct PanelFrame {
                 route_id: usize,
@@ -3983,6 +3994,14 @@ impl Screen<'_> {
                 let Some(p) = panels.iter_mut().find(|p| p.route_id == *route_id) else {
                     continue;
                 };
+                let panel_emit_started = rio_backend::perf_metrics::start_timer();
+                let damage_label = match p.damage {
+                    rio_backend::event::TerminalDamage::Noop => "noop",
+                    rio_backend::event::TerminalDamage::Full => "full",
+                    rio_backend::event::TerminalDamage::Partial => "partial",
+                    rio_backend::event::TerminalDamage::CursorOnly => "cursor_only",
+                };
+                let mut rebuilt_rows = 0usize;
 
                 // Decide which rows to rebuild.
                 //
@@ -4109,6 +4128,7 @@ impl Screen<'_> {
                         // (cursor_pos moved, etc.) take effect.
                     }
                     RowsToRebuild::All => {
+                        rebuilt_rows = p.visible_rows.len();
                         for y in 0..p.visible_rows.len() {
                             rebuild_row(p, y, grid, rasterizer);
                         }
@@ -4123,6 +4143,7 @@ impl Screen<'_> {
                             if !p.visible_rows[y].dirty {
                                 continue;
                             }
+                            rebuilt_rows += 1;
                             rebuild_row(p, y, grid, rasterizer);
                             p.visible_rows[y].dirty = false;
                         }
@@ -4237,8 +4258,17 @@ impl Screen<'_> {
                 };
 
                 frame_grids.push((grid, uniforms));
+                rio_backend::perf_metrics::record_grid_emit(
+                    p.route_id,
+                    damage_label,
+                    rebuilt_rows,
+                    rebuilt_rows.saturating_mul(cols),
+                    rio_backend::perf_metrics::elapsed_us(panel_emit_started),
+                );
             }
 
+            grid_emit_us = rio_backend::perf_metrics::elapsed_us(grid_emit_started);
+            let present_started = rio_backend::perf_metrics::start_timer();
             if should_present {
                 if frame_grids.is_empty() {
                     self.sugarloaf.render();
@@ -4253,6 +4283,7 @@ impl Screen<'_> {
                 // composite them on top of their re-pushed selves.
                 self.sugarloaf.discard_frame();
             }
+            present_us = rio_backend::perf_metrics::elapsed_us(present_started);
 
             // Return each panel's snapshot buffers to the matching
             // context's `renderable_content` so the next frame's
@@ -4276,6 +4307,17 @@ impl Screen<'_> {
             }
             panels.clear();
         }
+        rio_backend::perf_metrics::record_frame_render(
+            current_route,
+            should_present,
+            any_panel_dirty,
+            has_animation,
+            visual_bell_frame != VisualBellFrame::Inactive,
+            rio_backend::perf_metrics::elapsed_us(frame_started),
+            snapshot_us,
+            grid_emit_us,
+            present_us,
+        );
 
         // Mark as dirty if we need continuous rendering (e.g.,
         // indeterminate progress bar, trail cursor animation). UI-only

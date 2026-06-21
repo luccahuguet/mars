@@ -5,6 +5,7 @@ pub mod config;
 pub mod crosswords;
 pub mod error;
 pub mod event;
+pub mod perf_metrics;
 pub mod performer;
 pub mod selection;
 pub mod simd_base64;

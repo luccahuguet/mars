@@ -26,6 +26,16 @@ DEFAULT_REPRO_SCENARIOS = (
 )
 CORPUS_GENERATOR_VERSION = 1
 CORPUS_KINDS = ("pty_flood", "scroll_render", "utf8", "osc_control", "sync_bursts")
+INTERNAL_METRIC_FIELDS = (
+    "bytes",
+    "cells",
+    "duration_us",
+    "grid_emit_us",
+    "present_us",
+    "rows",
+    "snapshot_us",
+    "total_us",
+)
 ENV_PREFIXES = (
     "MARS",
     "RIO_CONFIG_HOME",
@@ -387,6 +397,82 @@ def read_phase(phase_file: Path | None) -> str:
     return phase_file.read_text(encoding="utf-8").strip()
 
 
+def percentile(sorted_values: list[int], fraction: float) -> int:
+    if not sorted_values:
+        return 0
+    index = int((len(sorted_values) - 1) * fraction)
+    return sorted_values[index]
+
+
+def summarize_internal_metrics(run_dir: Path) -> dict[str, object]:
+    metrics_path = run_dir / "mars_perf_metrics.jsonl"
+    summary_path = run_dir / "mars_perf_metrics_summary.json"
+    if not metrics_path.exists():
+        return {
+            "enabled": False,
+            "file": str(metrics_path),
+            "summary_file": "",
+            "line_count": 0,
+            "invalid_line_count": 0,
+            "events": {},
+            "histograms": {},
+        }
+
+    line_count = 0
+    invalid_line_count = 0
+    events: dict[str, int] = {}
+    values: dict[str, list[int]] = {}
+    for line in metrics_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        line_count += 1
+        try:
+            metric = json.loads(line)
+        except json.JSONDecodeError:
+            invalid_line_count += 1
+            continue
+        if not isinstance(metric, dict):
+            invalid_line_count += 1
+            continue
+        event = str(metric.get("event", "unknown"))
+        events[event] = events.get(event, 0) + 1
+        for field in INTERNAL_METRIC_FIELDS:
+            value = metric.get(field)
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            values.setdefault(f"{event}.{field}", []).append(value)
+
+    histograms: dict[str, dict[str, int]] = {}
+    for name, field_values in sorted(values.items()):
+        field_values.sort()
+        histograms[name] = {
+            "count": len(field_values),
+            "min": field_values[0],
+            "p50": percentile(field_values, 0.50),
+            "p95": percentile(field_values, 0.95),
+            "p99": percentile(field_values, 0.99),
+            "max": field_values[-1],
+        }
+
+    summary: dict[str, object] = {
+        "enabled": True,
+        "file": str(metrics_path),
+        "summary_file": str(summary_path),
+        "line_count": line_count,
+        "invalid_line_count": invalid_line_count,
+        "events": dict(sorted(events.items())),
+        "histograms": histograms,
+    }
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return summary
+
+
+def compact_mapping(mapping: object) -> str:
+    if not isinstance(mapping, dict) or not mapping:
+        return ""
+    return ",".join(f"{key}:{value}" for key, value in mapping.items())
+
+
 def write_summary(
     path: Path,
     run_dir: Path,
@@ -402,6 +488,7 @@ def write_summary(
     if len(sample_lines) > 1:
         last_sample = sample_lines[-1]
     average_cpu, max_cpu, process_sample_count = read_process_cpu(samples)
+    internal_metrics = summarize_internal_metrics(run_dir)
 
     thread_sample_lines = threads.read_text(encoding="utf-8").splitlines()[1:]
     last_thread_sample = ""
@@ -432,6 +519,12 @@ def write_summary(
         f"pidstat_process={(run_dir / 'pidstat.txt').exists()}",
         f"pidstat_threads={(run_dir / 'pidstat_threads.txt').exists()}",
         f"perf_stat={(run_dir / 'perf_stat.txt').exists()}",
+        f"mars_internal_metrics={internal_metrics['enabled']}",
+        f"mars_internal_metrics_file={internal_metrics['file']}",
+        f"mars_internal_metrics_summary={internal_metrics['summary_file']}",
+        f"mars_internal_metrics_lines={internal_metrics['line_count']}",
+        f"mars_internal_metrics_invalid_lines={internal_metrics['invalid_line_count']}",
+        f"mars_internal_metric_events={compact_mapping(internal_metrics['events'])}",
         f"ps_process_sample_count={process_sample_count}",
         f"ps_process_cpu_average={average_cpu:.2f}",
         f"ps_process_cpu_max={max_cpu:.2f}",
@@ -616,9 +709,13 @@ def launch_mars(
     config_home: Path,
     workload: Path,
     run_dir: Path,
+    internal_metrics: bool,
 ) -> subprocess.Popen[str]:
     env = os.environ.copy()
     env["MARS_CONFIG_HOME"] = str(config_home)
+    if internal_metrics:
+        env["MARS_PERF_METRICS"] = "1"
+        env["MARS_PERF_METRICS_FILE"] = str(run_dir / "mars_perf_metrics.jsonl")
     stdout_file = (run_dir / "mars_stdout.log").open("w", encoding="utf-8")
     stderr_file = (run_dir / "mars_stderr.log").open("w", encoding="utf-8")
     try:
@@ -684,6 +781,7 @@ def run_repro_suite(args: argparse.Namespace) -> int:
         f"repeat_count={args.repeat}",
         f"primary_sampler={'pidstat' if command_exists('pidstat') else 'ps_fallback'}",
         f"perf_stat_requested={args.perf_stat}",
+        f"internal_metrics_requested={args.internal_metrics}",
         f"scenarios={','.join(scenarios)}",
     ]
     if corpus is not None:
@@ -736,12 +834,20 @@ def run_repro_suite(args: argparse.Namespace) -> int:
                 f"scroll_lines={args.scroll_lines}",
                 f"cooldown_seconds={args.cooldown_seconds}",
                 f"perf_stat_requested={args.perf_stat}",
+                f"internal_metrics_requested={args.internal_metrics}",
+                f"internal_metrics_file={run_dir / 'mars_perf_metrics.jsonl' if args.internal_metrics else ''}",
             ]
             if scenario == "corpus_replay" and corpus is not None:
                 manifest.extend(corpus_manifest_lines(corpus, run_dir))
             (run_dir / "manifest.txt").write_text("\n".join(manifest) + "\n", encoding="utf-8")
 
-            process = launch_mars(args.mars_binary, config_home, workload, run_dir)
+            process = launch_mars(
+                args.mars_binary,
+                config_home,
+                workload,
+                run_dir,
+                args.internal_metrics,
+            )
             time.sleep(args.startup_delay)
             if process.poll() is not None:
                 exit_code = 1
@@ -812,6 +918,11 @@ def parse_args() -> argparse.Namespace:
         "--perf-stat",
         action="store_true",
         help="also run perf stat for the sampled Mars process when perf is available",
+    )
+    parser.add_argument(
+        "--internal-metrics",
+        action="store_true",
+        help="enable gated Mars PTY/render JSONL metrics for suite-launched Mars",
     )
     parser.add_argument(
         "--generate-corpus",

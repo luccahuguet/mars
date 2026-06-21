@@ -47,6 +47,7 @@ Minimum saved files:
 - `summary.txt`
 - `pidstat.txt` and `pidstat_threads.txt` when `pidstat` is available; these are the primary CPU/resource artifacts
 - `perf_stat.txt` when `--perf-stat` is requested and `perf` is available, otherwise `perf_stat_skipped.txt`
+- `mars_perf_metrics.jsonl` and `mars_perf_metrics_summary.json` when `--internal-metrics` is requested
 
 ## Reproducible Gate
 
@@ -99,9 +100,20 @@ Add hardware-counter evidence when the host has `perf`:
 tools/mars_perf_gate.py --suite --scenario pty_flood --seconds 20 --perf-stat
 ```
 
+Add Mars-owned PTY/render histograms for a focused traced run:
+
+```sh
+tools/mars_perf_gate.py --suite --scenario pty_flood --seconds 20 --internal-metrics
+```
+
+Internal metrics are off by default in Mars. The suite enables them by
+setting `MARS_PERF_METRICS=1` and `MARS_PERF_METRICS_FILE` only when
+`--internal-metrics` is present. Manual dogfooding can also enable them
+with `MARS_PERF_METRICS=1` or `MARS_PERF_TRACE=metrics`.
+
 `--seconds` is the active workload duration for bounded workloads. Non-idle scenarios also sample `--cooldown-seconds` after the workload window so sustained CPU after output or animation can be seen in the same artifact.
 
-Documented variables are written to `suite_summary.txt` and each scenario `manifest.txt`: Mars binary, workload seconds, sample seconds, startup delay, line counts, cooldown, repeat count, generated config path, workload path, phase file, primary sampler, and whether `perf stat` was requested.
+Documented variables are written to `suite_summary.txt` and each scenario `manifest.txt`: Mars binary, workload seconds, sample seconds, startup delay, line counts, cooldown, repeat count, generated config path, workload path, phase file, primary sampler, whether `perf stat` was requested, and whether internal Mars metrics were requested.
 
 Use a specific binary with:
 
@@ -145,6 +157,7 @@ them.
 - `yzx screen` does not cause sustained CPU after the bounded workload ends
 - Scenario summaries include `workload_phase`; a PTY or scroll row that never reaches `output_done` did not complete the intended cooldown portion
 - Artifacts identify whether CPU is in Mars, Zellij, Codex, or helpers
+- Focused traced runs can show PTY read batches, parser/state batches, render snapshots, grid row/cell emission, and frame present timing
 - 2-4 active Codex sessions remain a supplemental dogfooding row until a synthetic Codex-load harness exists
 
 If any row fails, keep Mars private and create a focused follow-up Bead from the artifact evidence.
