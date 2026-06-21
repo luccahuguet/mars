@@ -77,6 +77,22 @@ tools/mars_perf_gate.py --suite --seconds 20 --repeat 3
 
 The runner only computes small `ps` fallback summaries. Compare repeated run directories and use `pidstat`/`perf` artifacts as the primary measurement source when those tools are available.
 
+Generate a deterministic terminal input corpus separately from measurement:
+
+```sh
+tools/mars_perf_gate.py --generate-corpus /tmp/mars_scroll.bin --corpus-kind scroll_render --corpus-seed 7 --corpus-lines 80000
+```
+
+Replay that exact corpus through Mars with normal artifacts:
+
+```sh
+tools/mars_perf_gate.py --suite --scenario corpus_replay --corpus /tmp/mars_scroll.bin --seconds 20
+```
+
+Corpus replay manifests include corpus path, size, SHA-256, seed,
+generator version, terminal rows/columns, line count, and copied metadata.
+Corpus generation is not part of timed measurement.
+
 Add hardware-counter evidence when the host has `perf`:
 
 ```sh

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
+import json
 import os
+import random
 import re
 import shutil
 import signal
@@ -21,6 +24,8 @@ DEFAULT_REPRO_SCENARIOS = (
     "scroll_render",
     "yzx_screen_mandelbrot",
 )
+CORPUS_GENERATOR_VERSION = 1
+CORPUS_KINDS = ("pty_flood", "scroll_render", "utf8", "osc_control", "sync_bursts")
 ENV_PREFIXES = (
     "MARS",
     "RIO_CONFIG_HOME",
@@ -64,6 +69,10 @@ SCENARIOS = {
         name="yzx_screen_mandelbrot",
         description="Run `yzx screen mandelbrot` for a bounded duration when yzx is available.",
     ),
+    "corpus_replay": Scenario(
+        name="corpus_replay",
+        description="Replay an existing deterministic terminal input corpus through Mars.",
+    ),
 }
 
 
@@ -78,6 +87,55 @@ def sample_timestamp() -> str:
 def run_capture(argv: list[str]) -> str:
     result = subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     return result.stdout
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def corpus_metadata_path(corpus: Path) -> Path:
+    return corpus.with_name(f"{corpus.name}.json")
+
+
+def read_corpus_metadata(corpus: Path) -> dict[str, object]:
+    metadata_path = corpus_metadata_path(corpus)
+    if not metadata_path.exists():
+        return {}
+    try:
+        parsed = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def corpus_manifest_lines(corpus: Path, run_dir: Path) -> list[str]:
+    metadata = read_corpus_metadata(corpus)
+    metadata_path = corpus_metadata_path(corpus)
+    copied_metadata = run_dir / "corpus_metadata.json"
+    copied_metadata.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    lines = [
+        f"corpus_path={corpus}",
+        f"corpus_metadata_path={metadata_path if metadata_path.exists() else ''}",
+        f"corpus_metadata_artifact={copied_metadata}",
+        f"corpus_size_bytes={corpus.stat().st_size}",
+        f"corpus_sha256={file_sha256(corpus)}",
+    ]
+    for key in [
+        "generator_version",
+        "kind",
+        "seed",
+        "rows",
+        "columns",
+        "line_count",
+        "byte_count",
+        "sha256",
+    ]:
+        lines.append(f"corpus_{key}={metadata.get(key, '')}")
+    return lines
 
 
 def command_exists(command: str) -> bool:
@@ -142,6 +200,56 @@ def terminate_process_group(process: subprocess.Popen[str]) -> None:
 def safe_label(raw: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("_")
     return value or "manual"
+
+
+def corpus_line(kind: str, index: int, columns: int, rng: random.Random) -> bytes:
+    if kind == "pty_flood":
+        payload = "".join(rng.choice("abcdef0123456789") for _ in range(max(columns, 16)))
+        return f"mars_corpus_pty {index:06d} {payload}\n".encode()
+    if kind == "scroll_render":
+        width = 1 + (index % 10)
+        return f"mars_corpus_scroll {index:06d} {'0123456789abcdef' * width}\n".encode()
+    if kind == "utf8":
+        words = ["Yazelix", "Mars", "Rio", "cursor", "render", "ação", "東京", "λ", "✓"]
+        payload = " ".join(rng.choice(words) for _ in range(max(4, columns // 12)))
+        return f"mars_corpus_utf8 {index:06d} {payload}\n".encode()
+    if kind == "osc_control":
+        color = rng.choice(["31", "32", "33", "34", "35", "36"])
+        title = f"mars-corpus-{index:06d}"
+        return f"\x1b]0;{title}\x07\x1b[{color}mmars_corpus_osc {index:06d}\x1b[0m\n".encode()
+    if kind == "sync_bursts":
+        body = f"mars_corpus_sync {index:06d} {'#' * (1 + index % max(columns // 2, 1))}\n"
+        return f"\x1b[?2026h{body}\x1b[?2026l".encode()
+    raise ValueError(f"unknown corpus kind: {kind}")
+
+
+def generate_corpus(args: argparse.Namespace) -> int:
+    corpus = Path(args.generate_corpus).expanduser()
+    corpus.parent.mkdir(parents=True, exist_ok=True)
+    rng = random.Random(args.corpus_seed)
+
+    with corpus.open("wb") as handle:
+        if args.corpus_kind == "scroll_render":
+            handle.write(b"\x1b[2J\x1b[H")
+        for index in range(args.corpus_lines):
+            handle.write(corpus_line(args.corpus_kind, index, args.corpus_columns, rng))
+
+    metadata = {
+        "generator": "mars_perf_gate.py",
+        "generator_version": CORPUS_GENERATOR_VERSION,
+        "kind": args.corpus_kind,
+        "seed": args.corpus_seed,
+        "rows": args.corpus_rows,
+        "columns": args.corpus_columns,
+        "line_count": args.corpus_lines,
+        "byte_count": corpus.stat().st_size,
+        "sha256": file_sha256(corpus),
+    }
+    metadata_path = corpus_metadata_path(corpus)
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(corpus)
+    print(metadata_path)
+    return 0
 
 
 def write_context(
@@ -395,6 +503,7 @@ def write_workload_script(
     pty_lines: int,
     scroll_lines: int,
     cooldown_seconds: int,
+    corpus: Path | None = None,
 ) -> None:
     hold_seconds = sample_seconds + cooldown_seconds + 2
     lines = [
@@ -419,6 +528,7 @@ def write_workload_script(
         f"pty_lines = {pty_lines}",
         f"scroll_lines = {scroll_lines}",
         f"sample_seconds = {sample_seconds}",
+        f"corpus_path = Path({str(corpus)!r}) if {corpus is not None!r} else None",
         "",
         "mark_phase('started')",
         "flush_print(f'mars perf workload start: {scenario}')",
@@ -469,6 +579,22 @@ def write_workload_script(
                 "    except subprocess.TimeoutExpired:",
                 "        flush_print('bounded yzx screen run reached timeout')",
                 "    mark_phase('screen_done')",
+                "time.sleep(hold_seconds)",
+            ]
+        )
+    elif scenario == "corpus_replay":
+        lines.extend(
+            [
+                "if corpus_path is None:",
+                "    raise SystemExit('corpus_replay requires a corpus path')",
+                "with corpus_path.open('rb') as handle:",
+                "    while True:",
+                "        chunk = handle.read(65536)",
+                "        if not chunk:",
+                "            break",
+                "        sys.stdout.buffer.write(chunk)",
+                "    sys.stdout.buffer.flush()",
+                "mark_phase('output_done')",
                 "time.sleep(hold_seconds)",
             ]
         )
@@ -525,6 +651,14 @@ def run_repro_suite(args: argparse.Namespace) -> int:
     if unknown:
         print(f"unknown scenarios: {', '.join(unknown)}", file=sys.stderr)
         return 2
+    corpus = Path(args.corpus).expanduser() if args.corpus else None
+    if "corpus_replay" in scenarios:
+        if corpus is None:
+            print("corpus_replay requires --corpus PATH", file=sys.stderr)
+            return 2
+        if not corpus.is_file():
+            print(f"corpus file not found: {corpus}", file=sys.stderr)
+            return 2
     if len(set(scenarios)) != len(scenarios):
         print("duplicate scenarios are not allowed; use --repeat for repeated runs", file=sys.stderr)
         return 2
@@ -547,8 +681,16 @@ def run_repro_suite(args: argparse.Namespace) -> int:
         f"primary_sampler={'pidstat' if command_exists('pidstat') else 'ps_fallback'}",
         f"perf_stat_requested={args.perf_stat}",
         f"scenarios={','.join(scenarios)}",
-        "",
     ]
+    if corpus is not None:
+        suite_lines.extend(
+            [
+                f"corpus_path={corpus}",
+                f"corpus_size_bytes={corpus.stat().st_size}",
+                f"corpus_sha256={file_sha256(corpus)}",
+            ]
+        )
+    suite_lines.append("")
 
     exit_code = 0
     for repeat_index in range(1, args.repeat + 1):
@@ -571,6 +713,7 @@ def run_repro_suite(args: argparse.Namespace) -> int:
                 args.pty_lines,
                 args.scroll_lines,
                 args.cooldown_seconds,
+                corpus if scenario == "corpus_replay" else None,
             )
 
             manifest = [
@@ -590,6 +733,8 @@ def run_repro_suite(args: argparse.Namespace) -> int:
                 f"cooldown_seconds={args.cooldown_seconds}",
                 f"perf_stat_requested={args.perf_stat}",
             ]
+            if scenario == "corpus_replay" and corpus is not None:
+                manifest.extend(corpus_manifest_lines(corpus, run_dir))
             (run_dir / "manifest.txt").write_text("\n".join(manifest) + "\n", encoding="utf-8")
 
             process = launch_mars(args.mars_binary, config_home, workload, run_dir)
@@ -662,6 +807,24 @@ def parse_args() -> argparse.Namespace:
         help="also run perf stat for the sampled Mars process when perf is available",
     )
     parser.add_argument(
+        "--generate-corpus",
+        help="write a deterministic terminal input corpus and exit",
+    )
+    parser.add_argument(
+        "--corpus",
+        help="existing terminal input corpus to replay with --suite --scenario corpus_replay",
+    )
+    parser.add_argument(
+        "--corpus-kind",
+        choices=CORPUS_KINDS,
+        default="pty_flood",
+        help="corpus kind for --generate-corpus",
+    )
+    parser.add_argument("--corpus-seed", type=int, default=1)
+    parser.add_argument("--corpus-lines", type=int, default=10000)
+    parser.add_argument("--corpus-rows", type=int, default=44)
+    parser.add_argument("--corpus-columns", type=int, default=132)
+    parser.add_argument(
         "--scenario",
         action="append",
         choices=sorted(SCENARIOS),
@@ -681,6 +844,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.generate_corpus:
+        if args.corpus_lines < 0:
+            print("corpus-lines must be >= 0", file=sys.stderr)
+            return 2
+        if args.corpus_rows < 1 or args.corpus_columns < 1:
+            print("corpus rows/columns must be >= 1", file=sys.stderr)
+            return 2
+        return generate_corpus(args)
     if args.seconds < 1:
         print("seconds must be >= 1", file=sys.stderr)
         return 2
