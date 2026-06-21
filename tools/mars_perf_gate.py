@@ -641,6 +641,10 @@ def scenario_sample_seconds(scenario: str, args: argparse.Namespace) -> int:
     return args.seconds + args.cooldown_seconds
 
 
+def completed_workload_phase(phase: str) -> bool:
+    return phase in {"done", "output_done", "screen_done"}
+
+
 def run_repro_suite(args: argparse.Namespace) -> int:
     if shutil.which(args.mars_binary) is None:
         print(f"Mars binary not found or not executable: {args.mars_binary}", file=sys.stderr)
@@ -763,8 +767,11 @@ def run_repro_suite(args: argparse.Namespace) -> int:
                 )
                 phase = read_phase(phase_file)
                 if process.poll() is not None:
-                    exit_code = 1
-                    status = f"ended early, exit_status={process.returncode}"
+                    if process.returncode == 0 and completed_workload_phase(phase):
+                        status = f"ok, exited after completed workload, exit_status={process.returncode}"
+                    else:
+                        exit_code = 1
+                        status = f"ended early, exit_status={process.returncode}"
                 else:
                     status = "ok"
                 suite_lines.extend(
