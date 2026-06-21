@@ -562,6 +562,29 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 if self.config.bell.audio {
                     self.handle_audio_bell();
                 }
+
+                let visual_bell_route = if self.config.bell.visual {
+                    if let Some(route) = self.router.routes.get_mut(&window_id) {
+                        route.window.screen.ring_visual_bell();
+                        route.request_redraw();
+                        Some(route.window.screen.ctx().current_route())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(route_id) = visual_bell_route {
+                    let timer_id = TimerId::new(Topic::VisualBell, route_id);
+                    let _ = self.scheduler.unschedule(timer_id);
+                    self.scheduler.schedule(
+                        EventPayload::new(RioEventType::Rio(RioEvent::Render), window_id),
+                        crate::constants::BELL_DURATION,
+                        false,
+                        timer_id,
+                    );
+                }
             }
             RioEventType::Rio(RioEvent::DesktopNotification { title, body }) => {
                 self.handle_desktop_notification(&title, &body);

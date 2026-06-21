@@ -54,6 +54,7 @@ use rio_window::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
+use std::time::Instant;
 use touch::TouchPurpose;
 
 /// Maximum number of lines for the blocking search while still typing the search regex.
@@ -61,6 +62,13 @@ const MAX_SEARCH_WHILE_TYPING: Option<usize> = Some(1000);
 
 /// Maximum number of search terms stored in the history.
 const MAX_SEARCH_HISTORY_SIZE: usize = 255;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VisualBellFrame {
+    Inactive,
+    Active,
+    Clearing,
+}
 
 pub struct Screen<'screen> {
     bindings: crate::bindings::KeyBindings,
@@ -80,6 +88,7 @@ pub struct Screen<'screen> {
     pub allow_manual_dragging: bool,
     pub grids: rustc_hash::FxHashMap<usize, rio_backend::sugarloaf::grid::GridRenderer>,
     pub grid_rasterizer: crate::grid_emit::GridGlyphRasterizer,
+    visual_bell_until: Option<Instant>,
 }
 
 pub struct ScreenWindowProperties {
@@ -298,7 +307,23 @@ impl Screen<'_> {
             allow_manual_dragging: config.navigation.is_enabled(),
             grids: rustc_hash::FxHashMap::default(),
             grid_rasterizer: crate::grid_emit::GridGlyphRasterizer::new(),
+            visual_bell_until: None,
         })
+    }
+
+    pub fn ring_visual_bell(&mut self) {
+        self.visual_bell_until = Some(Instant::now() + crate::constants::BELL_DURATION);
+    }
+
+    fn visual_bell_frame(&mut self) -> VisualBellFrame {
+        match self.visual_bell_until {
+            Some(until) if Instant::now() < until => VisualBellFrame::Active,
+            Some(_) => {
+                self.visual_bell_until = None;
+                VisualBellFrame::Clearing
+            }
+            None => VisualBellFrame::Inactive,
+        }
     }
 
     #[inline]
@@ -3640,7 +3665,10 @@ impl Screen<'_> {
             .renderer
             .run(&mut self.sugarloaf, &mut self.context_manager);
         let has_animation = self.renderer.needs_redraw();
-        let should_present = any_panel_dirty || has_animation;
+        let visual_bell_frame = self.visual_bell_frame();
+        let should_present = any_panel_dirty
+            || has_animation
+            || visual_bell_frame != VisualBellFrame::Inactive;
 
         if self.renderer.custom_mouse_cursor {
             let scale = self.sugarloaf.scale_factor();
@@ -3693,6 +3721,21 @@ impl Screen<'_> {
                     cursor_color,
                 );
             }
+        }
+
+        if visual_bell_frame == VisualBellFrame::Active {
+            let window_size = self.sugarloaf.window_size();
+            let scale_factor = self.sugarloaf.scale_factor();
+            self.sugarloaf.rect(
+                None,
+                0.0,
+                0.0,
+                window_size.width / scale_factor,
+                window_size.height / scale_factor,
+                [1.0, 1.0, 1.0, 0.18],
+                0.0,
+                255,
+            );
         }
 
         // Phase 2.2/2.3: per-panel CellBg + CellText emission with

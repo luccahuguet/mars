@@ -7,6 +7,10 @@ scrollback-history-limit = 0
 force-theme = "dark"
 enable-scroll-bar = false
 
+[bell]
+audio = false
+visual = true
+
 [effects]
 trail-cursor = true
 

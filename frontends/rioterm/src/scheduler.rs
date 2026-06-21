@@ -29,6 +29,7 @@ pub enum Topic {
     CursorBlinking,
     UpdateTitles,
     SelectionScrolling,
+    VisualBell,
 }
 
 /// Event scheduled to be emitted at a specific time.
