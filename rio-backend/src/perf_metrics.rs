@@ -103,27 +103,25 @@ mod imp {
     }
 
     pub fn record_pty_read(route_id: usize, bytes: usize, duration_us: Option<u64>) {
-        write_event(
-            "pty_read_batch",
-            &format!(
+        write_event("pty_read_batch", || {
+            format!(
                 ",\"route_id\":{},\"bytes\":{},\"duration_us\":{}",
                 route_id,
                 bytes,
                 json_opt_u64(duration_us)
-            ),
-        );
+            )
+        });
     }
 
     pub fn record_parser_batch(route_id: usize, bytes: usize, duration_us: Option<u64>) {
-        write_event(
-            "parser_state_batch",
-            &format!(
+        write_event("parser_state_batch", || {
+            format!(
                 ",\"route_id\":{},\"bytes\":{},\"duration_us\":{}",
                 route_id,
                 bytes,
                 json_opt_u64(duration_us)
-            ),
-        );
+            )
+        });
     }
 
     pub fn record_render_snapshot(
@@ -131,15 +129,14 @@ mod imp {
         duration_us: Option<u64>,
         any_panel_dirty: bool,
     ) {
-        write_event(
-            "render_snapshot",
-            &format!(
+        write_event("render_snapshot", || {
+            format!(
                 ",\"route_id\":{},\"duration_us\":{},\"any_panel_dirty\":{}",
                 route_id,
                 json_opt_u64(duration_us),
                 any_panel_dirty
-            ),
-        );
+            )
+        });
     }
 
     pub fn record_grid_emit(
@@ -149,17 +146,16 @@ mod imp {
         cells: usize,
         duration_us: Option<u64>,
     ) {
-        write_event(
-            "grid_emit",
-            &format!(
+        write_event("grid_emit", || {
+            format!(
                 ",\"route_id\":{},\"damage\":\"{}\",\"rows\":{},\"cells\":{},\"duration_us\":{}",
                 route_id,
                 escape_json(damage),
                 rows,
                 cells,
                 json_opt_u64(duration_us)
-            ),
-        );
+            )
+        });
     }
 
     pub fn record_frame_render(
@@ -173,9 +169,8 @@ mod imp {
         grid_emit_us: Option<u64>,
         present_us: Option<u64>,
     ) {
-        write_event(
-            "frame_render",
-            &format!(
+        write_event("frame_render", || {
+            format!(
                 concat!(
                     ",\"route_id\":{},\"presented\":{},\"any_panel_dirty\":{},",
                     "\"has_animation\":{},\"visual_bell\":{},\"total_us\":{},",
@@ -190,13 +185,14 @@ mod imp {
                 json_opt_u64(snapshot_us),
                 json_opt_u64(grid_emit_us),
                 json_opt_u64(present_us)
-            ),
-        );
+            )
+        });
     }
 
-    fn write_event(event: &str, fields: &str) {
+    fn write_event(event: &str, fields: impl FnOnce() -> String) {
         if let Some(metrics) = metrics() {
-            write_raw_event(metrics, event, fields);
+            let fields = fields();
+            write_raw_event(metrics, event, &fields);
         }
     }
 
