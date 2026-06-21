@@ -114,6 +114,13 @@ config path, key environment variables, periodic child state, descendant
 processes, survivor candidates, final status, and end time. It is for
 diagnostics only and does not replace the reproducible performance gate.
 
+## Yazelix Cursors V1
+
+`mars-yazelix` materializes a launch-local Mars config from the current
+`yzc current --format json` selection. V1 only writes the selected color
+to Rio-compatible `[colors].cursor`; split, multicolor, and shader cursor
+geometry stay out of scope until separate cursor beads implement them.
+
 ## Pass Bar
 
 - Idle Mars does not sit on a busy core
