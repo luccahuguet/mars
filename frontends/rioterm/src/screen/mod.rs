@@ -53,6 +53,7 @@ use rio_window::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use rio_window::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use std::error::Error;
 use std::ffi::OsStr;
+use std::process::{Command, Stdio};
 use touch::TouchPurpose;
 
 /// Maximum number of lines for the blocking search while still typing the search regex.
@@ -2199,25 +2200,61 @@ impl Screen<'_> {
     fn open_hyperlink(&self, hyperlink: Hyperlink) {
         // Apply post-processing to remove trailing delimiters and handle uneven brackets
         let processed_uri = post_process_hyperlink_uri(hyperlink.uri());
-        Self::open_uri_direct(&processed_uri);
+        if crate::hints::has_uri_scheme(&processed_uri) {
+            Self::open_uri_direct(&processed_uri);
+            return;
+        }
+
+        #[cfg(not(any(target_os = "macos", windows)))]
+        self.exec("xdg-open", [&processed_uri]);
+
+        #[cfg(target_os = "macos")]
+        self.exec("open", [&processed_uri]);
+
+        #[cfg(windows)]
+        self.exec("cmd", ["/c", "start", "", &processed_uri]);
     }
 
     fn open_uri_direct(uri: &str) {
         #[cfg(not(any(target_os = "macos", windows)))]
         {
-            let _ = std::process::Command::new("xdg-open").arg(uri).spawn();
+            let mut command = Command::new("xdg-open");
+            command.arg(uri);
+            Self::spawn_desktop_opener(command);
         }
 
         #[cfg(target_os = "macos")]
         {
-            let _ = std::process::Command::new("open").arg(uri).spawn();
+            let mut command = Command::new("open");
+            command.arg(uri);
+            Self::spawn_desktop_opener(command);
         }
 
         #[cfg(windows)]
         {
-            let _ = std::process::Command::new("cmd")
-                .args(["/c", "start", "", uri])
-                .spawn();
+            let mut command = Command::new("cmd");
+            command.args(["/c", "start", "", uri]);
+            Self::spawn_desktop_opener(command);
+        }
+    }
+
+    fn spawn_desktop_opener(mut command: Command) {
+        match command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => {
+                let _ = std::thread::Builder::new()
+                    .name("rio-url-opener".to_string())
+                    .spawn(move || {
+                        let _ = child.wait();
+                    });
+            }
+            Err(err) => {
+                tracing::warn!("Unable to launch desktop opener: {:?}", err);
+            }
         }
     }
 

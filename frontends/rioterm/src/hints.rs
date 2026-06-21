@@ -444,7 +444,10 @@ const URI_SCHEMES: &[&str] = &[
 
 pub fn has_uri_scheme(text: &str) -> bool {
     let text = text.trim();
-    URI_SCHEMES.iter().any(|s| text.starts_with(s))
+    URI_SCHEMES.iter().any(|scheme| {
+        text.get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    })
 }
 
 /// If `text` looks like a local filesystem path, resolve it against `cwd` and
@@ -734,6 +737,7 @@ mod tests {
     #[test]
     fn test_resolve_path_skips_scheme_urls() {
         assert!(resolve_path_for_opening("https://example.com", None).is_none());
+        assert!(resolve_path_for_opening("HTTP://localhost:4321/", None).is_none());
         assert!(resolve_path_for_opening("http://localhost:4321/", None).is_none());
         assert!(resolve_path_for_opening("mailto:a@b.c", None).is_none());
         assert!(resolve_path_for_opening("file:///tmp", None).is_none());
@@ -743,6 +747,7 @@ mod tests {
     #[test]
     fn test_has_uri_scheme() {
         assert!(has_uri_scheme("http://localhost:4321/"));
+        assert!(has_uri_scheme("HTTP://localhost:4321/"));
         assert!(has_uri_scheme(" https://example.com/docs "));
         assert!(!has_uri_scheme("/tmp/file.txt"));
         assert!(!has_uri_scheme("src/main.rs"));
