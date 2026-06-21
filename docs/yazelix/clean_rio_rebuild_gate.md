@@ -101,6 +101,19 @@ Manual dogfooding can add evidence, but it is not the gate. To sample an already
 tools/mars_perf_gate.py --label live_dogfood --seconds 20
 ```
 
+## Launcher Breadcrumbs
+
+Private dogfooding launchers should route desktop starts through:
+
+```sh
+mars-launch-trace --log-file ~/.cache/mars-desktop-launch.log -- mars ...
+```
+
+The trace helper records wrapper PID, Mars frontend PID, argv, selected
+config path, key environment variables, periodic child state, descendant
+processes, survivor candidates, final status, and end time. It is for
+diagnostics only and does not replace the reproducible performance gate.
+
 ## Pass Bar
 
 - Idle Mars does not sit on a busy core

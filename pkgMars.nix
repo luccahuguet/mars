@@ -2,6 +2,7 @@
   imagemagick,
   lib,
   makeWrapper,
+  python3,
   rioPackage,
   symlinkJoin,
 }:
@@ -12,6 +13,7 @@ symlinkJoin {
   nativeBuildInputs = [
     imagemagick
     makeWrapper
+    python3
   ];
 
   postBuild = ''
@@ -21,6 +23,8 @@ symlinkJoin {
 
     makeWrapper "${rioPackage}/bin/rio" "$out/bin/mars" \
       --add-flags "--app-id mars"
+    install -D -m 755 "${./tools/mars_launch_trace.py}" "$out/bin/mars-launch-trace"
+    patchShebangs "$out/bin/mars-launch-trace"
 
     install -D -m 644 "${./misc/mars.desktop}" \
       "$out/share/applications/mars.desktop"
