@@ -152,6 +152,10 @@ impl Perform for CountingPerformer {
 
     fn print_codepoints(&mut self, codepoints: &[u32]) {
         self.counts.print_chars += codepoints.len() as u64;
+        self.counts.print_bytes += codepoints
+            .iter()
+            .map(|&cp| char::from_u32(cp).unwrap_or('\u{FFFD}').len_utf8() as u64)
+            .sum::<u64>();
     }
 
     fn execute(&mut self, _byte: u8) {
@@ -252,5 +256,21 @@ mod tests {
         assert!(result.counts.print_chars >= 16);
         assert!(result.counts.csi_dispatch >= 4);
         assert!(result.counts.osc_dispatch >= 2);
+    }
+
+    #[test]
+    fn parser_benchmark_counts_utf8_print_bytes() {
+        let text = "acao ação 東京 λ ✓";
+        let result = run_parser_benchmark(
+            text.as_bytes(),
+            ParserBenchmarkConfig {
+                chunk_size: 3,
+                iterations: 3,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.counts.print_chars, text.chars().count() as u64 * 3);
+        assert_eq!(result.counts.print_bytes, text.len() as u64 * 3);
     }
 }
