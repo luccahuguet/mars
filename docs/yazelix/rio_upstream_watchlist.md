@@ -29,6 +29,7 @@ Record the issue query, result, and upstream commit range in the Bead or `docs/y
 | Issue | Relevance To Mars |
 | --- | --- |
 | [#1644 Background opacity does not work anymore (cosmic/wayland)](https://github.com/raphamorim/rio/issues/1644) | Directly matches the local transparency problem on COSMIC/Wayland. Treat opacity failure as likely upstream until a Mars-only difference is proven. |
+| [#1667 fix: honor surface alpha in Vulkan](https://github.com/raphamorim/rio/pull/1667) | Open upstream PR for the same Vulkan composite-alpha behavior. Mars should drop its local hunk once this or an equivalent Rio fix is merged and consumed. |
 | [#1658 Bug Report: Rio terminal close button freezes under Labwc (Wayland)](https://github.com/raphamorim/rio/issues/1658) | Wayland close/freeze issue. Relevant to Mars crash and shutdown dogfooding. |
 | [#1620 Wayland: mouse selection is not exported to PRIMARY selection](https://github.com/raphamorim/rio/issues/1620) | Wayland integration issue. Not a blocker for Mars startup, but relevant to daily terminal quality. |
 | [#1622 Window title on Wayland CSD drops non-Cantarell glyphs](https://github.com/raphamorim/rio/issues/1622) | Wayland CSD/titlebar font fallback issue. Relevant only if Mars keeps Rio CSD behavior visible. |
