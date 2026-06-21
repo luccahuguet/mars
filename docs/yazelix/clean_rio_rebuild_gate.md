@@ -185,10 +185,10 @@ cargo run -p rio-backend --bin mars-terminal-stream-bench --release \
 ```
 
 The output records corpus path/bytes, detected sidecar metadata path/size, the
-sidecar JSON metadata on one line when present, terminal dimensions, scrollback
-limit, chunk size, iterations, elapsed nanoseconds, bytes per second, final
-cursor position, final scrollback size, display offset, total grid lines, and
-synchronized-update buffer bytes.
+sidecar JSON metadata on one line when it is readable as UTF-8, terminal
+dimensions, scrollback limit, chunk size, iterations, elapsed nanoseconds, bytes
+per second, final cursor position, final scrollback size, display offset, total
+grid lines, and synchronized-update buffer bytes.
 
 To compare Mars against upstream Rio, apply the benchmark patch series to a
 `rio-upstream/main` worktree, generate one corpus file, and run the exact same
