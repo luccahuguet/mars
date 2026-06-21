@@ -116,10 +116,11 @@ diagnostics only and does not replace the reproducible performance gate.
 
 ## Yazelix Cursors V1
 
-`mars-yazelix` materializes a launch-local Mars config from the current
-`yzc current --format json` selection. V1 only writes the selected color
-to Rio-compatible `[colors].cursor`; split, multicolor, and shader cursor
-geometry stay out of scope until separate cursor beads implement them.
+`yzc materialize rio-compatible-config` materializes a launch-local
+Rio-compatible config from the current cursor selection. V1 only writes
+the selected color to `[colors].cursor`; split, multicolor, and shader
+cursor geometry stay out of scope until separate cursor beads implement
+them.
 
 ## Pass Bar
 
