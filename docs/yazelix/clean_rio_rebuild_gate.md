@@ -10,15 +10,12 @@ Mars stays private until this gate passes on the clean Rio-based branch.
 
 ## Private Yazelix Launcher
 
-The private test config is `misc/private_yazelix/config.toml`.
+The private Mars test config is `misc/private_yazelix/config.toml`.
+The matching Rio comparison config is `misc/private_rio/config.toml`.
 
-It runs:
-
-```toml
-[shell]
-program = "yzx"
-args = ["start"]
-```
+Keep those files identical until Mars has measured evidence for a
+terminal-specific config difference. Terminal identity belongs in the
+launcher and environment boundary, not in the TOML.
 
 After a local Mars package or binary exists, launch it with:
 
@@ -26,61 +23,91 @@ After a local Mars package or binary exists, launch it with:
 tools/mars_private_yazelix.py
 ```
 
-Use `MARS_BINARY=/path/to/mars` when testing a build artifact directly.
+The launcher sets `MARS_CONFIG_HOME`. The config owns startup through
+`[shell] program = "yzx"` and `args = ["start"]`. Use
+`MARS_BINARY=/path/to/mars` when testing a build artifact directly.
 
 ## Artifact Rule
 
-Every run should leave logs under:
+Every reproducible run leaves logs under:
 
 ```text
-artifacts/dogfooding/<timestamp>_<label>/
+artifacts/dogfooding/<timestamp>_repro_suite/
 ```
 
 Minimum saved files:
 
+- `suite_summary.txt`
 - `context.txt`
+- `manifest.txt`
+- `workload.py`
+- `workload_phase.txt`
 - `process_samples.tsv`
 - `thread_samples.tsv`
 - `summary.txt`
-- `pidstat.txt` and `pidstat_threads.txt` when `pidstat` is available
+- `pidstat.txt` and `pidstat_threads.txt` when `pidstat` is available; these are the primary CPU/resource artifacts
+- `perf_stat.txt` when `--perf-stat` is requested and `perf` is available, otherwise `perf_stat_skipped.txt`
 
-## Rows
+## Reproducible Gate
 
-Run each row with a fresh Mars window and sample the Mars process:
+Run the gate with:
 
 ```sh
-tools/mars_perf_gate.py --label idle --seconds 20
+tools/mars_perf_gate.py --suite --seconds 20
 ```
 
-Required rows:
+The suite launches Mars itself with an isolated generated config and fixed workloads. Default scenarios:
 
-- `idle`: Mars open, no active workload
-- `pty_flood`: sustained terminal output without Codex
-- `scroll_render`: long scrollback/render pass
-- `welcome_screen`: Yazelix welcome or `yzx screen` animation
-- `codex_2`: two Codex sessions active
-- `codex_3`: three Codex sessions active
-- `codex_4`: four Codex sessions active
+- `idle`: quiet Python process inside Mars
+- `pty_flood`: fixed high-volume output stream
+- `scroll_render`: fixed long scrollback stream with varied line widths
+- `yzx_screen_mandelbrot`: bounded `yzx screen mandelbrot` run when `yzx` is available
 
-Suggested proxy commands inside Mars:
+Run one scenario with:
 
 ```sh
-python3 - <<'PY'
-for i in range(200000):
-    print(f"pty flood line {i:06d} " + "abcdef0123456789" * 8)
-PY
+tools/mars_perf_gate.py --suite --scenario pty_flood --seconds 20
 ```
 
+Run repeated samples with:
+
 ```sh
-seq 1 100000
+tools/mars_perf_gate.py --suite --seconds 20 --repeat 3
+```
+
+The runner does not compute its own statistics. Compare repeated run directories and use the `pidstat` summaries as the primary measurement source.
+
+Add hardware-counter evidence when the host has `perf`:
+
+```sh
+tools/mars_perf_gate.py --suite --scenario pty_flood --seconds 20 --perf-stat
+```
+
+`--seconds` is the active workload duration for bounded workloads. Non-idle scenarios also sample `--cooldown-seconds` after the workload window so sustained CPU after output or animation can be seen in the same artifact.
+
+Documented variables are written to `suite_summary.txt` and each scenario `manifest.txt`: Mars binary, workload seconds, sample seconds, startup delay, line counts, cooldown, repeat count, generated config path, workload path, phase file, primary sampler, and whether `perf stat` was requested.
+
+Use a specific binary with:
+
+```sh
+MARS_BINARY=mars-desktop tools/mars_perf_gate.py --suite --seconds 20
+```
+
+## Supplemental Sampling
+
+Manual dogfooding can add evidence, but it is not the gate. To sample an already running Mars process:
+
+```sh
+tools/mars_perf_gate.py --label live_dogfood --seconds 20
 ```
 
 ## Pass Bar
 
 - Idle Mars does not sit on a busy core
 - PTY flood does not leave the reader thread pegged after output stops
-- Welcome and `yzx screen` animations do not show cursor artifacts or repeated top-down rerenders
-- 2-4 active Codex sessions remain usable enough for normal Yazelix work
+- `yzx screen` does not cause sustained CPU after the bounded workload ends
+- Scenario summaries include `workload_phase`; a PTY or scroll row that never reaches `output_done` did not complete the intended cooldown portion
 - Artifacts identify whether CPU is in Mars, Zellij, Codex, or helpers
+- 2-4 active Codex sessions remain a supplemental dogfooding row until a synthetic Codex-load harness exists
 
 If any row fails, keep Mars private and create a focused follow-up Bead from the artifact evidence.

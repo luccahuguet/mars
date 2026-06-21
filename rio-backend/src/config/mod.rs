@@ -34,6 +34,9 @@ use sugarloaf::font::fonts::SugarloafFonts;
 use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme};
 use tracing::warn;
 
+const CONFIG_HOME_ENV: &str = "MARS_CONFIG_HOME";
+const CONFIG_DIR_NAME: &str = "mars";
+
 #[derive(Clone, Debug)]
 pub enum ConfigError {
     ErrLoadingConfig(String),
@@ -184,36 +187,35 @@ pub struct CursorConfig {
 #[cfg(target_os = "macos")]
 #[inline]
 pub fn config_dir_path() -> PathBuf {
-    std::env::var("RIO_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or(dirs::home_dir().unwrap().join(".config").join("rio"))
+    std::env::var(CONFIG_HOME_ENV).map(PathBuf::from).unwrap_or(
+        dirs::home_dir()
+            .unwrap()
+            .join(".config")
+            .join(CONFIG_DIR_NAME),
+    )
 }
 
 #[cfg(target_os = "windows")]
 #[inline]
 pub fn config_dir_path() -> PathBuf {
-    std::env::var("RIO_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or(
-            dirs::home_dir()
-                .unwrap()
-                .join("AppData")
-                .join("Local")
-                .join("rio"),
-        )
+    std::env::var(CONFIG_HOME_ENV).map(PathBuf::from).unwrap_or(
+        dirs::home_dir()
+            .unwrap()
+            .join("AppData")
+            .join("Local")
+            .join(CONFIG_DIR_NAME),
+    )
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 #[inline]
 pub fn config_dir_path() -> PathBuf {
-    std::env::var("RIO_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or(
-            std::env::var("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .unwrap_or(dirs::home_dir().unwrap().join(".config"))
-                .join("rio"),
-        )
+    std::env::var(CONFIG_HOME_ENV).map(PathBuf::from).unwrap_or(
+        std::env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or(dirs::home_dir().unwrap().join(".config"))
+            .join(CONFIG_DIR_NAME),
+    )
 }
 
 #[inline]
