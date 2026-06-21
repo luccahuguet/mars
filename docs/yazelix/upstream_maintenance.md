@@ -83,4 +83,4 @@ git diff --name-status rio-upstream/main
 
 The expected early diff should be Mars-owned wrapper, docs, config, icon, and gate files. Any Rio-owned source file in that diff needs a current Bead explaining why it exists.
 
-Every Mars-owned commit also needs a row in `docs/yazelix/change_scorecard.md` explaining why the commit exists, which Rio-owned files it touches, how it was verified, and the expected upstream merge cost.
+Every Mars-owned code or runtime-behavior commit also needs a row in `docs/yazelix/change_scorecard.md` explaining why the commit exists, which Rio-owned files it touches, how it was verified, and the expected upstream merge cost. Pure documentation-only commits are exempt.

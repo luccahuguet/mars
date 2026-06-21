@@ -1,10 +1,10 @@
 # Mars Change Scorecard
 
-Every Mars-owned commit gets a row here. The goal is to make the fork delta easy to audit before pulling upstream Rio.
+Every Mars-owned code or runtime-behavior commit gets a row here. Pure documentation-only commits do not need scorecard rows. The goal is to make the fork delta easy to audit before pulling upstream Rio.
 
 ## Rules
 
-- Add or update a row before closing the Bead for the commit
+- Add or update a row before closing the Bead for a code or runtime-behavior commit
 - Keep the reason concrete: what broke, what user workflow it enables, or what gate it supports
 - Record touched upstream Rio-owned files explicitly
 - Record verification, even when verification is only static review
