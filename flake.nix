@@ -1,5 +1,5 @@
 {
-  description = "Rio | A hardware-accelerated GPU terminal emulator";
+  description = "Mars Terminal | A maintainable Rio-derived terminal fork";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -41,6 +41,21 @@
           rio = msrv;
           default = rio;
         };
+        mkRioPackage = rust-toolchain: pkgs.callPackage ./pkgRio.nix {inherit rust-toolchain;};
+        rioPackages =
+          lib.mapAttrs' (
+            k: v: {
+              name =
+                if builtins.elem k ["rio" "default"]
+                then k
+                else "rio-${k}";
+              value = mkRioPackage v;
+            }
+          )
+          toolchains;
+        marsPackage = pkgs.callPackage ./pkgMars.nix {
+          rioPackage = rioPackages.rio;
+        };
       in {
         formatter = pkgs.alejandra;
         _module.args.pkgs = import inputs.nixpkgs {
@@ -48,19 +63,14 @@
           overlays = [(import inputs.rust-overlay)];
         };
 
-        # Create overlay to override `rio` with this flake's default
-        overlayAttrs = {inherit (self'.packages) rio;};
+        # Keep Rio available while exposing Mars as the fork-owned wrapper.
+        overlayAttrs = {inherit (self'.packages) rio mars;};
         packages =
-          lib.mapAttrs' (
-            k: v: {
-              name =
-                if builtins.elem k ["rio" "default"]
-                then k
-                else "rio-${k}";
-              value = pkgs.callPackage ./pkgRio.nix {rust-toolchain = v;};
-            }
-          )
-          toolchains;
+          rioPackages
+          // {
+            mars = marsPackage;
+            default = marsPackage;
+          };
         # Different devshells for different rust versions
         devShells = lib.mapAttrs (_: v: mkDevShell v) toolchains;
       };

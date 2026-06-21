@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+TryExec=mars
+Exec=mars
+Icon=mars
+Terminal=false
+Categories=System;TerminalEmulator;
+
+Name=Mars Terminal
+GenericName=Terminal
+Comment=A maintainable Rio-derived GPU terminal emulator
+StartupWMClass=mars
+Actions=New;
+
+[Desktop Action New]
+Name=New Terminal
+Exec=mars

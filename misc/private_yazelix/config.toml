@@ -1,0 +1,6 @@
+[window]
+title-placeholder = "Mars private Yazelix"
+
+[shell]
+program = "yzx"
+args = ["start"]

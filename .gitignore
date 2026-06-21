@@ -7,6 +7,7 @@ result/
 /result
 
 target/
+__pycache__/
 .DS_Store
 rls/
 .vs
@@ -26,6 +27,9 @@ misc/72/
 
 # goreleaser
 dist/
+
+# local benchmark and dogfooding output
+artifacts/
 
 # Compiled SPIR-V — generated at build time by sugarloaf/build.rs into
 # OUT_DIR. The GLSL sources are checked in; the bytecode isn't.
