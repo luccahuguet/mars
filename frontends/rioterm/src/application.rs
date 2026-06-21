@@ -999,6 +999,19 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
             WindowEvent::ModifiersChanged(modifiers) => {
                 route.window.screen.set_modifiers(modifiers);
+                if route.window.screen.update_highlighted_hints() {
+                    let cursor_icon = if route.window.screen.has_highlighted_hint() {
+                        CursorIcon::Pointer
+                    } else if !route.window.screen.modifiers.state().shift_key()
+                        && route.window.screen.mouse_mode()
+                    {
+                        CursorIcon::Default
+                    } else {
+                        CursorIcon::Text
+                    };
+                    route.window.winit_window.set_cursor(cursor_icon);
+                    route.request_redraw();
+                }
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
@@ -1163,6 +1176,12 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         // of mouse mode (e.g. neovim capturing clicks).
                         if route.window.screen.select_current_based_on_mouse() {
                             route.request_redraw();
+                        } else if button == MouseButton::Left
+                            && route.window.screen.prepare_hint_click()
+                        {
+                            route.window.screen.mouse.link_gesture_active = true;
+                            route.request_redraw();
+                            return;
                         } else if !route.window.screen.modifiers.state().shift_key()
                             && route.window.screen.mouse_mode()
                         {
@@ -1220,6 +1239,23 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             let timer_id =
                                 TimerId::new(Topic::SelectionScrolling, scroll_timer_id);
                             self.scheduler.unschedule(timer_id);
+                        }
+
+                        if button == MouseButton::Left
+                            && route.window.screen.mouse.link_gesture_active
+                        {
+                            route.window.screen.mouse.link_gesture_active = false;
+                            route.window.screen.update_highlighted_hints();
+                            if route
+                                .window
+                                .screen
+                                .trigger_hint(&mut self.router.clipboard)
+                            {
+                                route.request_redraw();
+                                return;
+                            }
+                            route.request_redraw();
+                            return;
                         }
 
                         if button == MouseButton::Left

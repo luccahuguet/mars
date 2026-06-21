@@ -164,7 +164,7 @@ impl Default for HintMouse {
         let default_mods = vec!["Super".to_string()];
 
         #[cfg(not(target_os = "macos"))]
-        let default_mods = vec!["Alt".to_string()];
+        let default_mods = vec!["Control".to_string()];
 
         Self {
             enabled: true,
@@ -248,6 +248,10 @@ mod tests {
         assert!(default_hint.hyperlinks);
         assert!(default_hint.post_processing);
         assert!(!default_hint.persist);
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(default_hint.mouse.mods, ["Control"]);
+        #[cfg(target_os = "macos")]
+        assert_eq!(default_hint.mouse.mods, ["Super"]);
     }
 
     #[test]

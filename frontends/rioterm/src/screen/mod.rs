@@ -1883,6 +1883,21 @@ impl Screen<'_> {
         }
     }
 
+    #[inline]
+    pub fn has_highlighted_hint(&self) -> bool {
+        self.context_manager
+            .current()
+            .renderable_content
+            .highlighted_hint
+            .is_some()
+    }
+
+    #[inline]
+    pub fn prepare_hint_click(&mut self) -> bool {
+        self.update_highlighted_hints();
+        self.has_highlighted_hint()
+    }
+
     /// Check if current modifiers match the required modifiers
     fn modifiers_match(&self, required_mods: &[String]) -> bool {
         if required_mods.is_empty() {

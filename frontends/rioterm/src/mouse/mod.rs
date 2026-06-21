@@ -43,6 +43,8 @@ pub struct Mouse {
     /// within the same cell — replaces the old pixel-equality check
     /// that fired on every subpixel HiDPI jitter.
     pub last_cell: Option<Pos>,
+    /// Left press was consumed by a terminal-owned link gesture.
+    pub link_gesture_active: bool,
 }
 
 impl Default for Mouse {
@@ -64,6 +66,7 @@ impl Default for Mouse {
             y: 0.0,
             raw_y: 0.0,
             last_cell: None,
+            link_gesture_active: false,
         }
     }
 }
