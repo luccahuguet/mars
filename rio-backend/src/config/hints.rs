@@ -345,6 +345,10 @@ mod tests {
             find_all("see https://example.com."),
             vec!["https://example.com"],
         );
+        assert_eq!(
+            find_all("Docs are at http://127.0.0.1:4321/docs/."),
+            vec!["http://127.0.0.1:4321/docs/"],
+        );
     }
 
     #[test]

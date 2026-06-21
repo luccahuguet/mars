@@ -2087,7 +2087,8 @@ impl Screen<'_> {
             let start_col = rio_backend::crosswords::pos::Column(start);
             let end_col = rio_backend::crosswords::pos::Column(end.saturating_sub(1));
 
-            if point.col < start_col || point.col > end_col {
+            if !point_hits_match_or_trailing_delimiters(line_text, start, end, point.col)
+            {
                 continue;
             }
 
@@ -2114,8 +2115,15 @@ impl Screen<'_> {
                 continue;
             };
 
-            // Check if the point is within the post-processed match.
-            if point.col >= processed_start && point.col <= processed_end {
+            // Check if the point is within the post-processed match or on
+            // punctuation immediately after it. The opened text remains the
+            // cleaned URL, and the highlight remains limited to the URL.
+            if point_hits_match_or_trailing_delimiters(
+                line_text,
+                processed_start.0,
+                processed_end.0 + 1,
+                point.col,
+            ) {
                 let original_match_text = line_text[start..end].to_string();
                 let mut match_text = original_match_text.clone();
 
@@ -4708,6 +4716,30 @@ fn post_process_hyperlink_uri(uri: &str) -> String {
     chars.into_iter().take(end_idx + 1).collect()
 }
 
+fn point_hits_match_or_trailing_delimiters(
+    line_text: &str,
+    start: usize,
+    end: usize,
+    point_col: rio_backend::crosswords::pos::Column,
+) -> bool {
+    let point = point_col.0;
+    if point < start {
+        return false;
+    }
+    if point < end {
+        return true;
+    }
+    let Some(trailing) = line_text.as_bytes().get(end..=point) else {
+        return false;
+    };
+    trailing.iter().all(|b| {
+        matches!(
+            *b,
+            b'.' | b',' | b':' | b';' | b'?' | b'!' | b'(' | b'[' | b'\''
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4767,5 +4799,38 @@ mod tests {
             post_process_hyperlink_uri("https://example.com/path[with]brackets"),
             "https://example.com/path[with]brackets"
         );
+    }
+
+    #[test]
+    fn test_link_hit_allows_immediate_trailing_punctuation() {
+        let url = "http://127.0.0.1:4321/docs/";
+        let text = format!("Docs are at {url}.");
+        let start = text.find(url).unwrap();
+        let end = start + url.len();
+
+        assert!(point_hits_match_or_trailing_delimiters(
+            &text,
+            start,
+            end,
+            rio_backend::crosswords::pos::Column(start)
+        ));
+        assert!(point_hits_match_or_trailing_delimiters(
+            &text,
+            start,
+            end,
+            rio_backend::crosswords::pos::Column(end - 1)
+        ));
+        assert!(point_hits_match_or_trailing_delimiters(
+            &text,
+            start,
+            end,
+            rio_backend::crosswords::pos::Column(end)
+        ));
+        assert!(!point_hits_match_or_trailing_delimiters(
+            &text,
+            start,
+            end,
+            rio_backend::crosswords::pos::Column(start - 1)
+        ));
     }
 }
