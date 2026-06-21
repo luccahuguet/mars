@@ -24,7 +24,7 @@ use crate::crosswords::{
     vi_mode::ViMotion,
     Mode,
 };
-use crate::hints::HintState;
+use crate::hints::{trim_trailing_link_blank_cells, HintState};
 use crate::layout::ContextDimension;
 use crate::mouse::{calculate_mouse_position, Mouse};
 use crate::renderer::{utils::padding_top_from_config, Renderer};
@@ -2007,6 +2007,11 @@ impl Screen<'_> {
                 break;
             }
         }
+        let trimmed_end_col =
+            trim_trailing_link_blank_cells(terminal, point.row, start_col, end_col)?;
+        if point.col > trimmed_end_col {
+            return None;
+        }
 
         let hyperlink = terminal.cell_hyperlink(point.row, point.col)?;
 
@@ -2019,9 +2024,7 @@ impl Screen<'_> {
             post_processing: true,
             persist: false,
             action: rio_backend::config::hints::HintAction::Command {
-                command: rio_backend::config::hints::HintCommand::Simple(
-                    "xdg-open".to_string(),
-                ),
+                command: Self::default_open_hint_command(),
             },
             mouse: rio_backend::config::hints::HintMouse::default(),
             binding: None,
@@ -2035,9 +2038,23 @@ impl Screen<'_> {
         Some(crate::hints::HintMatch {
             text: uri,
             start: rio_backend::crosswords::pos::Pos::new(point.row, start_col),
-            end: rio_backend::crosswords::pos::Pos::new(point.row, end_col),
+            end: rio_backend::crosswords::pos::Pos::new(point.row, trimmed_end_col),
             hint: hint_config,
         })
+    }
+
+    fn default_open_hint_command() -> rio_backend::config::hints::HintCommand {
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        return rio_backend::config::hints::HintCommand::Simple("xdg-open".to_string());
+
+        #[cfg(target_os = "macos")]
+        return rio_backend::config::hints::HintCommand::Simple("open".to_string());
+
+        #[cfg(target_os = "windows")]
+        return rio_backend::config::hints::HintCommand::WithArgs {
+            program: "cmd".to_string(),
+            args: vec!["/c".to_string(), "start".to_string(), "".to_string()],
+        };
     }
 
     /// Find regex match at the specified point
@@ -2069,23 +2086,37 @@ impl Screen<'_> {
             let start_col = rio_backend::crosswords::pos::Column(start);
             let end_col = rio_backend::crosswords::pos::Column(end.saturating_sub(1));
 
-            // Check if the point is within this match
-            if point.col >= start_col && point.col <= end_col {
+            if point.col < start_col || point.col > end_col {
+                continue;
+            }
+
+            // Apply grid-based post-processing before hit testing the final
+            // activatable range. Raw regex matches can include surrounding
+            // punctuation; those cells must not become hover/click targets.
+            let (processed_start, processed_end) = if hint_config.post_processing {
+                self.hint_post_processing(
+                    terminal,
+                    start_col,
+                    end_col,
+                    rio_backend::crosswords::pos::Line(point.row.0),
+                )
+                .unwrap_or((start_col, end_col))
+            } else {
+                (start_col, end_col)
+            };
+            let Some(processed_end) = trim_trailing_link_blank_cells(
+                terminal,
+                point.row,
+                processed_start,
+                processed_end,
+            ) else {
+                continue;
+            };
+
+            // Check if the point is within the post-processed match.
+            if point.col >= processed_start && point.col <= processed_end {
                 let original_match_text = line_text[start..end].to_string();
                 let mut match_text = original_match_text.clone();
-
-                // Apply grid-based post-processing
-                let (processed_start, processed_end) = if hint_config.post_processing {
-                    self.hint_post_processing(
-                        terminal,
-                        start_col,
-                        end_col,
-                        rio_backend::crosswords::pos::Line(point.row.0),
-                    )
-                    .unwrap_or((start_col, end_col))
-                } else {
-                    (start_col, end_col)
-                };
 
                 // Extract the processed text
                 if hint_config.post_processing {
@@ -2168,15 +2199,47 @@ impl Screen<'_> {
     fn open_hyperlink(&self, hyperlink: Hyperlink) {
         // Apply post-processing to remove trailing delimiters and handle uneven brackets
         let processed_uri = post_process_hyperlink_uri(hyperlink.uri());
+        Self::open_uri_direct(&processed_uri);
+    }
 
+    fn open_uri_direct(uri: &str) {
         #[cfg(not(any(target_os = "macos", windows)))]
-        self.exec("xdg-open", [&processed_uri]);
+        {
+            let _ = std::process::Command::new("xdg-open").arg(uri).spawn();
+        }
 
         #[cfg(target_os = "macos")]
-        self.exec("open", [&processed_uri]);
+        {
+            let _ = std::process::Command::new("open").arg(uri).spawn();
+        }
 
         #[cfg(windows)]
-        self.exec("cmd", ["/c", "start", "", &processed_uri]);
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/c", "start", "", uri])
+                .spawn();
+        }
+    }
+
+    fn is_default_url_opener(command: &rio_backend::config::hints::HintCommand) -> bool {
+        use rio_backend::config::hints::HintCommand;
+
+        match command {
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            HintCommand::Simple(program) => program == "xdg-open",
+
+            #[cfg(target_os = "macos")]
+            HintCommand::Simple(program) => program == "open",
+
+            #[cfg(target_os = "windows")]
+            HintCommand::WithArgs { program, args } => {
+                program.eq_ignore_ascii_case("cmd")
+                    && args == &["/c".to_string(), "start".to_string(), "".to_string()]
+            }
+
+            #[allow(unreachable_patterns)]
+            _ => false,
+        }
     }
 
     pub fn exec<I, S>(&self, program: &str, args: I)
@@ -2432,21 +2495,7 @@ impl Screen<'_> {
     }
 
     fn open_docs_url() {
-        let url = "https://rioterm.com/docs/config";
-        #[cfg(target_os = "macos")]
-        {
-            let _ = std::process::Command::new("open").arg(url).spawn();
-        }
-        #[cfg(not(any(target_os = "macos", windows)))]
-        {
-            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-        }
-        #[cfg(windows)]
-        {
-            let _ = std::process::Command::new("cmd")
-                .args(["/c", "start", "", url])
-                .spawn();
-        }
+        Self::open_uri_direct("https://rioterm.com/docs/config");
     }
 
     pub fn handle_scrollbar_click(&mut self) -> bool {
@@ -4330,6 +4379,13 @@ impl Screen<'_> {
                         None => hint_match.text.clone(),
                     }
                 };
+
+                if crate::hints::has_uri_scheme(&arg_text)
+                    && Self::is_default_url_opener(command)
+                {
+                    Self::open_uri_direct(&arg_text);
+                    return;
+                }
 
                 match command {
                     HintCommand::Simple(program) => {

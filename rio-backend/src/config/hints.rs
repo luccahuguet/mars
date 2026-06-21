@@ -291,6 +291,10 @@ mod tests {
             find_all("visit https://rioterm.com here"),
             vec!["https://rioterm.com"]
         );
+        assert_eq!(
+            find_all("serve http://localhost:4321/"),
+            vec!["http://localhost:4321/"]
+        );
         assert_eq!(find_all("file://foo"), vec!["file://foo"]);
     }
 
