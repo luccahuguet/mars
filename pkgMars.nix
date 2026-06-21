@@ -28,7 +28,7 @@ symlinkJoin {
       mesa_vulkan_icd_files="''${mesa_vulkan_icd_files%:}"
     ''}
     makeWrapper "${rioPackage}/bin/rio" "$out/bin/mars" \
-      ${lib.optionalString stdenv.isLinux ''--set-default VK_ICD_FILENAMES "$mesa_vulkan_icd_files" \''}
+      ${lib.optionalString stdenv.isLinux ''--run 'if [ -z "''${VK_ICD_FILENAMES:-}" ]; then export VK_ICD_FILENAMES='"$mesa_vulkan_icd_files"'; fi' \''}
       --add-flags "--app-id mars"
     install -D -m 755 "${./tools/mars_launch_trace.py}" "$out/bin/mars-launch-trace"
     patchShebangs "$out/bin/mars-launch-trace"
