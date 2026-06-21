@@ -137,6 +137,59 @@ printed UTF-8 byte counts.
 Rows and columns are recorded for corpus comparability; this benchmark measures
 only the escape parser and does not allocate a terminal grid.
 
+## Terminal Stream State Benchmark
+
+Run the parser plus terminal/grid state benchmark without starting Mars, a PTY,
+Zellij, or the renderer:
+
+```sh
+cargo run -p rio-backend --bin mars-terminal-stream-bench --release \
+  --features rio-window/x11,rio-window/wayland -- \
+  --corpus rio-backend/fixtures/terminal_stream_smoke.txt \
+  --rows 24 \
+  --columns 80 \
+  --scrollback 10000 \
+  --chunk-size 4096 \
+  --iterations 10
+```
+
+Use this benchmark when parser-only throughput is fine but CPU could be spent
+mutating terminal state: wrapping, scrollback, cursor movement, styles, and
+grid changes. It still excludes PTY scheduling, Zellij, renderer, GPU, shaders,
+and live Codex load.
+
+For a larger corpus, generate input once and replay the exact same file:
+
+```sh
+tools/mars_perf_gate.py --generate-corpus /tmp/mars_stream_scroll.bin \
+  --corpus-kind scroll_render \
+  --corpus-seed 7 \
+  --corpus-lines 80000 \
+  --corpus-rows 44 \
+  --corpus-columns 132
+
+cargo run -p rio-backend --bin mars-terminal-stream-bench --release \
+  --features rio-window/x11,rio-window/wayland -- \
+  --corpus /tmp/mars_stream_scroll.bin \
+  --rows 44 \
+  --columns 132 \
+  --scrollback 10000 \
+  --chunk-size 4096 \
+  --iterations 5
+```
+
+The output records corpus path/bytes, detected sidecar metadata path/size,
+terminal dimensions, scrollback limit, chunk size, iterations, elapsed
+nanoseconds, bytes per second, final cursor position, final scrollback size,
+display offset, total grid lines, and synchronized-update buffer bytes.
+
+To compare Mars against upstream Rio, apply the benchmark patch series to a
+`rio-upstream/main` worktree, generate one corpus file, and run the exact same
+`mars-terminal-stream-bench` command in both worktrees. Compare only release
+output from the same machine, corpus, dimensions, scrollback, chunk size, and
+iteration count. Use the generator metadata SHA-256 when the corpus was
+produced by `mars_perf_gate.py`.
+
 To compare Mars against upstream Rio, apply the parser-benchmark patch series
 to a `rio-upstream/main` worktree, generate one corpus file, and run the exact
 same `mars-parser-bench` command in both worktrees. Compare only release-mode

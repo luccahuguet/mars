@@ -3,6 +3,11 @@ use std::fmt;
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
+use crate::ansi::CursorShape;
+use crate::crosswords::grid::Dimensions as _;
+use crate::crosswords::{Crosswords, CrosswordsSize};
+use crate::event::{VoidListener, WindowId};
+use crate::performer::handler::Processor;
 use crate::performer::parser::{Params, Parser, Perform};
 
 #[derive(Clone, Copy, Debug)]
@@ -60,6 +65,44 @@ impl ParserBenchmarkResult {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct TerminalStreamBenchmarkConfig {
+    pub rows: usize,
+    pub columns: usize,
+    pub scrollback_history_limit: usize,
+    pub chunk_size: usize,
+    pub iterations: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TerminalStreamBenchmarkResult {
+    pub corpus_bytes: usize,
+    pub rows: usize,
+    pub columns: usize,
+    pub scrollback_history_limit: usize,
+    pub chunk_size: usize,
+    pub iterations: usize,
+    pub total_bytes: u128,
+    pub elapsed: Duration,
+    pub final_cursor_line: i32,
+    pub final_cursor_column: usize,
+    pub final_history_size: usize,
+    pub final_display_offset: usize,
+    pub final_total_lines: usize,
+    pub final_sync_buffer_bytes: usize,
+}
+
+impl TerminalStreamBenchmarkResult {
+    pub fn bytes_per_second(self) -> f64 {
+        let elapsed = self.elapsed.as_secs_f64();
+        if elapsed == 0.0 {
+            0.0
+        } else {
+            self.total_bytes as f64 / elapsed
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ParserBenchmarkError {
     EmptyCorpus,
@@ -82,6 +125,37 @@ impl fmt::Display for ParserBenchmarkError {
 }
 
 impl Error for ParserBenchmarkError {}
+
+#[derive(Debug)]
+pub enum TerminalStreamBenchmarkError {
+    EmptyCorpus,
+    ZeroRows,
+    ZeroColumns,
+    ZeroChunkSize,
+    ZeroIterations,
+}
+
+impl fmt::Display for TerminalStreamBenchmarkError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyCorpus => f.write_str("terminal stream benchmark corpus is empty"),
+            Self::ZeroRows => {
+                f.write_str("terminal stream benchmark rows must be greater than zero")
+            }
+            Self::ZeroColumns => {
+                f.write_str("terminal stream benchmark columns must be greater than zero")
+            }
+            Self::ZeroChunkSize => f.write_str(
+                "terminal stream benchmark chunk size must be greater than zero",
+            ),
+            Self::ZeroIterations => f.write_str(
+                "terminal stream benchmark iterations must be greater than zero",
+            ),
+        }
+    }
+}
+
+impl Error for TerminalStreamBenchmarkError {}
 
 pub fn run_parser_benchmark(
     corpus: &[u8],
@@ -116,6 +190,79 @@ pub fn run_parser_benchmark(
         total_bytes: corpus.len() as u128 * config.iterations as u128,
         elapsed: start.elapsed(),
         counts,
+    })
+}
+
+pub fn run_terminal_stream_benchmark(
+    corpus: &[u8],
+    config: TerminalStreamBenchmarkConfig,
+) -> Result<TerminalStreamBenchmarkResult, TerminalStreamBenchmarkError> {
+    if corpus.is_empty() {
+        return Err(TerminalStreamBenchmarkError::EmptyCorpus);
+    }
+    if config.rows == 0 {
+        return Err(TerminalStreamBenchmarkError::ZeroRows);
+    }
+    if config.columns == 0 {
+        return Err(TerminalStreamBenchmarkError::ZeroColumns);
+    }
+    if config.chunk_size == 0 {
+        return Err(TerminalStreamBenchmarkError::ZeroChunkSize);
+    }
+    if config.iterations == 0 {
+        return Err(TerminalStreamBenchmarkError::ZeroIterations);
+    }
+
+    let mut final_cursor_line = 0;
+    let mut final_cursor_column = 0;
+    let mut final_history_size = 0;
+    let mut final_display_offset = 0;
+    let mut final_total_lines = 0;
+    let mut final_sync_buffer_bytes = 0;
+    let mut elapsed = Duration::ZERO;
+
+    for _ in 0..config.iterations {
+        let mut processor = Processor::default();
+        let mut terminal = Crosswords::new(
+            CrosswordsSize::new(config.columns, config.rows),
+            CursorShape::Block,
+            VoidListener {},
+            WindowId::from(0),
+            0,
+            config.scrollback_history_limit,
+        );
+
+        let start = Instant::now();
+        for chunk in corpus.chunks(config.chunk_size) {
+            processor.advance(&mut terminal, black_box(chunk));
+        }
+        elapsed += start.elapsed();
+
+        final_cursor_line = terminal.grid.cursor.pos.row.0;
+        final_cursor_column = terminal.grid.cursor.pos.col.0;
+        final_history_size = terminal.grid.history_size();
+        final_display_offset = terminal.grid.display_offset();
+        final_total_lines = terminal.grid.total_lines();
+        final_sync_buffer_bytes = processor.sync_bytes_count();
+        black_box(&terminal);
+        black_box(&processor);
+    }
+
+    Ok(TerminalStreamBenchmarkResult {
+        corpus_bytes: corpus.len(),
+        rows: config.rows,
+        columns: config.columns,
+        scrollback_history_limit: config.scrollback_history_limit,
+        chunk_size: config.chunk_size,
+        iterations: config.iterations,
+        total_bytes: corpus.len() as u128 * config.iterations as u128,
+        elapsed,
+        final_cursor_line,
+        final_cursor_column,
+        final_history_size,
+        final_display_offset,
+        final_total_lines,
+        final_sync_buffer_bytes,
     })
 }
 
@@ -272,5 +419,47 @@ mod tests {
 
         assert_eq!(result.counts.print_chars, text.chars().count() as u64 * 3);
         assert_eq!(result.counts.print_bytes, text.len() as u64 * 3);
+    }
+
+    #[test]
+    fn terminal_stream_benchmark_updates_grid_state() {
+        let corpus = b"\x1b[2J\x1b[Hhello\r\n\x1b[31mred\x1b[0m\r\n";
+        let result = run_terminal_stream_benchmark(
+            corpus,
+            TerminalStreamBenchmarkConfig {
+                rows: 4,
+                columns: 20,
+                scrollback_history_limit: 100,
+                chunk_size: 3,
+                iterations: 2,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.corpus_bytes, corpus.len());
+        assert_eq!(result.rows, 4);
+        assert_eq!(result.columns, 20);
+        assert_eq!(result.total_bytes, corpus.len() as u128 * 2);
+        assert!(result.final_cursor_line >= 1);
+        assert_eq!(result.final_sync_buffer_bytes, 0);
+    }
+
+    #[test]
+    fn terminal_stream_benchmark_exercises_scrollback() {
+        let corpus = b"one\r\ntwo\r\nthree\r\nfour\r\n";
+        let result = run_terminal_stream_benchmark(
+            corpus,
+            TerminalStreamBenchmarkConfig {
+                rows: 2,
+                columns: 20,
+                scrollback_history_limit: 100,
+                chunk_size: 5,
+                iterations: 1,
+            },
+        )
+        .unwrap();
+
+        assert!(result.final_history_size > 0);
+        assert!(result.final_total_lines > result.rows);
     }
 }

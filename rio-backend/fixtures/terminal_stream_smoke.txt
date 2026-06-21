@@ -1,0 +1,4 @@
+Mars terminal stream smoke fixture
+plain text line 1
+plain text line 2 with enough text to exercise wrapping in narrow panes
+ansi-style literal examples for humans: ESC [ 31 m red ESC [ 0 m
