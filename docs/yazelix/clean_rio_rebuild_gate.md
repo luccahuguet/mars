@@ -132,14 +132,16 @@ cargo run -p rio-backend --bin mars-parser-bench --release \
 ```
 
 The output records corpus path, corpus bytes, rows, columns, chunk size,
-iterations, elapsed nanoseconds, bytes per second, and parser action counts.
+iterations, elapsed nanoseconds, bytes per second, parser action counts, and
+printed UTF-8 byte counts.
 Rows and columns are recorded for corpus comparability; this benchmark measures
 only the escape parser and does not allocate a terminal grid.
 
-To compare Mars against upstream Rio, apply the benchmark commit alone to a
-`rio-upstream/main` worktree, generate one corpus file, and run the exact same
-`mars-parser-bench` command in both worktrees. Compare only release-mode output
-from the same machine and same corpus path/hash.
+To compare Mars against upstream Rio, apply the parser-benchmark patch series
+to a `rio-upstream/main` worktree, generate one corpus file, and run the exact
+same `mars-parser-bench` command in both worktrees. Compare only release-mode
+output from the same machine and same corpus file; use the generator metadata
+SHA-256 when the corpus was produced by `mars_perf_gate.py`.
 
 Add hardware-counter evidence when the host has `perf`:
 
