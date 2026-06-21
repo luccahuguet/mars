@@ -1,3 +1,4 @@
+// Test lane: default
 // Kitty graphics protocol virtual placement encoding/decoding
 
 use crate::config::colors::{AnsiColor, ColorRgb};
@@ -569,13 +570,23 @@ pub fn compute_run_geometry(
 ) -> Option<RunGeometry> {
     let img_w = image_width_px as f32;
     let img_h = image_height_px as f32;
-    if img_w <= 0.0 || img_h <= 0.0 {
+    if img_w <= 0.0 || img_h <= 0.0 || cell_width <= 0.0 || cell_height <= 0.0 {
         return None;
     }
 
     // 1. Placement box in pixels.
-    let p_cols_px = placement_cols.max(1) as f32 * cell_width;
-    let p_rows_px = placement_rows.max(1) as f32 * cell_height;
+    let effective_cols = if placement_cols == 0 {
+        (img_w / cell_width).ceil().max(1.0) as u32
+    } else {
+        placement_cols
+    };
+    let effective_rows = if placement_rows == 0 {
+        (img_h / cell_height).ceil().max(1.0) as u32
+    } else {
+        placement_rows
+    };
+    let p_cols_px = effective_cols as f32 * cell_width;
+    let p_rows_px = effective_rows as f32 * cell_height;
 
     // 2. Aspect-fit + centering.
     let scale = (p_cols_px / img_w).min(p_rows_px / img_h);
@@ -882,6 +893,34 @@ mod tests {
         approx(g.source_rect[3], 0.20);
     }
 
+    // Regression: Yazi's KGP driver sends virtual placements without c=/r=;
+    // omitted dimensions must derive the grid from image and cell size.
+    #[test]
+    fn geom_omitted_grid_uses_image_size_in_cells() {
+        let g = compute_run_geometry(
+            &run(0, 0, 3),
+            0,
+            0,
+            100,
+            50,
+            10.0,
+            10.0,
+            0.0,
+            0.0,
+            0,
+            0,
+        )
+        .expect("visible");
+        approx(g.x, 0.0);
+        approx(g.y, 0.0);
+        approx(g.width, 30.0);
+        approx(g.height, 10.0);
+        approx(g.source_rect[0], 0.0);
+        approx(g.source_rect[1], 0.0);
+        approx(g.source_rect[2], 0.30);
+        approx(g.source_rect[3], 0.20);
+    }
+
     #[test]
     fn geom_image_taller_than_grid_centers_horizontally() {
         // Image 50×100, placement 10×10, cell 10×10. Placement box
@@ -1071,6 +1110,14 @@ mod tests {
     fn geom_returns_none_when_image_zero_sized() {
         let none =
             compute_run_geometry(&run(0, 0, 1), 10, 5, 0, 50, 10.0, 10.0, 0.0, 0.0, 0, 0);
+        assert!(none.is_none());
+    }
+
+    // Invariant: omitted placement dimensions cannot divide by a zero-sized cell.
+    #[test]
+    fn geom_returns_none_when_cell_zero_sized() {
+        let none =
+            compute_run_geometry(&run(0, 0, 1), 0, 0, 100, 50, 0.0, 10.0, 0.0, 0.0, 0, 0);
         assert!(none.is_none());
     }
 
