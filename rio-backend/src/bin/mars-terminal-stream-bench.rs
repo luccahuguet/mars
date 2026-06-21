@@ -29,9 +29,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     let args = parse_args(env::args_os().skip(1))?;
     let corpus = fs::read(&args.corpus)?;
     let metadata_path = corpus_metadata_path(&args.corpus);
-    let metadata_bytes = fs::metadata(&metadata_path)
+    let metadata_source = fs::read_to_string(&metadata_path).ok();
+    let metadata_bytes = metadata_source
+        .as_ref()
         .map(|metadata| metadata.len())
-        .ok();
+        .unwrap_or(0);
+    let metadata_json = metadata_source.as_deref().map(compact_metadata_json);
     let result = run_terminal_stream_benchmark(
         &corpus,
         TerminalStreamBenchmarkConfig {
@@ -59,8 +62,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     println!("corpus_path={}", args.corpus.display());
     println!("corpus_bytes={}", result.corpus_bytes);
     println!("corpus_metadata_path={}", metadata_path.display());
-    println!("corpus_metadata_present={}", metadata_bytes.is_some());
-    println!("corpus_metadata_bytes={}", metadata_bytes.unwrap_or(0));
+    println!("corpus_metadata_present={}", metadata_json.is_some());
+    println!("corpus_metadata_bytes={metadata_bytes}");
+    println!(
+        "corpus_metadata_json={}",
+        metadata_json.as_deref().unwrap_or("")
+    );
     println!("rows={}", result.rows);
     println!("columns={}", result.columns);
     println!(
@@ -172,6 +179,15 @@ fn corpus_metadata_path(corpus: &Path) -> PathBuf {
         .unwrap_or_else(|| OsString::from("corpus"));
     metadata_name.push(".json");
     corpus.with_file_name(metadata_name)
+}
+
+fn compact_metadata_json(metadata: &str) -> String {
+    metadata
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn print_help() {

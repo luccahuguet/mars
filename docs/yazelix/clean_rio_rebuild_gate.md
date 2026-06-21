@@ -137,6 +137,12 @@ printed UTF-8 byte counts.
 Rows and columns are recorded for corpus comparability; this benchmark measures
 only the escape parser and does not allocate a terminal grid.
 
+To compare Mars against upstream Rio, apply the parser-benchmark patch series
+to a `rio-upstream/main` worktree, generate one corpus file, and run the exact
+same `mars-parser-bench` command in both worktrees. Compare only release-mode
+output from the same machine and same corpus file; use the generator metadata
+SHA-256 when the corpus was produced by `mars_perf_gate.py`.
+
 ## Terminal Stream State Benchmark
 
 Run the parser plus terminal/grid state benchmark without starting Mars, a PTY,
@@ -178,10 +184,11 @@ cargo run -p rio-backend --bin mars-terminal-stream-bench --release \
   --iterations 5
 ```
 
-The output records corpus path/bytes, detected sidecar metadata path/size,
-terminal dimensions, scrollback limit, chunk size, iterations, elapsed
-nanoseconds, bytes per second, final cursor position, final scrollback size,
-display offset, total grid lines, and synchronized-update buffer bytes.
+The output records corpus path/bytes, detected sidecar metadata path/size, the
+sidecar JSON metadata on one line when present, terminal dimensions, scrollback
+limit, chunk size, iterations, elapsed nanoseconds, bytes per second, final
+cursor position, final scrollback size, display offset, total grid lines, and
+synchronized-update buffer bytes.
 
 To compare Mars against upstream Rio, apply the benchmark patch series to a
 `rio-upstream/main` worktree, generate one corpus file, and run the exact same
@@ -189,12 +196,6 @@ To compare Mars against upstream Rio, apply the benchmark patch series to a
 output from the same machine, corpus, dimensions, scrollback, chunk size, and
 iteration count. Use the generator metadata SHA-256 when the corpus was
 produced by `mars_perf_gate.py`.
-
-To compare Mars against upstream Rio, apply the parser-benchmark patch series
-to a `rio-upstream/main` worktree, generate one corpus file, and run the exact
-same `mars-parser-bench` command in both worktrees. Compare only release-mode
-output from the same machine and same corpus file; use the generator metadata
-SHA-256 when the corpus was produced by `mars_perf_gate.py`.
 
 Add hardware-counter evidence when the host has `perf`:
 
