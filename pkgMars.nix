@@ -2,8 +2,10 @@
   imagemagick,
   lib,
   makeWrapper,
+  mesa,
   python3,
   rioPackage,
+  stdenv,
   symlinkJoin,
 }:
 
@@ -21,7 +23,12 @@ symlinkJoin {
     rm -f "$out/share/applications/rio.desktop"
     rm -f "$out/share/icons/hicolor/scalable/apps/rio.svg"
 
+    ${lib.optionalString stdenv.isLinux ''
+      mesa_vulkan_icd_files="$(printf '%s:' ${mesa}/share/vulkan/icd.d/*.json)"
+      mesa_vulkan_icd_files="''${mesa_vulkan_icd_files%:}"
+    ''}
     makeWrapper "${rioPackage}/bin/rio" "$out/bin/mars" \
+      ${lib.optionalString stdenv.isLinux ''--set-default VK_ICD_FILENAMES "$mesa_vulkan_icd_files" \''}
       --add-flags "--app-id mars"
     install -D -m 755 "${./tools/mars_launch_trace.py}" "$out/bin/mars-launch-trace"
     patchShebangs "$out/bin/mars-launch-trace"
@@ -45,7 +52,9 @@ symlinkJoin {
     (rioPackage.passthru or {})
     // {
       unwrappedRioPackage = rioPackage;
-      runtimeDependencies = rioPackage.runtimeDependencies or [];
+      runtimeDependencies =
+        (rioPackage.runtimeDependencies or [])
+        ++ lib.optionals stdenv.isLinux [mesa];
       nativeBuildInputs = rioPackage.nativeBuildInputs or [];
       buildInputs = rioPackage.buildInputs or [];
     };
