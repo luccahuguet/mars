@@ -9,9 +9,9 @@ agent-driven development.
 
 The project keeps Rio close enough to upstream to rebase deliberately, while
 giving Yazelix a terminal stack it can control, test, package, and adapt when
-terminal behavior matters. Mars aims for practical Ghostty parity where Yazelix
-depends on it, strong Kitty protocol support, good Nix/runtime integration, and
-small measured changes instead of broad fork drift.
+terminal behavior matters. Mars aims for practical Ghostty parity, strong Kitty
+protocol support, good Nix/runtime integration, and small measured changes
+instead of broad fork drift.
 
 Mars is the default packaged terminal for Yazelix. Ghostty remains the mature
 alternate in Yazelix; Mars exists so the Rust terminal/runtime boundary can move
