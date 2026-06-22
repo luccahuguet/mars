@@ -40,6 +40,22 @@ with Yazelix when protocol, cursor, graphics, and packaging work needs it.
 - Rio package outputs remain exposed as `.#rio`, `.#rio-msrv`, `.#rio-stable`,
   and `.#rio-nightly` for comparison and upstream maintenance work
 
+## Mars Delta
+
+The full fork audit trail lives in
+[`docs/yazelix/change_scorecard.md`](docs/yazelix/change_scorecard.md). The
+table below is the README-sized feature view.
+
+| Area | Mars Behavior | Evidence |
+| --- | --- | --- |
+| Yazelix packaging | `.#mars` is the first-class package, with Mars metadata, config roots, launcher wrappers, desktop identity, and icon assets. | [`9df072cdfe`](https://github.com/luccahuguet/mars/commit/9df072cdfe), [`d9e303e8b7`](https://github.com/luccahuguet/mars/commit/d9e303e8b7) |
+| Split cursors | Mars accepts hard-validated `[yazelix.cursor]` split-color config and renders split block, hollow, beam, underline, and trail sprites without mono fallback for malformed split config. | [`b545e539ec`](https://github.com/luccahuguet/mars/commit/b545e539ec), [`6b108cba5a`](https://github.com/luccahuguet/mars/commit/6b108cba5a) |
+| Kitty graphics | WGPU image source rectangles use endpoint semantics for nonzero-origin slices, with shader parsing and renderer regression coverage. | [`011d648d83`](https://github.com/luccahuguet/mars/commit/011d648d83) |
+| Link handling | Non-macOS link hints use Ctrl-click, URL hit spans are clipped to useful targets, and edge punctuation remains clickable without opening punctuation. | [`c2a49e7421`](https://github.com/luccahuguet/mars/commit/c2a49e7421), [`1a9dc553ec`](https://github.com/luccahuguet/mars/commit/1a9dc553ec), [`8e43f00c1d`](https://github.com/luccahuguet/mars/commit/8e43f00c1d) |
+| Visual bell | `[bell].visual` draws a short full-window cue on BEL while keeping audio behavior independent. | [`1a80115ef9`](https://github.com/luccahuguet/mars/commit/1a80115ef9) |
+| Nix runtime hardening | The Mars wrapper supplies a package-owned Vulkan ICD default when needed, preserves explicit overrides, and includes launch tracing for dogfooding failures. | [`3dd8210e70`](https://github.com/luccahuguet/mars/commit/3dd8210e70), [`01d732997c`](https://github.com/luccahuguet/mars/commit/01d732997c), [`a650371806`](https://github.com/luccahuguet/mars/commit/a650371806) |
+| Performance evidence | Mars carries reproducible perf gates, parser/terminal/render benchmarks, and gated internal metrics for agent-driven diagnosis. | [`52952ad0c7`](https://github.com/luccahuguet/mars/commit/52952ad0c7), [`3cf912b9bf`](https://github.com/luccahuguet/mars/commit/3cf912b9bf), [`c69d02a716`](https://github.com/luccahuguet/mars/commit/c69d02a716), [`9f6d3a8fcd`](https://github.com/luccahuguet/mars/commit/9f6d3a8fcd) |
+
 ## Install
 
 Build the Mars package with Nix:
