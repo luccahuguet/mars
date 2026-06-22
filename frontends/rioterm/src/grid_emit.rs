@@ -28,11 +28,12 @@ use rio_backend::config::colors::{AnsiColor, NamedColor};
 use rio_backend::crosswords::grid::row::Row;
 use rio_backend::crosswords::pos::{Column, Line, Pos};
 use rio_backend::crosswords::search::Match;
-use rio_backend::crosswords::square::{ContentTag, Extras, Square};
+use rio_backend::crosswords::square::{ContentTag, Extras, Square, Wide};
 use rio_backend::crosswords::style::{Style, StyleFlags};
 use rio_backend::selection::SelectionRange;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
+use unicode_width::UnicodeWidthChar;
 
 /// Snapshot's per-frame extras map. Keyed by the cell's `extras_id`,
 /// populated by `Crosswords::snapshot_visible` from a walk of visible
@@ -348,6 +349,17 @@ const DECORATION_FONT_ID_BASE: u32 = 0xFFFF_FF00;
 /// The atlas `glyph_id` for a registered cell is
 /// `pack_atlas_glyph_id(codepoint, version)`.
 use rio_backend::sugarloaf::font::glyph_registry::CUSTOM_GLYPH_FONT_ID_U32;
+
+const NERD_FONT_GLYPH_KEY_FLAG: u32 = 0x8000_0000;
+const EMOJI_GLYPH_KEY_FLAG: u32 = 0x4000_0000;
+const CONSTRAINED_CODEPOINT_MASK: u32 = 0x001F_FFFF;
+// Ghostty derives icon height from cap/face metrics before rasterization.
+// This grid-emitter path only has cell metrics after rasterization; applying
+// a reduced single-cell icon band here double-shrinks broad PUA status icons
+// such as U+EA73 and U+EBCA. Keep the height bound at full cell size and let
+// the generated Nerd Font padding/alignment rules do the centering.
+const NERD_FONT_ICON_HEIGHT_SINGLE_FACTOR: f64 = 1.0;
+const NERD_FONT_ICON_HEIGHT_FACTOR: f64 = 1.0;
 
 /// Sentinel font_id base for cursor sprites. Distinct from the
 /// decoration range so the two never collide in the atlas
@@ -990,6 +1002,85 @@ mod cursor_tests {
         assert_eq!(h, 2);
         assert_eq!(bearing_x, 7);
         assert_eq!(bearing_y, 8);
+    }
+
+    #[test]
+    fn constrained_glyph_key_separates_nerd_font_and_emoji_namespaces() {
+        let nerd_constraint = glyph_constraint(0xEA73, false).unwrap();
+        let emoji_wide_constraint = glyph_constraint(0x1F600, true).unwrap();
+        let emoji_narrow_constraint = glyph_constraint(0x23, true).unwrap();
+        let emoji_vs16_constraint = glyph_constraint(0x2601, true).unwrap();
+        let mut emoji_vs16_cell = Square::from_char('\u{2601}');
+        emoji_vs16_cell.set_wide(Wide::Wide);
+
+        assert_eq!(atlas_glyph_id(42, 0xEA73, 1, None), 42);
+        assert_eq!(
+            atlas_glyph_id(42, 0xEA73, 1, Some(nerd_constraint)),
+            NERD_FONT_GLYPH_KEY_FLAG | 0xEA73
+        );
+        assert_eq!(
+            atlas_glyph_id(42, 0x1F600, 2, Some(emoji_wide_constraint)),
+            EMOJI_GLYPH_KEY_FLAG | (2 << 16) | 42
+        );
+        assert_eq!(
+            atlas_glyph_id(42, 0x23, 1, Some(emoji_narrow_constraint)),
+            EMOJI_GLYPH_KEY_FLAG | (1 << 16) | 42
+        );
+        assert_eq!(constraint_width_for_square(emoji_vs16_cell), 2);
+        assert_eq!(
+            atlas_glyph_id(
+                42,
+                0x2601,
+                constraint_width_for_square(emoji_vs16_cell),
+                Some(emoji_vs16_constraint)
+            ),
+            EMOJI_GLYPH_KEY_FLAG | (2 << 16) | 42
+        );
+    }
+
+    #[test]
+    fn constrain_rasterized_glyph_preserves_status_icon_weight() {
+        for codepoint in [0xEA73, 0xEBCA] {
+            let constraint =
+                rio_backend::sugarloaf::font::nerd_font_attributes::get_constraint(
+                    codepoint,
+                )
+                .expect("status icon should use generated Nerd Font constraints");
+            let mut raw = RawGlyph {
+                width: 8,
+                height: 24,
+                left: 0,
+                top: 0,
+                is_color: false,
+                bytes: vec![255; 8 * 24],
+            };
+            let mut bearing_x = 0;
+            let mut bearing_y = 24;
+
+            constrain_rasterized_glyph(
+                &mut raw,
+                &mut bearing_x,
+                &mut bearing_y,
+                constraint,
+                1,
+                10.0,
+                20.0,
+            );
+
+            assert!(
+                raw.height <= 20,
+                "{codepoint:#x} should still fit inside the cell height"
+            );
+            assert!(
+                raw.height >= 19,
+                "{codepoint:#x} should keep close to full-cell visual weight"
+            );
+            assert_eq!(raw.bytes.len(), (raw.width * raw.height) as usize);
+            assert!(
+                bearing_y >= raw.height as i16,
+                "{codepoint:#x} should remain centered rather than bottom-aligned"
+            );
+        }
     }
 }
 
@@ -2299,14 +2390,20 @@ pub fn build_row_fg(
             if (grid_col as usize) >= cols {
                 continue;
             }
+            let src_col = (grid_col as usize).min(cols.saturating_sub(1));
+            let src_sq = row[Column(src_col)];
+            let constraint_width = constraint_width_for_square(src_sq);
 
             let Some((_, slot, is_color)) = ensure_glyph_by_id(
                 rasterizer,
                 grid,
                 font_id,
                 glyph_id,
+                src_sq.c() as u32,
+                constraint_width,
                 size_bucket,
                 size_u16,
+                cell_w,
                 cell_h,
                 ascent_px,
                 is_emoji,
@@ -2324,8 +2421,6 @@ pub fn build_row_fg(
             // ligatures take the first cluster cell's colour. Mapped
             // through `run_cell_columns` for the same reason as
             // `grid_col` above.
-            let src_col = (grid_col as usize).min(cols.saturating_sub(1));
-            let src_sq = row[Column(src_col)];
             let src_style = resolve_style(style_table, src_sq);
             let (atlas, color) = if is_color {
                 // Colour glyphs (emoji) don't take the selection-fg /
@@ -2528,6 +2623,201 @@ fn emit_strikethroughs(
     }
 }
 
+#[derive(Clone, Copy)]
+enum GlyphConstraint {
+    NerdFont(rio_backend::sugarloaf::font::nerd_font_attributes::Constraint),
+    Emoji(rio_backend::sugarloaf::font::nerd_font_attributes::Constraint),
+}
+
+impl GlyphConstraint {
+    fn constraint(
+        self,
+    ) -> rio_backend::sugarloaf::font::nerd_font_attributes::Constraint {
+        match self {
+            Self::NerdFont(constraint) | Self::Emoji(constraint) => constraint,
+        }
+    }
+}
+
+fn glyph_constraint(codepoint: u32, is_emoji: bool) -> Option<GlyphConstraint> {
+    use rio_backend::sugarloaf::font::nerd_font_attributes::{
+        get_constraint, Align, Constraint, Size,
+    };
+
+    if let Some(constraint) = get_constraint(codepoint) {
+        return Some(GlyphConstraint::NerdFont(constraint));
+    }
+
+    if is_emoji {
+        return Some(GlyphConstraint::Emoji(Constraint {
+            size: Size::Cover,
+            align_horizontal: Align::Center,
+            align_vertical: Align::Center,
+            pad_left: 0.025,
+            pad_right: 0.025,
+            ..Constraint::DEFAULT
+        }));
+    }
+
+    None
+}
+
+#[inline]
+fn atlas_glyph_id(
+    glyph_id: u16,
+    codepoint: u32,
+    constraint_width: u8,
+    constraint: Option<GlyphConstraint>,
+) -> u32 {
+    match constraint {
+        Some(GlyphConstraint::NerdFont(_)) => {
+            NERD_FONT_GLYPH_KEY_FLAG | (codepoint & CONSTRAINED_CODEPOINT_MASK)
+        }
+        Some(GlyphConstraint::Emoji(_)) => {
+            EMOJI_GLYPH_KEY_FLAG | ((constraint_width as u32) << 16) | glyph_id as u32
+        }
+        None => glyph_id as u32,
+    }
+}
+
+#[inline]
+fn glyph_bearing_y(cell_h: f32, ascent_px: i16, top: i32) -> i16 {
+    let top_i16 = top.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let cell_h_i16 = cell_h.round().clamp(0.0, i16::MAX as f32) as i16;
+    cell_h_i16.saturating_sub(ascent_px).saturating_add(top_i16)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn constrain_rasterized_glyph(
+    raw: &mut RawGlyph,
+    bearing_x: &mut i16,
+    bearing_y: &mut i16,
+    constraint: rio_backend::sugarloaf::font::nerd_font_attributes::Constraint,
+    constraint_width: u8,
+    cell_w: f32,
+    cell_h: f32,
+) {
+    use rio_backend::sugarloaf::font::nerd_font_attributes::{
+        GlyphSize, Metrics as ConstraintMetrics,
+    };
+
+    if raw.width == 0 || raw.height == 0 || !constraint.does_anything() {
+        return;
+    }
+
+    let bytes_per_pixel = if raw.is_color { 4 } else { 1 };
+    if bitmap_len(raw.width, raw.height, bytes_per_pixel) != Some(raw.bytes.len()) {
+        return;
+    }
+
+    let glyph = GlyphSize {
+        width: raw.width as f64,
+        height: raw.height as f64,
+        x: f64::from(*bearing_x),
+        y: f64::from(*bearing_y) - raw.height as f64,
+    };
+    let constrained =
+        constraint.constrain(glyph, constraint_metrics(cell_w, cell_h), constraint_width);
+    if !constrained.width.is_finite()
+        || !constrained.height.is_finite()
+        || !constrained.x.is_finite()
+        || !constrained.y.is_finite()
+    {
+        return;
+    }
+
+    let width = constrained.width.round().clamp(1.0, u16::MAX as f64) as u32;
+    let height = constrained.height.round().clamp(1.0, u16::MAX as f64) as u32;
+    if width != raw.width || height != raw.height {
+        let Some(bytes) = resize_bitmap(
+            &raw.bytes,
+            raw.width,
+            raw.height,
+            width,
+            height,
+            bytes_per_pixel,
+        ) else {
+            return;
+        };
+        raw.bytes = bytes;
+        raw.width = width;
+        raw.height = height;
+    }
+
+    *bearing_x = round_to_i16(constrained.x);
+    *bearing_y = round_to_i16(constrained.y + constrained.height);
+
+    fn constraint_metrics(cell_w: f32, cell_h: f32) -> ConstraintMetrics {
+        let cell_width = cell_w.round().clamp(1.0, u32::MAX as f32) as u32;
+        let cell_height = cell_h.round().clamp(1.0, u32::MAX as f32) as u32;
+        let face_width = f64::from(cell_w.max(1.0));
+        let face_height = f64::from(cell_h.max(1.0));
+        ConstraintMetrics {
+            face_width,
+            face_height,
+            face_y: 0.0,
+            cell_width,
+            cell_height,
+            icon_height_single: (face_height * NERD_FONT_ICON_HEIGHT_SINGLE_FACTOR)
+                .max(1.0),
+            icon_height: (face_height * NERD_FONT_ICON_HEIGHT_FACTOR).max(1.0),
+        }
+    }
+}
+
+fn constraint_width_for_square(sq: Square) -> u8 {
+    if matches!(sq.wide(), Wide::Wide) {
+        2
+    } else {
+        constraint_width_for_codepoint(sq.c() as u32)
+    }
+}
+
+fn constraint_width_for_codepoint(codepoint: u32) -> u8 {
+    char::from_u32(codepoint)
+        .and_then(|ch| ch.width())
+        .unwrap_or(1)
+        .clamp(1, 2) as u8
+}
+
+fn resize_bitmap(
+    bytes: &[u8],
+    src_w: u32,
+    src_h: u32,
+    dst_w: u32,
+    dst_h: u32,
+    bytes_per_pixel: usize,
+) -> Option<Vec<u8>> {
+    if src_w == dst_w && src_h == dst_h {
+        return Some(bytes.to_vec());
+    }
+
+    let filter = image_rs::imageops::FilterType::Triangle;
+    match bytes_per_pixel {
+        1 => {
+            let image = image_rs::GrayImage::from_raw(src_w, src_h, bytes.to_vec())?;
+            Some(image_rs::imageops::resize(&image, dst_w, dst_h, filter).into_raw())
+        }
+        4 => {
+            let image = image_rs::RgbaImage::from_raw(src_w, src_h, bytes.to_vec())?;
+            Some(image_rs::imageops::resize(&image, dst_w, dst_h, filter).into_raw())
+        }
+        _ => None,
+    }
+}
+
+#[inline]
+fn bitmap_len(width: u32, height: u32, bytes_per_pixel: usize) -> Option<usize> {
+    (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(bytes_per_pixel)
+}
+
+#[inline]
+fn round_to_i16(value: f64) -> i16 {
+    value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16
+}
+
 /// Look up or rasterize-and-insert a glyph into the grid atlas by
 /// `glyph_id`. Platform-agnostic entry point; cfg branches inside to
 /// call the CT or swash rasterizer.
@@ -2537,17 +2827,21 @@ fn ensure_glyph_by_id(
     grid: &mut GridRenderer,
     font_id: u32,
     glyph_id: u16,
+    codepoint: u32,
+    constraint_width: u8,
     size_bucket: u16,
     size_u16: u16,
+    cell_w: f32,
     cell_h: f32,
     ascent_px: i16,
     is_emoji: bool,
     synthetic_italic: bool,
     synthetic_bold: bool,
 ) -> Option<(GlyphKey, AtlasSlot, bool)> {
+    let constraint = glyph_constraint(codepoint, is_emoji);
     let key = GlyphKey {
         font_id,
-        glyph_id: glyph_id as u32,
+        glyph_id: atlas_glyph_id(glyph_id, codepoint, constraint_width, constraint),
         size_bucket,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
@@ -2558,7 +2852,7 @@ fn ensure_glyph_by_id(
     }
 
     // Rasterize via the platform-native backend.
-    let raw = rasterize_glyph_native(
+    let mut raw = rasterize_glyph_native(
         rasterizer,
         font_id,
         glyph_id,
@@ -2572,15 +2866,23 @@ fn ensure_glyph_by_id(
     // Convert CG-convention `left`/`top` into grid-convention
     // `bearing_y` = `cell_h - ascent + top`. See the long comment in
     // the original macOS rasterizer for the geometry.
-    let bearing_y = {
-        let top_i16 = raw.top.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-        let cell_h_i16 = cell_h.round().clamp(0.0, i16::MAX as f32) as i16;
-        cell_h_i16.saturating_sub(ascent_px).saturating_add(top_i16)
-    };
+    let mut bearing_x = raw.left.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+    let mut bearing_y = glyph_bearing_y(cell_h, ascent_px, raw.top);
+    if let Some(constraint) = constraint {
+        constrain_rasterized_glyph(
+            &mut raw,
+            &mut bearing_x,
+            &mut bearing_y,
+            constraint.constraint(),
+            constraint_width,
+            cell_w,
+            cell_h,
+        );
+    }
     let raster = RasterizedGlyph {
         width: raw.width.min(u16::MAX as u32) as u16,
         height: raw.height.min(u16::MAX as u32) as u16,
-        bearing_x: raw.left.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+        bearing_x,
         bearing_y,
         bytes: &raw.bytes,
     };
