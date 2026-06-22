@@ -27,6 +27,13 @@ The launcher sets `MARS_CONFIG_HOME` and starts Yazelix with
 `mars -e yzx enter`. The config stays terminal-only. Use
 `MARS_BINARY=/path/to/mars` when testing a build artifact directly.
 
+## Non-Nix Packaging And Graphics
+
+Mars should preserve normal non-Nix packaging paths inherited from Rio, but each
+artifact family needs its own validation before it becomes a public support
+claim. The current policy and Vulkan loader diagnostic flow live in
+[`non_nix_graphics_launch_support.md`](./non_nix_graphics_launch_support.md).
+
 ## Artifact Rule
 
 Every reproducible run leaves logs under:
@@ -196,6 +203,74 @@ To compare Mars against upstream Rio, apply the benchmark patch series to a
 output from the same machine, corpus, dimensions, scrollback, chunk size, and
 iteration count. Use the generator metadata SHA-256 when the corpus was
 produced by `mars_perf_gate.py`.
+
+## Render Snapshot and Damage Benchmark
+
+Run the renderer-facing snapshot benchmark without starting Mars, a PTY,
+Zellij, the frontend renderer, Sugarloaf, or the GPU:
+
+```sh
+cargo run -p rio-backend --bin mars-render-snapshot-bench --release \
+  --features rio-window/x11,rio-window/wayland -- \
+  --corpus rio-backend/fixtures/render_snapshot_smoke.txt \
+  --rows 24 \
+  --columns 80 \
+  --scrollback 10000 \
+  --chunk-size 4096 \
+  --iterations 10 \
+  --mode all \
+  --dirty-rows 4
+```
+
+The benchmark replays the corpus into terminal/grid state once, warms reusable
+snapshot buffers, then times Rio/Mars damage extraction plus
+`Crosswords::snapshot_visible` for three renderer inputs:
+
+- `noop`: damage extraction and the no-visible-row-copy snapshot path after
+  warmup damage has been settled
+- `full`: full visible-row snapshot copy
+- `incremental`: controlled dirty-row update before each snapshot
+
+Use this benchmark when parser-only and terminal-state throughput are acceptable
+but renderer CPU may be spent extracting visible rows, styles, hyperlinks, or
+other per-row extras. It still excludes PTY scheduling, Zellij, frontend row
+emission, rasterization, GPU presentation, shaders, and live Codex load.
+
+For a larger corpus, generate input once and replay the exact same file:
+
+```sh
+tools/mars_perf_gate.py --generate-corpus /tmp/mars_snapshot_scroll.bin \
+  --corpus-kind scroll_render \
+  --corpus-seed 7 \
+  --corpus-lines 80000 \
+  --corpus-rows 44 \
+  --corpus-columns 132
+
+cargo run -p rio-backend --bin mars-render-snapshot-bench --release \
+  --features rio-window/x11,rio-window/wayland -- \
+  --corpus /tmp/mars_snapshot_scroll.bin \
+  --rows 44 \
+  --columns 132 \
+  --scrollback 10000 \
+  --chunk-size 4096 \
+  --iterations 5 \
+  --mode all \
+  --dirty-rows 8
+```
+
+The output records corpus path/bytes, detected sidecar metadata path/size, the
+sidecar JSON metadata on one line when it is readable as UTF-8, terminal
+dimensions, scrollback limit, chunk size, iterations, dirty rows per
+incremental snapshot, elapsed nanoseconds, snapshots per second, final damage
+class, final cursor position, final resident snapshot-buffer row count, dirty
+row count, style count, extras count, and synchronized-update buffer bytes.
+
+To compare Mars against upstream Rio, apply the benchmark patch series to a
+`rio-upstream/main` worktree, generate one corpus file, and run the exact same
+`mars-render-snapshot-bench` command in both worktrees. Compare only release
+output from the same machine, corpus, dimensions, scrollback, chunk size,
+iteration count, mode, and dirty-row count. Use the generator metadata SHA-256
+when the corpus was produced by `mars_perf_gate.py`.
 
 Add hardware-counter evidence when the host has `perf`:
 

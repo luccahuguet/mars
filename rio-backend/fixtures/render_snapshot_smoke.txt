@@ -1,0 +1,10 @@
+[48;2;20;40;60mMars render snapshot smoke[0m
+plain line before scrollback
+]8;;https://example.test/renderhyperlink cell payload]8;;
+wide symbols 東京 λ ✓
+one
+two
+three
+four
+five
+six

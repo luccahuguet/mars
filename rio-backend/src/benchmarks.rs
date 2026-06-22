@@ -4,11 +4,15 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use crate::ansi::CursorShape;
+use crate::crosswords::grid::row::Row;
 use crate::crosswords::grid::Dimensions as _;
+use crate::crosswords::pos::{Column, Line};
+use crate::crosswords::square::{Extras, Square};
 use crate::crosswords::{Crosswords, CrosswordsSize};
-use crate::event::{VoidListener, WindowId};
+use crate::event::{TerminalDamage, VoidListener, WindowId};
 use crate::performer::handler::Processor;
 use crate::performer::parser::{Params, Parser, Perform};
+use rustc_hash::FxHashMap;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ParserBenchmarkConfig {
@@ -103,6 +107,69 @@ impl TerminalStreamBenchmarkResult {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderSnapshotBenchmarkMode {
+    Noop,
+    Full,
+    Incremental,
+}
+
+impl RenderSnapshotBenchmarkMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Noop => "noop",
+            Self::Full => "full",
+            Self::Incremental => "incremental",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RenderSnapshotBenchmarkConfig {
+    pub rows: usize,
+    pub columns: usize,
+    pub scrollback_history_limit: usize,
+    pub chunk_size: usize,
+    pub iterations: usize,
+    pub dirty_rows_per_iteration: usize,
+    pub mode: RenderSnapshotBenchmarkMode,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RenderSnapshotBenchmarkResult {
+    pub corpus_bytes: usize,
+    pub rows: usize,
+    pub columns: usize,
+    pub scrollback_history_limit: usize,
+    pub chunk_size: usize,
+    pub iterations: usize,
+    pub dirty_rows_per_iteration: usize,
+    pub mode: RenderSnapshotBenchmarkMode,
+    pub elapsed: Duration,
+    pub total_snapshots: usize,
+    pub final_damage: TerminalDamage,
+    pub final_cursor_line: i32,
+    pub final_cursor_column: usize,
+    pub final_history_size: usize,
+    pub final_display_offset: usize,
+    pub final_visible_rows: usize,
+    pub final_dirty_rows: usize,
+    pub final_style_count: usize,
+    pub final_extras_count: usize,
+    pub final_sync_buffer_bytes: usize,
+}
+
+impl RenderSnapshotBenchmarkResult {
+    pub fn snapshots_per_second(self) -> f64 {
+        let elapsed = self.elapsed.as_secs_f64();
+        if elapsed == 0.0 {
+            0.0
+        } else {
+            self.total_snapshots as f64 / elapsed
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ParserBenchmarkError {
     EmptyCorpus,
@@ -156,6 +223,41 @@ impl fmt::Display for TerminalStreamBenchmarkError {
 }
 
 impl Error for TerminalStreamBenchmarkError {}
+
+#[derive(Debug)]
+pub enum RenderSnapshotBenchmarkError {
+    EmptyCorpus,
+    ZeroRows,
+    ZeroColumns,
+    ZeroChunkSize,
+    ZeroIterations,
+    ZeroDirtyRows,
+}
+
+impl fmt::Display for RenderSnapshotBenchmarkError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyCorpus => f.write_str("render snapshot benchmark corpus is empty"),
+            Self::ZeroRows => {
+                f.write_str("render snapshot benchmark rows must be greater than zero")
+            }
+            Self::ZeroColumns => {
+                f.write_str("render snapshot benchmark columns must be greater than zero")
+            }
+            Self::ZeroChunkSize => f.write_str(
+                "render snapshot benchmark chunk size must be greater than zero",
+            ),
+            Self::ZeroIterations => f.write_str(
+                "render snapshot benchmark iterations must be greater than zero",
+            ),
+            Self::ZeroDirtyRows => f.write_str(
+                "render snapshot benchmark dirty rows must be greater than zero",
+            ),
+        }
+    }
+}
+
+impl Error for RenderSnapshotBenchmarkError {}
 
 pub fn run_parser_benchmark(
     corpus: &[u8],
@@ -264,6 +366,183 @@ pub fn run_terminal_stream_benchmark(
         final_total_lines,
         final_sync_buffer_bytes,
     })
+}
+
+pub fn run_render_snapshot_benchmark(
+    corpus: &[u8],
+    config: RenderSnapshotBenchmarkConfig,
+) -> Result<RenderSnapshotBenchmarkResult, RenderSnapshotBenchmarkError> {
+    if corpus.is_empty() {
+        return Err(RenderSnapshotBenchmarkError::EmptyCorpus);
+    }
+    if config.rows == 0 {
+        return Err(RenderSnapshotBenchmarkError::ZeroRows);
+    }
+    if config.columns == 0 {
+        return Err(RenderSnapshotBenchmarkError::ZeroColumns);
+    }
+    if config.chunk_size == 0 {
+        return Err(RenderSnapshotBenchmarkError::ZeroChunkSize);
+    }
+    if config.iterations == 0 {
+        return Err(RenderSnapshotBenchmarkError::ZeroIterations);
+    }
+    if config.mode == RenderSnapshotBenchmarkMode::Incremental
+        && config.dirty_rows_per_iteration == 0
+    {
+        return Err(RenderSnapshotBenchmarkError::ZeroDirtyRows);
+    }
+
+    let mut processor = Processor::default();
+    let mut terminal = Crosswords::new(
+        CrosswordsSize::new(config.columns, config.rows),
+        CursorShape::Block,
+        VoidListener {},
+        WindowId::from(0),
+        0,
+        config.scrollback_history_limit,
+    );
+
+    for chunk in corpus.chunks(config.chunk_size) {
+        processor.advance(&mut terminal, black_box(chunk));
+    }
+
+    let mut visible_rows: Vec<Row<Square>> = Vec::new();
+    let mut style_table = Vec::new();
+    let mut extras: FxHashMap<u16, Extras> = FxHashMap::default();
+
+    // Warm the reusable snapshot buffers once so the timed loop measures the
+    // steady-state renderer extraction path rather than first-frame allocation.
+    terminal.reset_damage();
+    terminal.snapshot_visible(
+        &TerminalDamage::Full,
+        terminal.columns(),
+        &mut visible_rows,
+        &mut style_table,
+        &mut extras,
+    );
+    clear_snapshot_dirty(&mut visible_rows);
+    let _ = terminal.damage();
+    terminal.reset_damage();
+
+    let mut elapsed = Duration::ZERO;
+    let mut final_damage = TerminalDamage::Noop;
+    let mut final_cursor_line = 0;
+    let mut final_cursor_column = 0;
+    let mut final_history_size = 0;
+    let mut final_display_offset = 0;
+    let mut final_visible_rows = 0;
+    let mut final_dirty_rows = 0;
+    let mut final_style_count = 0;
+    let mut final_extras_count = 0;
+    let mut final_sync_buffer_bytes = processor.sync_bytes_count();
+
+    for iteration in 0..config.iterations {
+        match config.mode {
+            RenderSnapshotBenchmarkMode::Full => terminal.mark_fully_damaged(),
+            RenderSnapshotBenchmarkMode::Incremental => {
+                prepare_incremental_snapshot_damage(
+                    &mut terminal,
+                    iteration,
+                    config.dirty_rows_per_iteration,
+                );
+            }
+            RenderSnapshotBenchmarkMode::Noop => {}
+        }
+
+        let start = Instant::now();
+        let damage = terminal.peek_damage_event().unwrap_or(TerminalDamage::Noop);
+        terminal.reset_damage();
+        terminal.snapshot_visible(
+            &damage,
+            terminal.columns(),
+            &mut visible_rows,
+            &mut style_table,
+            &mut extras,
+        );
+
+        let cursor = terminal.cursor();
+        final_damage = damage;
+        final_cursor_line = cursor.pos.row.0;
+        final_cursor_column = cursor.pos.col.0;
+        final_history_size = terminal.history_size();
+        final_display_offset = terminal.display_offset();
+        final_visible_rows = visible_rows.len();
+        final_dirty_rows = count_snapshot_dirty(&visible_rows);
+        final_style_count = style_table.len();
+        final_extras_count = extras.len();
+        final_sync_buffer_bytes = processor.sync_bytes_count();
+        black_box((
+            terminal.colors,
+            final_cursor_line,
+            final_cursor_column,
+            final_history_size,
+            final_display_offset,
+            final_visible_rows,
+            final_dirty_rows,
+            final_style_count,
+            final_extras_count,
+            terminal.blinking_cursor,
+            terminal.graphics.kitty_graphics_dirty,
+        ));
+        elapsed += start.elapsed();
+
+        clear_snapshot_dirty(&mut visible_rows);
+    }
+
+    Ok(RenderSnapshotBenchmarkResult {
+        corpus_bytes: corpus.len(),
+        rows: config.rows,
+        columns: config.columns,
+        scrollback_history_limit: config.scrollback_history_limit,
+        chunk_size: config.chunk_size,
+        iterations: config.iterations,
+        dirty_rows_per_iteration: config.dirty_rows_per_iteration,
+        mode: config.mode,
+        elapsed,
+        total_snapshots: config.iterations,
+        final_damage,
+        final_cursor_line,
+        final_cursor_column,
+        final_history_size,
+        final_display_offset,
+        final_visible_rows,
+        final_dirty_rows,
+        final_style_count,
+        final_extras_count,
+        final_sync_buffer_bytes,
+    })
+}
+
+fn prepare_incremental_snapshot_damage<U>(
+    terminal: &mut Crosswords<U>,
+    iteration: usize,
+    dirty_rows_per_iteration: usize,
+) where
+    U: crate::event::EventListener,
+{
+    let rows = terminal.screen_lines().max(1);
+    let columns = terminal.columns().max(1);
+    let dirty_rows = dirty_rows_per_iteration.min(rows);
+
+    for offset in 0..dirty_rows {
+        let row = (iteration + offset) % rows;
+        let col = Column((iteration + offset) % columns);
+        let ch = char::from_u32(b'a' as u32 + ((iteration + offset) % 26) as u32)
+            .unwrap_or('a');
+        terminal.grid[Line(row as i32)][col].set_c(ch);
+        terminal.damage_line(row);
+    }
+}
+
+fn count_snapshot_dirty(rows: &[Row<Square>]) -> usize {
+    rows.iter().filter(|row| row.dirty).count()
+}
+
+fn clear_snapshot_dirty(rows: &mut [Row<Square>]) {
+    for row in rows {
+        row.dirty = false;
+    }
 }
 
 impl ParserBenchmarkCounts {
@@ -461,5 +740,76 @@ mod tests {
 
         assert!(result.final_history_size > 0);
         assert!(result.final_total_lines > result.rows);
+    }
+
+    #[test]
+    fn render_snapshot_benchmark_measures_full_snapshot() {
+        let corpus = b"\x1b[48;2;20;40;60mhello\x1b[0m\r\n\x1b]8;;https://example.test\x07link\x1b]8;;\x07\r\n";
+        let result = run_render_snapshot_benchmark(
+            corpus,
+            RenderSnapshotBenchmarkConfig {
+                rows: 4,
+                columns: 20,
+                scrollback_history_limit: 100,
+                chunk_size: 4,
+                iterations: 2,
+                dirty_rows_per_iteration: 1,
+                mode: RenderSnapshotBenchmarkMode::Full,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.mode, RenderSnapshotBenchmarkMode::Full);
+        assert_eq!(result.final_damage, TerminalDamage::Full);
+        assert_eq!(result.final_visible_rows, 4);
+        assert_eq!(result.final_dirty_rows, 4);
+        assert!(result.final_style_count > 0);
+        assert!(result.final_extras_count > 0);
+    }
+
+    #[test]
+    fn render_snapshot_benchmark_measures_incremental_damage() {
+        let corpus = b"one\r\ntwo\r\nthree\r\nfour\r\n";
+        let result = run_render_snapshot_benchmark(
+            corpus,
+            RenderSnapshotBenchmarkConfig {
+                rows: 4,
+                columns: 20,
+                scrollback_history_limit: 100,
+                chunk_size: 4,
+                iterations: 3,
+                dirty_rows_per_iteration: 2,
+                mode: RenderSnapshotBenchmarkMode::Incremental,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.mode, RenderSnapshotBenchmarkMode::Incremental);
+        assert_eq!(result.final_damage, TerminalDamage::Partial);
+        assert_eq!(result.final_visible_rows, 4);
+        assert_eq!(result.final_dirty_rows, 2);
+        assert!(result.final_history_size > 0);
+    }
+
+    #[test]
+    fn render_snapshot_benchmark_measures_noop_gate() {
+        let result = run_render_snapshot_benchmark(
+            b"stable\r\n",
+            RenderSnapshotBenchmarkConfig {
+                rows: 3,
+                columns: 10,
+                scrollback_history_limit: 10,
+                chunk_size: 8,
+                iterations: 2,
+                dirty_rows_per_iteration: 1,
+                mode: RenderSnapshotBenchmarkMode::Noop,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.mode, RenderSnapshotBenchmarkMode::Noop);
+        assert_eq!(result.final_damage, TerminalDamage::Noop);
+        assert_eq!(result.final_dirty_rows, 0);
+        assert_eq!(result.final_visible_rows, 3);
     }
 }
