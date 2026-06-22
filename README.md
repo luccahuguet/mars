@@ -207,8 +207,7 @@ are useful beyond Yazelix.
 
 ## Trivia
 
-Mars carries a small Rio coincidence: like Rio's creator, Mars' maintainer was
-born in Rio de Janeiro.
+Like Rio's creator, I was also born in Rio de Janeiro.
 
 ## License
 
