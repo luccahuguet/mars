@@ -13,6 +13,8 @@ Mars is the default packaged terminal for Yazelix. Ghostty remains the mature
 alternate in Yazelix; Mars exists so the Rust terminal/runtime boundary can move
 with Yazelix when protocol, cursor, graphics, and packaging work needs it.
 
+![Mars running Yazelix](docs/assets/mars-yazelix-session.png)
+
 ## Current Shape
 
 - The source tree is based on upstream Rio and still carries Rio crate names in
