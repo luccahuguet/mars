@@ -1,5 +1,9 @@
 # Mars Terminal
 
+<p align="center">
+  <img src="docs/assets/mars-terminal-icon.png" alt="Mars terminal icon" width="180">
+</p>
+
 Mars is a Rio-derived Rust terminal fork maintained for Yazelix and
 agent-driven development.
 
