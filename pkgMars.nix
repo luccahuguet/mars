@@ -77,6 +77,37 @@
   notoEmojiDir = "${notoEmojiFont}/share/fonts/noto";
   twitterEmojiDir = "${twitterEmojiFont}/share/fonts/truetype/TwitterColorEmoji";
   serenityOsEmojiDir = "${serenityOsEmojiFont}/share/fonts/truetype";
+  marsAnsiColors = ''
+    black = "#000000"
+    dim-black = "#6f7782"
+    red = "#cd0000"
+    green = "#00cd00"
+    yellow = "#cdcd00"
+    blue = "#1093f5"
+    magenta = "#cd00cd"
+    cyan = "#00cdcd"
+    white = "#faebd7"
+    light-black = "#8b949e"
+    light-red = "#ff0000"
+    light-green = "#00ff00"
+    light-yellow = "#ffff00"
+    light-blue = "#11b5f6"
+    light-magenta = "#ff00ff"
+    light-cyan = "#00ffff"
+    light-white = "#ffffff"
+  '';
+  darkColors = ''
+    background = "#111416"
+    foreground = "#eeeeec"
+    dim-foreground = "#9d9d9c"
+    ${marsAnsiColors}
+  '';
+  lightColors = ''
+    background = "#f5f3ef"
+    foreground = "#202124"
+    dim-foreground = "#62666d"
+    ${marsAnsiColors}
+  '';
   configFor = {
     emojiFamily,
     emojiDir,
@@ -133,40 +164,19 @@
     ]
 
     [colors]
-    background = "#111416"
-    foreground = "#eeeeec"
-    dim-foreground = "#9d9d9c"
-    black = "#000000"
-    dim-black = "#6f7782"
-    red = "#cd0000"
-    green = "#00cd00"
-    yellow = "#cdcd00"
-    blue = "#1093f5"
-    magenta = "#cd00cd"
-    cyan = "#00cdcd"
-    white = "#faebd7"
-    light-black = "#8b949e"
-    light-red = "#ff0000"
-    light-green = "#00ff00"
-    light-yellow = "#ffff00"
-    light-blue = "#11b5f6"
-    light-magenta = "#ff00ff"
-    light-cyan = "#00ffff"
-    light-white = "#ffffff"
+    ${darkColors}
 
     [navigation]
     mode = "Plain"
   '';
   darkTheme = ''
     [colors]
-    background = "#111416"
-    foreground = "#eeeeec"
+    ${darkColors}
     cursor = "#00e6ff"
   '';
   lightTheme = ''
     [colors]
-    background = "#f5f3ef"
-    foreground = "#202124"
+    ${lightColors}
     cursor = "#0077cc"
   '';
 in
