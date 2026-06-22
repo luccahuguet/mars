@@ -33,7 +33,8 @@ with Yazelix when protocol, cursor, graphics, and packaging work needs it.
   at `share/mars/package-metadata.json`
 - The package includes generated Mars config roots for Yazelix:
   `share/mars`, `share/mars/baseline`, `share/mars/profiles/shaders`,
-  `share/mars/emoji/twitter`, and `share/mars/emoji/serenityos`
+  `share/mars/emoji/twitter`, and, where supported by nixpkgs,
+  `share/mars/emoji/serenityos`
 - The package metadata advertises `MARS_APPEARANCE`, `MARS_EMOJI_FONT`,
   `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the runtime environment
   contract consumed by Yazelix

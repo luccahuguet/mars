@@ -16,24 +16,28 @@
   writeText,
 }: let
   packageProfile = "full";
+  supportsSerenityOsEmoji = !stdenv.isDarwin;
   configRoots = {
     full = "share/mars";
     baseline = "share/mars/baseline";
     shaders = "share/mars/profiles/shaders";
   };
-  emojiConfigRoots = {
-    noto = configRoots;
-    twitter = {
-      full = "share/mars/emoji/twitter";
-      baseline = "share/mars/emoji/twitter/baseline";
-      shaders = "share/mars/emoji/twitter/profiles/shaders";
+  emojiConfigRoots =
+    {
+      noto = configRoots;
+      twitter = {
+        full = "share/mars/emoji/twitter";
+        baseline = "share/mars/emoji/twitter/baseline";
+        shaders = "share/mars/emoji/twitter/profiles/shaders";
+      };
+    }
+    // lib.optionalAttrs supportsSerenityOsEmoji {
+      serenityos = {
+        full = "share/mars/emoji/serenityos";
+        baseline = "share/mars/emoji/serenityos/baseline";
+        shaders = "share/mars/emoji/serenityos/profiles/shaders";
+      };
     };
-    serenityos = {
-      full = "share/mars/emoji/serenityos";
-      baseline = "share/mars/emoji/serenityos/baseline";
-      shaders = "share/mars/emoji/serenityos/profiles/shaders";
-    };
-  };
   marsPackageMetadata = {
     schema_version = 1;
     terminal = "mars";
@@ -46,11 +50,12 @@
       terminal = "bin/mars";
     };
     config_roots = configRoots;
-    supported_emoji_fonts = [
-      "noto"
-      "twitter"
-      "serenityos"
-    ];
+    supported_emoji_fonts =
+      [
+        "noto"
+        "twitter"
+      ]
+      ++ lib.optional supportsSerenityOsEmoji "serenityos";
     supported_appearance_modes = [
       "dark"
       "light"
@@ -252,24 +257,26 @@ in
         trailCursor = true;
       })}
 
-      install_mars_profile "${emojiConfigRoots.serenityos.full}" \
-        ${writeText "mars-serenityos-full.toml" (configFor {
-        emojiFamily = "SerenityOS Emoji";
-        emojiDir = serenityOsEmojiDir;
-        trailCursor = true;
-      })}
-      install_mars_profile "${emojiConfigRoots.serenityos.baseline}" \
-        ${writeText "mars-serenityos-baseline.toml" (configFor {
-        emojiFamily = "SerenityOS Emoji";
-        emojiDir = serenityOsEmojiDir;
-        trailCursor = false;
-      })}
-      install_mars_profile "${emojiConfigRoots.serenityos.shaders}" \
-        ${writeText "mars-serenityos-shaders.toml" (configFor {
-        emojiFamily = "SerenityOS Emoji";
-        emojiDir = serenityOsEmojiDir;
-        trailCursor = true;
-      })}
+      ${lib.optionalString supportsSerenityOsEmoji ''
+        install_mars_profile "${emojiConfigRoots.serenityos.full}" \
+          ${writeText "mars-serenityos-full.toml" (configFor {
+          emojiFamily = "SerenityOS Emoji";
+          emojiDir = serenityOsEmojiDir;
+          trailCursor = true;
+        })}
+        install_mars_profile "${emojiConfigRoots.serenityos.baseline}" \
+          ${writeText "mars-serenityos-baseline.toml" (configFor {
+          emojiFamily = "SerenityOS Emoji";
+          emojiDir = serenityOsEmojiDir;
+          trailCursor = false;
+        })}
+        install_mars_profile "${emojiConfigRoots.serenityos.shaders}" \
+          ${writeText "mars-serenityos-shaders.toml" (configFor {
+          emojiFamily = "SerenityOS Emoji";
+          emojiDir = serenityOsEmojiDir;
+          trailCursor = true;
+        })}
+      ''}
     '';
 
     passthru =
