@@ -1,48 +1,178 @@
-<!-- LOGO -->
-<h1>
-<p align="center">
-  <img src="https://rioterm.com/assets/rio-logo.png" alt="Rio terminal logo" width="128">
-  <br>Rio Terminal
-</h1>
-  <p align="center">
-    Rio is a modern terminal built to run everywhere.
-    <br />
-    <a href="#about">About</a>
-    ·
-    <a href="https://rioterm.com/docs/install">Install</a>
-    ·
-    <a href="https://rioterm.com/docs/config">Config</a>
-    ·
-    <a href="https://rioterm.com/changelog">Changelog</a>
-    ·
-    <a href="https://github.com/sponsors/raphamorim">Sponsor</a>
-  </p>
-</p>
+# Mars Terminal
 
-Documentation: [rioterm.com](https://rioterm.com).
+Mars is a Rio-derived Rust terminal fork maintained for Yazelix and
+agent-driven development.
 
-## Supporting the Project
+The project keeps Rio close enough to upstream to rebase deliberately, while
+giving Yazelix a terminal stack it can control, test, package, and adapt when
+terminal behavior matters. Mars aims for practical Ghostty parity where Yazelix
+depends on it, strong Kitty protocol support, good Nix/runtime integration, and
+small measured changes instead of broad fork drift.
 
-If you use and like Rio, please consider sponsoring it: your support helps to cover the fees required to maintain the project and to validate the time spent working on it!
+Mars is the default packaged terminal for Yazelix. Ghostty remains the mature
+alternate in Yazelix; Mars exists so the Rust terminal/runtime boundary can move
+with Yazelix when protocol, cursor, graphics, and packaging work needs it.
 
-[![Sponsor Rio terminal](https://img.shields.io/github/sponsors/raphamorim?label=Sponsor%20Rio&logo=github&style=for-the-badge)](https://github.com/sponsors/raphamorim)
+## Current Shape
 
-## Packaging
+- The source tree is based on upstream Rio and still carries Rio crate names in
+  many Rust packages
+- The first-class Nix package is `.#mars`; `.#default` points at the same
+  package
+- The package wraps the upstream Rio binary as `bin/mars`, installs Mars desktop
+  metadata and icons, and sets the app id to `mars`
+- The package exposes `passthru.marsPackageMetadata` and installs the same data
+  at `share/mars/package-metadata.json`
+- The package includes generated Mars config roots for Yazelix:
+  `share/mars`, `share/mars/baseline`, `share/mars/profiles/shaders`,
+  `share/mars/emoji/twitter`, and `share/mars/emoji/serenityos`
+- The package metadata advertises `MARS_APPEARANCE`, `MARS_EMOJI_FONT`,
+  `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the wrapper environment
+  contract consumed by Yazelix
+- On Linux, the Nix wrapper provides a package-owned default Vulkan ICD path
+  when `VK_ICD_FILENAMES` is unset, while preserving explicit user overrides
+- Rio package outputs remain exposed as `.#rio`, `.#rio-msrv`, `.#rio-stable`,
+  and `.#rio-nightly` for comparison and upstream maintenance work
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/rio-terminal.svg?columns=3)](https://repology.org/project/rio-terminal/versions)
+## Install
 
-> Demo with split and CRT on MacOS
+Build the Mars package with Nix:
 
-![Demo Rio 0.2.0 on MacOS](https://rioterm.com/assets/posts/0.2.0/demo-rio.png)
+```sh
+nix build github:luccahuguet/mars#mars
+./result/bin/mars
+```
 
-> Demo with blurred background on Linux
+Install it into a Nix profile:
 
-![Demo blurred background](https://rioterm.com/assets/demos/demos-nixos-blur.png)
+```sh
+nix profile install github:luccahuguet/mars#mars
+mars
+```
 
-> Demo of Rio running on a Steam Deck
+Build from a local checkout:
 
-![Demo of Rio running on a Steam Deck](https://rioterm.com/assets/demos/demo-flatpak-steamdeck.jpg)
+```sh
+nix build .#mars
+./result/bin/mars
+```
 
-## Minimal stable rust version
+The Cargo workspace still follows upstream Rio's crate layout. Use Cargo for
+source-level development and CI parity:
 
-Rio's MSRV is 1.96.0.
+```sh
+cargo build --release --features wgpu
+```
+
+## Yazelix Integration
+
+Yazelix consumes Mars through the Nix package contract, not by guessing Rio
+internals. The package metadata tells Yazelix where Mars configs live, which
+emoji presets and appearance modes are supported, and which wrapper command to
+launch.
+
+Mars config roots are designed for generated Yazelix runtime state. User-facing
+Yazelix configuration belongs in Yazelix; terminal implementation details stay
+in Mars.
+
+For local Yazelix dogfooding, use the private launcher:
+
+```sh
+tools/mars_private_yazelix.py
+```
+
+Set `MARS_BINARY=/path/to/mars` to test a specific build artifact. Set
+`MARS_CONFIG_HOME` or `MARS_PRIVATE_CONFIG_HOME` to override the private config
+root.
+
+## Development Principles
+
+Mars is maintained as an agent-friendly fork. Work should leave enough context
+for humans and coding agents to continue safely:
+
+- Plan behavior work in Beads before editing Rio-owned source
+- Prefer additive Mars-owned files over broad Rio source rewrites
+- Keep each feature small, measurable, and easy to remove or upstream
+- Compare relevant Ghostty and WezTerm behavior before terminal-behavior edits
+- Search Rio issues and current upstream Rio commits before local Rio-owned source
+  changes
+- Record runtime-behavior changes in `docs/yazelix/change_scorecard.md`
+- Preserve normal non-Nix packaging routes where practical, but avoid public
+  support claims until each path is validated
+
+Start with:
+
+- [`docs/yazelix/fork_plan.md`](docs/yazelix/fork_plan.md)
+- [`docs/yazelix/upstream_maintenance.md`](docs/yazelix/upstream_maintenance.md)
+- [`docs/yazelix/clean_rio_rebuild_gate.md`](docs/yazelix/clean_rio_rebuild_gate.md)
+- [`docs/yazelix/non_nix_graphics_launch_support.md`](docs/yazelix/non_nix_graphics_launch_support.md)
+
+## Performance And Debugging
+
+Mars keeps reproducible dogfooding tools in the repo. The performance gate
+launches Mars with deterministic workloads and writes artifacts under
+`artifacts/dogfooding/`.
+
+Run the default suite:
+
+```sh
+tools/mars_perf_gate.py --suite --seconds 20
+```
+
+Run one scenario:
+
+```sh
+tools/mars_perf_gate.py --suite --scenario pty_flood --seconds 20
+```
+
+Enable gated internal PTY/render metrics for suite-launched Mars:
+
+```sh
+tools/mars_perf_gate.py --suite --scenario pty_flood --seconds 20 --internal-metrics
+```
+
+Trace a launch boundary:
+
+```sh
+mars-launch-trace -- mars -e true
+```
+
+## Verification
+
+Useful local checks:
+
+```sh
+cargo fmt -- --check --color always
+cargo clippy --all-targets --all-features
+cargo test --features wgpu
+nix build .#mars --no-link --print-build-logs
+actionlint .github/workflows/release.yml
+```
+
+The GitHub `Test` workflow runs native Linux, macOS, and Windows Rust checks,
+plus MSYS2 release builds for `MINGW64`, `UCRT64`, and `CLANG64`.
+
+The GitHub `Nix Build` workflow builds the flake package on Linux ARM.
+
+## Release Status
+
+The release workflow is intentionally limited to `v*.*.*` tags and manual
+dispatch. It uses inherited GoReleaser Pro release machinery, requires
+`GORELEASER_KEY` for release execution, and only configures Apple signing when
+signing secrets are present.
+
+The release-secrets decision is tracked in Bead `yzt-c2d`. Until that is
+resolved, treat Nix builds and source builds as the validated first-party
+surfaces, and treat inherited Rio release packaging as a path to evaluate
+instead of a public Mars guarantee.
+
+## Upstream
+
+Mars inherits substantial code and history from
+[Rio](https://github.com/raphamorim/rio). Upstream Rio remains the baseline for
+terminal behavior, renderer fixes, and cross-platform packaging context. Mars
+should upstream generic fixes when they are useful beyond Yazelix.
+
+## License
+
+Mars follows Rio's MIT licensing.
