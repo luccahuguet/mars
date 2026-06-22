@@ -54,7 +54,13 @@
           )
           toolchains;
         marsPackage = pkgs.callPackage ./pkgMars.nix {
+          firaCodeNerdFont = pkgs.nerd-fonts.fira-code;
+          notoEmojiFont = pkgs.noto-fonts-color-emoji;
+          notoFonts = pkgs.noto-fonts;
           rioPackage = rioPackages.rio;
+          serenityOsEmojiFont = pkgs.serenityos-emoji-font;
+          symbolsNerdFont = pkgs.nerd-fonts.symbols-only;
+          twitterEmojiFont = pkgs.twitter-color-emoji;
         };
       in {
         formatter = pkgs.alejandra;
