@@ -4,6 +4,8 @@
   <img src="docs/assets/mars-terminal-icon.png" alt="Mars terminal icon" width="180">
 </p>
 
+**Born from Rio. Built for Mars.**
+
 Mars is a Rio-derived Rust terminal fork maintained for Yazelix and
 agent-driven development.
 
@@ -33,7 +35,7 @@ with Yazelix when protocol, cursor, graphics, and packaging work needs it.
   `share/mars`, `share/mars/baseline`, `share/mars/profiles/shaders`,
   `share/mars/emoji/twitter`, and `share/mars/emoji/serenityos`
 - The package metadata advertises `MARS_APPEARANCE`, `MARS_EMOJI_FONT`,
-  `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the wrapper environment
+  `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the runtime environment
   contract consumed by Yazelix
 - On Linux, the Nix wrapper provides a package-owned default Vulkan ICD path
   when `VK_ICD_FILENAMES` is unset, while preserving explicit user overrides
@@ -93,6 +95,15 @@ internals. The package metadata tells Yazelix where Mars configs live, which
 emoji presets and appearance modes are supported, and which wrapper command to
 launch.
 
+Package metadata exposes the current runtime environment contract to Yazelix:
+
+| Variable | Purpose |
+| --- | --- |
+| `MARS_PROFILE` | Selects the full, baseline, or shaders profile config root. |
+| `MARS_APPEARANCE` | Selects the dark, light, or auto palette mode. |
+| `MARS_EMOJI_FONT` | Selects the Noto, Twitter/Twemoji, or SerenityOS emoji config root. |
+| `MARS_EMOJI_FONT_SOURCE` | Carries the Yazelix-owned emoji source marker paired with `MARS_EMOJI_FONT`. |
+
 Mars config roots are designed for generated Yazelix runtime state. User-facing
 Yazelix configuration belongs in Yazelix; terminal implementation details stay
 in Mars.
@@ -103,9 +114,13 @@ For local Yazelix dogfooding, use the private launcher:
 tools/mars_private_yazelix.py
 ```
 
-Set `MARS_BINARY=/path/to/mars` to test a specific build artifact. Set
-`MARS_CONFIG_HOME` or `MARS_PRIVATE_CONFIG_HOME` to override the private config
-root.
+Local dogfooding helpers also accept focused overrides:
+
+| Variable | Purpose |
+| --- | --- |
+| `MARS_BINARY` | Runs a specific Mars binary instead of `mars`. |
+| `MARS_CONFIG_HOME` | Uses a specific Mars config directory for the terminal process. |
+| `MARS_PRIVATE_CONFIG_HOME` | Uses a private launcher config root when `MARS_CONFIG_HOME` is unset. |
 
 ## Development
 
