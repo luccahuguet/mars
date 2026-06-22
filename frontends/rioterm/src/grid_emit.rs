@@ -360,9 +360,8 @@ const CURSOR_FONT_ID_BASE: u32 = 0xFFFF_FE00;
 /// font index, so it never collides.
 const DRAWABLE_FONT_ID: u32 = 0xFFFF_FD00;
 
-/// Cursor sprite styles. `font.Sprite::cursor_*`
-///. Each variant maps to a distinct
-/// rasterized bitmap stored in the grid's grayscale atlas.
+/// Cursor sprite styles. Each variant maps to a distinct rasterized
+/// bitmap stored in the grid's grayscale atlas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 enum CursorSpriteStyle {
@@ -397,7 +396,7 @@ impl CursorSpriteStyle {
 pub enum CursorRenderStyle {
     /// Active focused block, painted via uniforms (text inverts).
     /// Also emits a `cursor_rect` sprite into slot 0 for parity with
-    /// .
+    /// the non-block cursor sprite path.
     Block,
     /// Outlined rectangle for inactive split panels.
     BlockHollow,
@@ -405,6 +404,20 @@ pub enum CursorRenderStyle {
     Bar,
     /// Underscore at the cell baseline.
     Underline,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum CursorSplitDivider {
+    Vertical = 0,
+    Horizontal = 1,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorSplit {
+    pub divider: CursorSplitDivider,
+    pub primary_color: [u8; 4],
+    pub secondary_color: [u8; 4],
 }
 
 /// Inputs to the cursor-style decision.
@@ -431,7 +444,7 @@ pub struct CursorRenderInputs {
 
 /// Decide which cursor variant to render this frame, or `None` to
 /// skip emission entirely (hidden cursor / blink-off half-frame).
-/// Strict priority order mirrors :
+/// Strict priority order mirrors Rio's cursor rendering:
 /// preedit > visibility > focused > blink > terminal shape.
 pub fn cursor_render_style(opts: CursorRenderInputs) -> Option<CursorRenderStyle> {
     use rio_backend::ansi::CursorShape;
@@ -475,6 +488,22 @@ impl CursorRenderStyle {
 #[inline]
 fn cursor_thickness(cell_h: u32) -> u32 {
     (cell_h / 16).clamp(1, 2)
+}
+
+#[inline]
+fn split_cursor_thickness(
+    style: CursorSpriteStyle,
+    divider: CursorSplitDivider,
+    cell_h: u32,
+) -> u32 {
+    let thickness = cursor_thickness(cell_h);
+    match (style, divider) {
+        (CursorSpriteStyle::Bar, CursorSplitDivider::Vertical)
+        | (CursorSpriteStyle::Underline, CursorSplitDivider::Horizontal) => {
+            thickness.max(2)
+        }
+        _ => thickness,
+    }
 }
 
 /// Per-style sprite bitmap + bearings. Top-of-sprite bearing is
@@ -601,6 +630,139 @@ fn ensure_cursor_sprite_slot(
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+enum CursorSplitPart {
+    Primary = 0,
+    Secondary = 1,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CursorSpriteRegion {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+fn split_cursor_regions(
+    width: u32,
+    height: u32,
+    divider: CursorSplitDivider,
+) -> Option<[CursorSpriteRegion; 2]> {
+    match divider {
+        CursorSplitDivider::Vertical => {
+            if width < 2 {
+                return None;
+            }
+            let split = (width / 2).clamp(1, width - 1);
+            Some([
+                CursorSpriteRegion {
+                    x: 0,
+                    y: 0,
+                    w: split,
+                    h: height,
+                },
+                CursorSpriteRegion {
+                    x: split,
+                    y: 0,
+                    w: width - split,
+                    h: height,
+                },
+            ])
+        }
+        CursorSplitDivider::Horizontal => {
+            if height < 2 {
+                return None;
+            }
+            let split = (height / 2).clamp(1, height - 1);
+            Some([
+                CursorSpriteRegion {
+                    x: 0,
+                    y: 0,
+                    w: width,
+                    h: split,
+                },
+                CursorSpriteRegion {
+                    x: 0,
+                    y: split,
+                    w: width,
+                    h: height - split,
+                },
+            ])
+        }
+    }
+}
+
+fn crop_cursor_sprite(
+    bytes: &[u8],
+    full_w: u32,
+    bearing_x: i16,
+    bearing_y: i16,
+    region: CursorSpriteRegion,
+) -> (Vec<u8>, u16, u16, i16, i16) {
+    let mut cropped = Vec::with_capacity((region.w * region.h) as usize);
+    let full_w = full_w as usize;
+    let x = region.x as usize;
+    let w = region.w as usize;
+    for row in region.y..region.y + region.h {
+        let start = (row as usize * full_w) + x;
+        cropped.extend_from_slice(&bytes[start..start + w]);
+    }
+
+    (
+        cropped,
+        region.w.min(u16::MAX as u32) as u16,
+        region.h.min(u16::MAX as u32) as u16,
+        bearing_x.saturating_add(region.x.min(i16::MAX as u32) as i16),
+        bearing_y.saturating_sub(region.y.min(i16::MAX as u32) as i16),
+    )
+}
+
+fn ensure_split_cursor_sprite_slot(
+    grid: &mut GridRenderer,
+    style: CursorSpriteStyle,
+    divider: CursorSplitDivider,
+    part: CursorSplitPart,
+    cell_w: u32,
+    cell_h: u32,
+    thickness: u32,
+) -> Option<AtlasSlot> {
+    let key = GlyphKey {
+        font_id: CURSOR_FONT_ID_BASE
+            + 16
+            + (style as u32 * 8)
+            + (divider as u32 * 2)
+            + part as u32,
+        glyph_id: cell_w,
+        size_bucket: ((thickness as u16 & 0xF) << 12) | (cell_h.min(0xFFF) as u16),
+    };
+    if let Some(slot) = grid.lookup_glyph(key) {
+        return Some(slot);
+    }
+
+    let (bytes, full_w, full_h, bearing_x, bearing_y) =
+        rasterize_cursor(style, cell_w, cell_h, thickness);
+    let regions = split_cursor_regions(full_w as u32, full_h as u32, divider)?;
+    let region = match part {
+        CursorSplitPart::Primary => regions[0],
+        CursorSplitPart::Secondary => regions[1],
+    };
+    let (bytes, w, h, bearing_x, bearing_y) =
+        crop_cursor_sprite(&bytes, full_w as u32, bearing_x, bearing_y, region);
+
+    grid.insert_glyph(
+        key,
+        RasterizedGlyph {
+            width: w,
+            height: h,
+            bearing_x,
+            bearing_y,
+            bytes: &bytes,
+        },
+    )
+}
+
 /// Look up or rasterize a built-in drawable sprite (box-drawing, …) into
 /// the grid atlas. Keyed by codepoint + cell height, so a font-size / DPI
 /// change re-rasterizes; rasterized once then served from the atlas like
@@ -643,8 +805,7 @@ fn ensure_drawable_sprite(
 /// Emit a cursor sprite into the appropriate `fg_rows` slot. Caller
 /// is responsible for clearing the OTHER slot (so a previous-frame
 /// block doesn't linger when this frame draws a hollow, etc.) — see
-/// `grid.clear_cursor()`. `addCursor`
-///.
+/// `grid.clear_cursor()`.
 pub fn emit_cursor_sprite(
     grid: &mut GridRenderer,
     style: CursorRenderStyle,
@@ -663,7 +824,68 @@ pub fn emit_cursor_sprite(
     if slot.w == 0 || slot.h == 0 {
         return;
     }
-    let cursor_cell = CellText {
+    let cursor_cell = cursor_cell(slot, col, row, color);
+    if sprite.is_block_slot() {
+        grid.set_block_cursor(&[cursor_cell]);
+    } else {
+        grid.set_non_block_cursor(&[cursor_cell]);
+    }
+}
+
+pub fn emit_split_cursor_sprite(
+    grid: &mut GridRenderer,
+    style: CursorRenderStyle,
+    col: u16,
+    row: u16,
+    split: CursorSplit,
+    cell_w: u32,
+    cell_h: u32,
+) {
+    let sprite = style.sprite();
+    let thickness = split_cursor_thickness(sprite, split.divider, cell_h);
+    let Some(primary_slot) = ensure_split_cursor_sprite_slot(
+        grid,
+        sprite,
+        split.divider,
+        CursorSplitPart::Primary,
+        cell_w,
+        cell_h,
+        thickness,
+    ) else {
+        return;
+    };
+    let Some(secondary_slot) = ensure_split_cursor_sprite_slot(
+        grid,
+        sprite,
+        split.divider,
+        CursorSplitPart::Secondary,
+        cell_w,
+        cell_h,
+        thickness,
+    ) else {
+        return;
+    };
+    if primary_slot.w == 0
+        || primary_slot.h == 0
+        || secondary_slot.w == 0
+        || secondary_slot.h == 0
+    {
+        return;
+    }
+
+    let cursor_cells = [
+        cursor_cell(primary_slot, col, row, split.primary_color),
+        cursor_cell(secondary_slot, col, row, split.secondary_color),
+    ];
+    if sprite.is_block_slot() {
+        grid.set_block_cursor(&cursor_cells);
+    } else {
+        grid.set_non_block_cursor(&cursor_cells);
+    }
+}
+
+fn cursor_cell(slot: AtlasSlot, col: u16, row: u16, color: [u8; 4]) -> CellText {
+    CellText {
         glyph_pos: [slot.x as u32, slot.y as u32],
         glyph_size: [slot.w as u32, slot.h as u32],
         bearings: [slot.bearing_x, slot.bearing_y],
@@ -676,11 +898,98 @@ pub fn emit_cursor_sprite(
         bools: CellText::BOOL_IS_CURSOR_GLYPH,
         page: slot.page,
         _pad: 0,
-    };
-    if sprite.is_block_slot() {
-        grid.set_block_cursor(&[cursor_cell]);
-    } else {
-        grid.set_non_block_cursor(&[cursor_cell]);
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    #[test]
+    fn split_regions_partition_vertically_and_horizontally() {
+        let vertical = split_cursor_regions(9, 18, CursorSplitDivider::Vertical).unwrap();
+        assert_eq!(vertical[0].x, 0);
+        assert_eq!(vertical[0].w, 4);
+        assert_eq!(vertical[1].x, 4);
+        assert_eq!(vertical[1].w, 5);
+
+        let horizontal =
+            split_cursor_regions(9, 18, CursorSplitDivider::Horizontal).unwrap();
+        assert_eq!(horizontal[0].y, 0);
+        assert_eq!(horizontal[0].h, 9);
+        assert_eq!(horizontal[1].y, 9);
+        assert_eq!(horizontal[1].h, 9);
+    }
+
+    #[test]
+    fn split_thickness_keeps_thin_shapes_two_color_visible() {
+        assert_eq!(
+            split_cursor_thickness(
+                CursorSpriteStyle::Bar,
+                CursorSplitDivider::Vertical,
+                18
+            ),
+            2
+        );
+        assert_eq!(
+            split_cursor_thickness(
+                CursorSpriteStyle::Underline,
+                CursorSplitDivider::Horizontal,
+                18
+            ),
+            2
+        );
+        assert_eq!(
+            split_cursor_thickness(
+                CursorSpriteStyle::Underline,
+                CursorSplitDivider::Vertical,
+                18
+            ),
+            cursor_thickness(18)
+        );
+    }
+
+    #[test]
+    fn split_cursor_regions_exist_for_common_cell_sizes() {
+        for style in [
+            CursorSpriteStyle::Block,
+            CursorSpriteStyle::Hollow,
+            CursorSpriteStyle::Bar,
+            CursorSpriteStyle::Underline,
+        ] {
+            for divider in [CursorSplitDivider::Vertical, CursorSplitDivider::Horizontal]
+            {
+                let thickness = split_cursor_thickness(style, divider, 18);
+                let (_, width, height, _, _) = rasterize_cursor(style, 9, 18, thickness);
+                assert!(
+                    split_cursor_regions(width as u32, height as u32, divider).is_some(),
+                    "{style:?} {divider:?} did not produce split regions"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn crop_cursor_sprite_adjusts_bitmap_and_bearings() {
+        let bytes: Vec<u8> = (0..12).collect();
+        let (cropped, w, h, bearing_x, bearing_y) = crop_cursor_sprite(
+            &bytes,
+            4,
+            5,
+            9,
+            CursorSpriteRegion {
+                x: 2,
+                y: 1,
+                w: 2,
+                h: 2,
+            },
+        );
+
+        assert_eq!(cropped, vec![6, 7, 10, 11]);
+        assert_eq!(w, 2);
+        assert_eq!(h, 2);
+        assert_eq!(bearing_x, 7);
+        assert_eq!(bearing_y, 8);
     }
 }
 
@@ -1342,8 +1651,7 @@ fn is_skipped_spacer(sq: Square) -> bool {
 
 /// Lookup. Hash → bucket; scan from most-recent; rotate on hit. No
 /// secondary comparison — we trust the 64-bit rapidhash to be
-/// collision-free across realistic workloads. Matches
-///.
+/// collision-free across realistic workloads.
 fn run_cache_get(
     buckets: &mut [Vec<RunCacheEntry>],
     hash: u64,

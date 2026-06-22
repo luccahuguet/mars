@@ -12,6 +12,7 @@ pub mod renderer;
 pub mod theme;
 pub mod title;
 pub mod window;
+pub mod yazelix;
 
 use crate::ansi::CursorShape;
 use crate::config::bell::Bell;
@@ -25,6 +26,7 @@ use crate::config::platform::{Platform, PlatformConfig};
 use crate::config::renderer::Renderer;
 use crate::config::title::Title;
 use crate::config::window::Window;
+use crate::config::yazelix::Yazelix;
 use colors::Colors;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -172,6 +174,11 @@ pub struct Config {
     pub scrollback_history_limit: usize,
     #[serde(default = "effects::Effects::default")]
     pub effects: effects::Effects,
+    #[serde(
+        default = "Yazelix::default",
+        skip_serializing_if = "Yazelix::is_empty"
+    )]
+    pub yazelix: Yazelix,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -666,6 +673,7 @@ impl Default for Config {
             enable_scroll_bar: true,
             scrollback_history_limit: default_scrollback_history_limit(),
             effects: effects::Effects::default(),
+            yazelix: Yazelix::default(),
         }
     }
 }
@@ -811,6 +819,59 @@ mod tests {
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
         assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
         assert_eq!(result.colors.cursor, colors::defaults::cursor());
+    }
+
+    #[test]
+    fn test_yazelix_split_cursor_config() {
+        let result = create_temporary_config(
+            "yazelix-split-cursor",
+            r##"
+            [yazelix.cursor]
+            family = "split"
+            divider = "horizontal"
+            transition = "hard"
+            colors = ["#ff1600", "#20242f"]
+            cursor_color = "#ff1600"
+        "##,
+        );
+
+        let cursor = result.yazelix.cursor.unwrap();
+        assert_eq!(cursor.divider, yazelix::YazelixCursorDivider::Horizontal);
+        assert_eq!(cursor.transition, yazelix::YazelixCursorTransition::Hard);
+        assert_eq!(cursor.colors[0], colors::hex_to_color_arr("#ff1600"));
+        assert_eq!(cursor.colors[1], colors::hex_to_color_arr("#20242f"));
+        assert_eq!(
+            cursor.cursor_color,
+            Some(colors::hex_to_color_arr("#ff1600"))
+        );
+    }
+
+    #[test]
+    fn test_yazelix_split_cursor_invalid_config_errors() {
+        let file_name = tmp_dir()
+            .join("test-rio-yazelix-invalid-config")
+            .with_extension("toml");
+        let mut file = std::fs::File::create(&file_name).unwrap();
+        writeln!(
+            file,
+            r##"
+            [yazelix.cursor]
+            family = "split"
+            divider = "vertical"
+            transition = "hard"
+            colors = ["#00e6ff"]
+        "##
+        )
+        .unwrap();
+
+        let err = Config::load_from_path_without_fallback(&file_name).unwrap_err();
+        assert!(err.contains("split cursors require exactly two colors"));
+    }
+
+    #[test]
+    fn test_default_config_serializes_without_empty_yazelix_section() {
+        let rendered = Config::default().to_string().unwrap();
+        assert!(!rendered.contains("[yazelix]"));
     }
 
     #[test]

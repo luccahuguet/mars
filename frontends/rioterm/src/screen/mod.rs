@@ -104,6 +104,36 @@ fn window_should_be_opaque(config: &rio_backend::config::Config) -> bool {
     config.window.opacity >= 1.0 && !config.window.blur.is_glass()
 }
 
+#[inline]
+fn color_array_to_rgba8(color: rio_backend::config::colors::ColorArray) -> [u8; 4] {
+    [
+        (color[0].clamp(0.0, 1.0) * 255.0) as u8,
+        (color[1].clamp(0.0, 1.0) * 255.0) as u8,
+        (color[2].clamp(0.0, 1.0) * 255.0) as u8,
+        255,
+    ]
+}
+
+#[inline]
+fn yazelix_cursor_split(
+    cursor: rio_backend::config::yazelix::YazelixCursor,
+) -> crate::grid_emit::CursorSplit {
+    let divider = match cursor.divider {
+        rio_backend::config::yazelix::YazelixCursorDivider::Vertical => {
+            crate::grid_emit::CursorSplitDivider::Vertical
+        }
+        rio_backend::config::yazelix::YazelixCursorDivider::Horizontal => {
+            crate::grid_emit::CursorSplitDivider::Horizontal
+        }
+    };
+
+    crate::grid_emit::CursorSplit {
+        divider,
+        primary_color: color_array_to_rgba8(cursor.colors[0]),
+        secondary_color: color_array_to_rgba8(cursor.colors[1]),
+    }
+}
+
 impl Screen<'_> {
     pub fn new<'screen>(
         window_properties: ScreenWindowProperties,
@@ -4177,21 +4207,29 @@ impl Screen<'_> {
                 if let Some(style) = render_style {
                     let cell_w = p.cell_w.round().clamp(1.0, u32::MAX as f32) as u32;
                     let cell_h = p.cell_h.round().clamp(1.0, u32::MAX as f32) as u32;
-                    let cursor_color = [
-                        (p.cursor_color[0].clamp(0.0, 1.0) * 255.0) as u8,
-                        (p.cursor_color[1].clamp(0.0, 1.0) * 255.0) as u8,
-                        (p.cursor_color[2].clamp(0.0, 1.0) * 255.0) as u8,
-                        255,
-                    ];
-                    crate::grid_emit::emit_cursor_sprite(
-                        grid,
-                        style,
-                        p.cursor_col,
-                        p.cursor_row,
-                        cursor_color,
-                        cell_w,
-                        cell_h,
-                    );
+                    if let Some(split) =
+                        renderer_ref.yazelix_cursor.map(yazelix_cursor_split)
+                    {
+                        crate::grid_emit::emit_split_cursor_sprite(
+                            grid,
+                            style,
+                            p.cursor_col,
+                            p.cursor_row,
+                            split,
+                            cell_w,
+                            cell_h,
+                        );
+                    } else {
+                        crate::grid_emit::emit_cursor_sprite(
+                            grid,
+                            style,
+                            p.cursor_col,
+                            p.cursor_row,
+                            color_array_to_rgba8(p.cursor_color),
+                            cell_w,
+                            cell_h,
+                        );
+                    }
                 }
 
                 // Panel's grid origin in drawable-pixel space =
@@ -4209,13 +4247,15 @@ impl Screen<'_> {
                 let panel_top = (scaled_margin.top + p.layout_rect[1]).round();
 
                 // Bg-tint uniforms fire ONLY for the active block
-                // style — the bg shader paints the cursor cell in
-                // `cursor_bg_color` and the text shader swaps glyph
-                // fg to `cursor_color` (so the character inverts on
-                // top of the block). All other styles (bar /
+                // style. Monocolor blocks let the bg shader paint
+                // `cursor_bg_color`; split Yazelix blocks leave that
+                // bg fill disabled so the two cursor sprites remain
+                // visible. In both cases, the text shader swaps glyph
+                // fg to `cursor_color` so the character inverts on
+                // top of the block. All other styles (bar /
                 // underline / hollow) draw via the sprite emitted
-                // above; their bg/text stays untouched. Same gate as
-                // .
+                // above; their bg/text stays untouched.
+                let split_cursor_active = renderer_ref.yazelix_cursor.is_some();
                 let (cursor_pos, cursor_col_u, cursor_bg_u) = if matches!(
                     render_style,
                     Some(crate::grid_emit::CursorRenderStyle::Block)
@@ -4223,7 +4263,11 @@ impl Screen<'_> {
                     (
                         [p.cursor_col as u32, p.cursor_row as u32],
                         [bg_col[0], bg_col[1], bg_col[2], bg_col[3]],
-                        [p.cursor_color[0], p.cursor_color[1], p.cursor_color[2], 1.0],
+                        if split_cursor_active {
+                            [0.0; 4]
+                        } else {
+                            [p.cursor_color[0], p.cursor_color[1], p.cursor_color[2], 1.0]
+                        },
                     )
                 } else {
                     ([u32::MAX; 2], [0.0; 4], [0.0; 4])

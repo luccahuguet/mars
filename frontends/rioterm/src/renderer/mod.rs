@@ -87,6 +87,7 @@ pub struct Renderer {
     pub custom_mouse_cursor: bool,
     pub trail_cursor_enabled: bool,
     pub trail_cursor: trail_cursor::TrailCursor,
+    pub yazelix_cursor: Option<rio_backend::config::yazelix::YazelixCursor>,
 }
 
 impl Renderer {
@@ -158,6 +159,7 @@ impl Renderer {
             custom_mouse_cursor: config.effects.custom_mouse_cursor,
             trail_cursor_enabled: config.effects.trail_cursor,
             trail_cursor: trail_cursor::TrailCursor::new(),
+            yazelix_cursor: config.yazelix.cursor,
         }
     }
 
