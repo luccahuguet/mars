@@ -59,8 +59,28 @@ jobs:
         run: rustup target add x86_64-apple-darwin
       - if: matrix.os == 'windows-latest'
         run: rustup target add aarch64-pc-windows-msvc
-      - if: matrix.os == 'macos-latest'
+      - name: Configure macOS signing keychain
+        if: matrix.os == 'macos-latest' && env.MACOS_SIGN_P12 != ''
+        shell: bash
         run: |
+          missing=0
+          for name in \
+            MACOS_SIGN_PASSWORD \
+            MACOS_NOTARY_ISSUER_ID \
+            MACOS_NOTARY_KEY \
+            MACOS_NOTARY_KEY_ID \
+            KEYCHAIN_PASSWORD \
+            MACOS_NOTARY_KEYCHAIN_PROFILE
+          do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name must be set when MACOS_SIGN_P12 is set"
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
           # create variables
           CERTIFICATE_PATH="$RUNNER_TEMP/goreleaser.p12"
           KEY_PATH="$RUNNER_TEMP/goreleaser.p8"
