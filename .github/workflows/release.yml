@@ -1,12 +1,8 @@
 name: Release
 on:
   push:
-    branches: [main]
     tags:
       - "v*.*.*"
-    paths:
-      - ".github/workflows/release.yml"
-      - ".goreleaser.yaml"
   workflow_dispatch:
 concurrency:
   group: release-${{ github.event_name }}-${{ github.ref_name }}
@@ -66,33 +62,33 @@ jobs:
       - if: matrix.os == 'macos-latest'
         run: |
           # create variables
-          CERTIFICATE_PATH=$RUNNER_TEMP/goreleaser.p12
-          KEY_PATH=$RUNNER_TEMP/goreleaser.p8
-          KEYCHAIN_PATH=$RUNNER_TEMP/goreleaser.keychain-db
+          CERTIFICATE_PATH="$RUNNER_TEMP/goreleaser.p12"
+          KEY_PATH="$RUNNER_TEMP/goreleaser.p8"
+          KEYCHAIN_PATH="$RUNNER_TEMP/goreleaser.keychain-db"
 
           # import certificate and key from secrets
-          echo -n "$MACOS_SIGN_P12" | base64 --decode -o $CERTIFICATE_PATH
-          echo -n "$MACOS_NOTARY_KEY" | base64 --decode -o $KEY_PATH
+          echo -n "$MACOS_SIGN_P12" | base64 --decode -o "$CERTIFICATE_PATH"
+          echo -n "$MACOS_NOTARY_KEY" | base64 --decode -o "$KEY_PATH"
 
           # create temporary keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           # import certificate to keychain
-          security import $CERTIFICATE_PATH -P "$MACOS_SIGN_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
+          security import "$CERTIFICATE_PATH" -P "$MACOS_SIGN_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
 
           # create notary profile
           xcrun notarytool store-credentials "$MACOS_NOTARY_KEYCHAIN_PROFILE" \
             --key "$KEY_PATH" \
             --key-id "$MACOS_NOTARY_KEY_ID" \
             --issuer "$MACOS_NOTARY_ISSUER_ID" \
-            --keychain $KEYCHAIN_PATH
+            --keychain "$KEYCHAIN_PATH"
 
           # export the keychain path
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >>$GITHUB_ENV
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >>"$GITHUB_ENV"
 
       - if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.cache-check.outputs.cache-hit != 'true'
         uses: goreleaser/goreleaser-action@v7
