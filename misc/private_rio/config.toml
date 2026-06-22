@@ -28,7 +28,7 @@ border-width = 0.0
 
 [fonts]
 family = "FiraCode Nerd Font Mono"
-size = 18.0
+size = 17.0
 symbol-map = [
   { start = "E000", end = "F900", font-family = "Symbols Nerd Font Mono" },
   { start = "F0000", end = "F3000", font-family = "Symbols Nerd Font Mono" },

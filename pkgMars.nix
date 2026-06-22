@@ -147,7 +147,7 @@
 
     [fonts]
     family = "FiraCode Nerd Font Mono"
-    size = 18.0
+    size = 17.0
     additional-dirs = [
       "${firaCodeNerdDir}",
       "${symbolsNerdDir}",
