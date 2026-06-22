@@ -1,6 +1,6 @@
-# Rio-compatible Yazelix dogfood config.
-# Keep this content identical in the private Rio and Mars config roots
-# until Mars has a measured reason to diverge from Rio config behavior.
+# Rio comparison Yazelix dogfood config.
+# Keep this file as the Rio baseline when the private Mars config diverges
+# for terminal-specific experiments.
 
 confirm-before-quit = false
 scrollback-history-limit = 0

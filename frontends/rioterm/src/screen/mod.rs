@@ -134,6 +134,26 @@ fn yazelix_cursor_split(
     }
 }
 
+#[inline]
+fn yazelix_cursor_trail_paint(
+    cursor: rio_backend::config::yazelix::YazelixCursor,
+) -> crate::renderer::trail_cursor::TrailCursorPaint {
+    let divider = match cursor.divider {
+        rio_backend::config::yazelix::YazelixCursorDivider::Vertical => {
+            crate::renderer::trail_cursor::TrailCursorSplitDivider::Vertical
+        }
+        rio_backend::config::yazelix::YazelixCursorDivider::Horizontal => {
+            crate::renderer::trail_cursor::TrailCursorSplitDivider::Horizontal
+        }
+    };
+
+    crate::renderer::trail_cursor::TrailCursorPaint::Split {
+        divider,
+        primary_color: cursor.colors[0],
+        secondary_color: cursor.colors[1],
+    }
+}
+
 impl Screen<'_> {
     pub fn new<'screen>(
         window_properties: ScreenWindowProperties,
@@ -3752,11 +3772,20 @@ impl Screen<'_> {
                 );
                 self.renderer.trail_cursor.animate(cell_width, cell_height);
 
-                let cursor_color = self.renderer.named_colors.cursor;
+                let cursor_color = current.renderable_content.term_colors
+                    [rio_backend::config::colors::NamedColor::Cursor as usize]
+                    .unwrap_or(self.renderer.named_colors.cursor);
+                let trail_paint = self
+                    .renderer
+                    .yazelix_cursor
+                    .map(yazelix_cursor_trail_paint)
+                    .unwrap_or(crate::renderer::trail_cursor::TrailCursorPaint::Solid(
+                        cursor_color,
+                    ));
                 self.renderer.trail_cursor.draw(
                     &mut self.sugarloaf,
                     scale_factor,
-                    cursor_color,
+                    trail_paint,
                 );
             }
         }

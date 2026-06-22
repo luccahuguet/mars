@@ -11,11 +11,13 @@ Mars stays private until this gate passes on the clean Rio-based branch.
 ## Private Yazelix Launcher
 
 The private Mars test config is `misc/private_yazelix/config.toml`.
-The matching Rio comparison config is `misc/private_rio/config.toml`.
+The Rio comparison config is `misc/private_rio/config.toml`.
 
-Keep those files identical until Mars has measured evidence for a
-terminal-specific config difference. Terminal identity belongs in the
-launcher and environment boundary, not in the TOML.
+Keep differences between those files narrow and explicitly justified.
+Terminal identity belongs in the launcher and environment boundary, not in
+the TOML. The current Mars config intentionally diverges for the native
+Yazelix split-cursor smoke while the Rio config remains the comparison
+baseline.
 
 After a local Mars package or binary exists, launch it with:
 

@@ -16,6 +16,25 @@ const SHORT_ANIMATION_LENGTH: f32 = 0.04;
 const TRAIL_SIZE: f32 = 1.0;
 const DEPTH: f32 = 0.0;
 
+type Point = (f32, f32);
+type Quad = [Point; 4];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrailCursorSplitDivider {
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TrailCursorPaint {
+    Solid([f32; 4]),
+    Split {
+        divider: TrailCursorSplitDivider,
+        primary_color: [f32; 4],
+        secondary_color: [f32; 4],
+    },
+}
+
 #[derive(Clone)]
 struct Corner {
     spring_x: Spring,
@@ -315,19 +334,18 @@ impl TrailCursor {
         }
     }
 
-    /// Draw the cursor trail as a single convex quad spanned by the four
-    /// animated corners — emitted as two triangles through the existing
+    /// Draw the cursor trail as one or two convex quads spanned by the four
+    /// animated corners — emitted as triangles through the existing
     /// `DrawCmd::Vertices` pipeline. Matches neovide's approach of
     /// `PathBuilder::move_to(TL).line_to(TR).line_to(BR).line_to(BL).close()`
     /// into a single `draw_path`. The old scanline fill (up to 640 rects
     /// per frame) was a workaround for `sugarloaf.rect` being axis-aligned
-    /// only; `sugarloaf.triangle` already accepts arbitrary vertex
-    /// positions, so one fan covers the same pixels in one draw call.
+    /// only; `sugarloaf.triangle` already accepts arbitrary vertex positions.
     pub fn draw(
         &self,
         sugarloaf: &mut Sugarloaf,
         scale_factor: f32,
-        cursor_color: [f32; 4],
+        paint: TrailCursorPaint,
     ) {
         if !self.animating {
             return;
@@ -345,34 +363,92 @@ impl TrailCursor {
             (self.corners[3].x * inv, self.corners[3].y * inv),
         ];
 
-        // Fan from TL: (TL, TR, BR) + (TL, BR, BL). Two triangles share
-        // TL and BR, so the shared diagonal seam is hidden inside the
-        // convex hull — same as any triangle-fan tessellation.
-        sugarloaf.triangle(
-            pts[0].0,
-            pts[0].1,
-            pts[1].0,
-            pts[1].1,
-            pts[2].0,
-            pts[2].1,
-            DEPTH,
-            cursor_color,
-        );
-        sugarloaf.triangle(
-            pts[0].0,
-            pts[0].1,
-            pts[2].0,
-            pts[2].1,
-            pts[3].0,
-            pts[3].1,
-            DEPTH,
-            cursor_color,
-        );
+        match paint {
+            TrailCursorPaint::Solid(color) => draw_quad(sugarloaf, pts, color),
+            TrailCursorPaint::Split {
+                divider,
+                primary_color,
+                secondary_color,
+            } => {
+                let [primary, secondary] = split_quad(pts, divider);
+                draw_quad(sugarloaf, primary, primary_color);
+                draw_quad(sugarloaf, secondary, secondary_color);
+            }
+        }
     }
 
     /// `true` while the spring corners haven't settled *visibly*.
     #[inline]
     pub fn is_animating(&self) -> bool {
         self.animating
+    }
+}
+
+fn draw_quad(sugarloaf: &mut Sugarloaf, pts: Quad, color: [f32; 4]) {
+    // Fan from TL: (TL, TR, BR) + (TL, BR, BL). Two triangles share
+    // TL and BR, so the shared diagonal seam is hidden inside the
+    // convex hull — same as any triangle-fan tessellation.
+    sugarloaf.triangle(
+        pts[0].0, pts[0].1, pts[1].0, pts[1].1, pts[2].0, pts[2].1, DEPTH, color,
+    );
+    sugarloaf.triangle(
+        pts[0].0, pts[0].1, pts[2].0, pts[2].1, pts[3].0, pts[3].1, DEPTH, color,
+    );
+}
+
+fn split_quad(pts: Quad, divider: TrailCursorSplitDivider) -> [Quad; 2] {
+    match divider {
+        TrailCursorSplitDivider::Vertical => {
+            let top_mid = midpoint(pts[0], pts[1]);
+            let bottom_mid = midpoint(pts[3], pts[2]);
+            [
+                [pts[0], top_mid, bottom_mid, pts[3]],
+                [top_mid, pts[1], pts[2], bottom_mid],
+            ]
+        }
+        TrailCursorSplitDivider::Horizontal => {
+            let left_mid = midpoint(pts[0], pts[3]);
+            let right_mid = midpoint(pts[1], pts[2]);
+            [
+                [pts[0], pts[1], right_mid, left_mid],
+                [left_mid, right_mid, pts[2], pts[3]],
+            ]
+        }
+    }
+}
+
+fn midpoint(a: Point, b: Point) -> Point {
+    ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_quad_partitions_vertical_divider() {
+        let quad = [(0.0, 0.0), (10.0, 0.0), (10.0, 20.0), (0.0, 20.0)];
+        let [primary, secondary] = split_quad(quad, TrailCursorSplitDivider::Vertical);
+
+        assert_eq!(primary, [(0.0, 0.0), (5.0, 0.0), (5.0, 20.0), (0.0, 20.0)]);
+        assert_eq!(
+            secondary,
+            [(5.0, 0.0), (10.0, 0.0), (10.0, 20.0), (5.0, 20.0)]
+        );
+    }
+
+    #[test]
+    fn split_quad_partitions_horizontal_divider() {
+        let quad = [(0.0, 0.0), (10.0, 0.0), (10.0, 20.0), (0.0, 20.0)];
+        let [primary, secondary] = split_quad(quad, TrailCursorSplitDivider::Horizontal);
+
+        assert_eq!(
+            primary,
+            [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+        );
+        assert_eq!(
+            secondary,
+            [(0.0, 10.0), (10.0, 10.0), (10.0, 20.0), (0.0, 20.0)]
+        );
     }
 }
