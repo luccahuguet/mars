@@ -3,12 +3,12 @@ use rio_backend::sugarloaf::text::DrawOpts;
 use rio_backend::sugarloaf::Sugarloaf;
 
 const SIDE_MARGIN: f32 = 28.0;
-const MODAL_MIN_W: f32 = 380.0;
-const MODAL_MAX_W: f32 = 540.0;
-const MODAL_H: f32 = 154.0;
-const MODAL_MIN_H: f32 = 118.0;
+const MODAL_MIN_W: f32 = 340.0;
+const MODAL_MAX_W: f32 = 480.0;
+const MODAL_H: f32 = 180.0;
+const MODAL_MIN_H: f32 = 132.0;
 const CONTENT_PAD_X: f32 = 34.0;
-const ACTION_GAP: f32 = 12.0;
+const ACTION_GAP: f32 = 24.0;
 const BUTTON_H: f32 = 38.0;
 const BUTTON_MAX_W: f32 = 146.0;
 const HEADING_SIZE: f32 = 20.0;
@@ -50,9 +50,9 @@ fn compute_layout(win_w: f32, win_h: f32) -> DialogLayout {
     let actions_w = button_w * 2.0 + ACTION_GAP;
     let actions_x = modal_x + (modal_w - actions_w) / 2.0;
 
-    let bottom_pad = if modal_h < MODAL_H { 18.0 } else { 28.0 };
+    let bottom_pad = if modal_h < MODAL_H { 20.0 } else { 34.0 };
     let button_y = modal_y + modal_h - BUTTON_H - bottom_pad;
-    let desired_heading_y = modal_y + if modal_h < MODAL_H { 32.0 } else { 47.0 };
+    let desired_heading_y = modal_y + if modal_h < MODAL_H { 34.0 } else { 54.0 };
     let heading_y = desired_heading_y.min(button_y - HEADING_SIZE - MIN_TEXT_ACTION_GAP);
 
     DialogLayout {
@@ -221,5 +221,17 @@ mod tests {
                 "actions overflow at {win_w}x{win_h}: {layout:?}"
             );
         }
+    }
+
+    #[test]
+    fn standard_layout_is_taller_narrower_and_spreads_actions() {
+        let layout = compute_layout(1920.0, 1080.0);
+
+        assert_eq!(layout.modal_w, MODAL_MAX_W);
+        assert_eq!(layout.modal_h, MODAL_H);
+        assert!(
+            ACTION_GAP >= 24.0,
+            "actions should have visible separation: {layout:?}"
+        );
     }
 }
