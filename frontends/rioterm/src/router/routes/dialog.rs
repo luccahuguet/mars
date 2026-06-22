@@ -23,6 +23,7 @@ struct DialogLayout {
     modal_h: f32,
     accent_w: f32,
     button_w: f32,
+    action_gap: f32,
     actions_x: f32,
     button_y: f32,
     heading_y: f32,
@@ -62,6 +63,7 @@ fn compute_layout(win_w: f32, win_h: f32) -> DialogLayout {
         modal_h,
         accent_w: 64.0_f32.min((modal_w - 32.0).max(24.0)),
         button_w,
+        action_gap: ACTION_GAP,
         actions_x,
         button_y,
         heading_y,
@@ -170,7 +172,7 @@ pub fn screen(
     );
     sugarloaf.rounded_rect(
         None,
-        layout.actions_x + layout.button_w + ACTION_GAP,
+        layout.actions_x + layout.button_w + layout.action_gap,
         layout.button_y,
         layout.button_w,
         BUTTON_H,
@@ -184,7 +186,7 @@ pub fn screen(
     let confirm_x = layout.actions_x + (layout.button_w - confirm_w) / 2.0;
     let quit_x = layout.actions_x
         + layout.button_w
-        + ACTION_GAP
+        + layout.action_gap
         + (layout.button_w - quit_w) / 2.0;
     let action_y = layout.button_y + (BUTTON_H - ACTION_SIZE) / 2.0 - 1.0;
 
@@ -214,7 +216,7 @@ mod tests {
     fn compact_layout_keeps_actions_inside_modal() {
         for (win_w, win_h) in [(320.0, 160.0), (260.0, 140.0), (220.0, 120.0)] {
             let layout = compute_layout(win_w, win_h);
-            let actions_w = layout.button_w * 2.0 + ACTION_GAP;
+            let actions_w = layout.button_w * 2.0 + layout.action_gap;
 
             assert!(
                 actions_w <= layout.modal_w,
@@ -230,7 +232,7 @@ mod tests {
         assert_eq!(layout.modal_w, MODAL_MAX_W);
         assert_eq!(layout.modal_h, MODAL_H);
         assert!(
-            ACTION_GAP >= 48.0,
+            layout.action_gap >= 48.0,
             "actions should have visible separation: {layout:?}"
         );
     }
