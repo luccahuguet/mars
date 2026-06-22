@@ -186,9 +186,13 @@ in
         mesa_vulkan_icd_files="$(printf '%s:' ${mesa}/share/vulkan/icd.d/*.json)"
         mesa_vulkan_icd_files="''${mesa_vulkan_icd_files%:}"
       ''}
-      makeWrapper "${rioPackage}/bin/rio" "$out/bin/mars" \
-        ${lib.optionalString stdenv.isLinux ''--run 'if [ -z "''${VK_ICD_FILENAMES:-}" ]; then export VK_ICD_FILENAMES='"$mesa_vulkan_icd_files"'; fi' \''}
+      wrapper_args=(
         --add-flags "--app-id mars"
+      )
+      ${lib.optionalString stdenv.isLinux ''
+        wrapper_args+=(--run 'if [ -z "''${VK_ICD_FILENAMES:-}" ]; then export VK_ICD_FILENAMES='"$mesa_vulkan_icd_files"'; fi')
+      ''}
+      makeWrapper "${rioPackage}/bin/rio" "$out/bin/mars" "''${wrapper_args[@]}"
       install -D -m 755 "${./tools/mars_launch_trace.py}" "$out/bin/mars-launch-trace"
       patchShebangs "$out/bin/mars-launch-trace"
 
