@@ -85,22 +85,13 @@ Set `MARS_BINARY=/path/to/mars` to test a specific build artifact. Set
 `MARS_CONFIG_HOME` or `MARS_PRIVATE_CONFIG_HOME` to override the private config
 root.
 
-## Development Principles
+## Development
 
-Mars is maintained as an agent-friendly fork. Work should leave enough context
-for humans and coding agents to continue safely:
+The Cargo workspace follows upstream Rio's crate layout and MSRV. Nix exposes
+the Mars package and comparison Rio packages. Repository workflow rules live in
+[`AGENTS.md`](AGENTS.md).
 
-- Plan behavior work in Beads before editing Rio-owned source
-- Prefer additive Mars-owned files over broad Rio source rewrites
-- Keep each feature small, measurable, and easy to remove or upstream
-- Compare relevant Ghostty and WezTerm behavior before terminal-behavior edits
-- Search Rio issues and current upstream Rio commits before local Rio-owned source
-  changes
-- Record runtime-behavior changes in `docs/yazelix/change_scorecard.md`
-- Preserve normal non-Nix packaging routes where practical, but avoid public
-  support claims until each path is validated
-
-Start with:
+Useful project docs:
 
 - [`docs/yazelix/fork_plan.md`](docs/yazelix/fork_plan.md)
 - [`docs/yazelix/upstream_maintenance.md`](docs/yazelix/upstream_maintenance.md)
