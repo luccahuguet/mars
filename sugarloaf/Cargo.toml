@@ -122,6 +122,7 @@ ash = "0.38.0"
 
 [dev-dependencies]
 rio-window = { workspace = true }
+naga = { version = "29.0.3", default-features = false, features = ["wgsl-in"] }
 png = "0.17.16"
 deflate = "1.0.0"
 criterion = { workspace = true }

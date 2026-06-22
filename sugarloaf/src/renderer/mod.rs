@@ -759,7 +759,7 @@ pub struct ImageInstance {
     pub dest_pos: [f32; 2],
     /// Size of the image on screen (physical pixels).
     pub dest_size: [f32; 2],
-    /// Source rectangle in the texture: xy = origin, zw = size (normalized 0..1).
+    /// Source rectangle in the texture: `[u0, v0, u1, v1]` (normalized 0..1).
     pub source_rect: [f32; 4],
 }
 
@@ -3070,6 +3070,45 @@ impl WgpuRenderer {
                 ],
                 label: Some("rich_text::Pipeline uniforms"),
             });
+    }
+}
+
+#[cfg(test)]
+mod image_source_rect_tests {
+    fn uv_for_corner(source_rect: [f32; 4], corner: [f32; 2]) -> [f32; 2] {
+        [
+            source_rect[0] + (source_rect[2] - source_rect[0]) * corner[0],
+            source_rect[1] + (source_rect[3] - source_rect[1]) * corner[1],
+        ]
+    }
+
+    #[test]
+    fn image_source_rect_uses_end_coordinates() {
+        let source_rect = [0.25, 0.125, 0.75, 0.625];
+
+        assert_eq!(uv_for_corner(source_rect, [0.0, 0.0]), [0.25, 0.125]);
+        assert_eq!(uv_for_corner(source_rect, [1.0, 0.0]), [0.75, 0.125]);
+        assert_eq!(uv_for_corner(source_rect, [0.0, 1.0]), [0.25, 0.625]);
+        assert_eq!(uv_for_corner(source_rect, [1.0, 1.0]), [0.75, 0.625]);
+    }
+
+    #[test]
+    fn wgpu_image_shader_uses_end_coordinate_source_rect() {
+        let shader = include_str!("image.wgsl");
+
+        let module =
+            naga::front::wgsl::parse_str(shader).expect("image.wgsl should parse");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::default(),
+            naga::valid::Capabilities::default(),
+        );
+        validator
+            .validate(&module)
+            .expect("image.wgsl should validate");
+
+        assert!(shader.contains("source_rect.zw - instance.source_rect.xy"));
+        assert!(!shader.contains("source_rect.xy + instance.source_rect.zw * corner"));
+        assert!(shader.contains("[u0, v0, u1, v1]"));
     }
 }
 

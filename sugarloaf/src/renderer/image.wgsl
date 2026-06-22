@@ -15,7 +15,7 @@ struct InstanceInput {
     @location(0) dest_pos: vec2<f32>,
     // Size of the image on screen (physical pixels).
     @location(1) dest_size: vec2<f32>,
-    // Source rectangle in the texture: xy = origin, zw = size (normalized 0..1).
+    // Source rectangle in the texture: xy = origin, zw = end (normalized 0..1).
     @location(2) source_rect: vec4<f32>,
 }
 
@@ -37,8 +37,9 @@ fn vs_main(
     corner.x = f32(vid == 1u || vid == 3u);
     corner.y = f32(vid == 2u || vid == 3u);
 
-    // Texture coordinates from source rect
-    var tex_coord = instance.source_rect.xy + instance.source_rect.zw * corner;
+    // `source_rect` is [u0, v0, u1, v1], matching the OpenGL/Metal paths.
+    var tex_coord =
+        instance.source_rect.xy + (instance.source_rect.zw - instance.source_rect.xy) * corner;
 
     // Screen position
     var image_pos = instance.dest_pos + instance.dest_size * corner;
