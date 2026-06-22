@@ -107,7 +107,7 @@
     height = 620
     decorations = "Disabled"
     opacity = 0.78
-    opacity-cells = true
+    opacity-cells = false
 
     [panel]
     margin = [0.0]
@@ -135,7 +135,9 @@
     [colors]
     background = "#111416"
     foreground = "#eeeeec"
+    dim-foreground = "#9d9d9c"
     black = "#000000"
+    dim-black = "#6f7782"
     red = "#cd0000"
     green = "#00cd00"
     yellow = "#cdcd00"
@@ -143,7 +145,7 @@
     magenta = "#cd00cd"
     cyan = "#00cdcd"
     white = "#faebd7"
-    light-black = "#404040"
+    light-black = "#8b949e"
     light-red = "#ff0000"
     light-green = "#00ff00"
     light-yellow = "#ffff00"
