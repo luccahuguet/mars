@@ -8,7 +8,7 @@ const MODAL_MAX_W: f32 = 480.0;
 const MODAL_H: f32 = 180.0;
 const MODAL_MIN_H: f32 = 132.0;
 const CONTENT_PAD_X: f32 = 34.0;
-const ACTION_GAP: f32 = 24.0;
+const ACTION_GAP: f32 = 56.0;
 const BUTTON_H: f32 = 38.0;
 const BUTTON_MAX_W: f32 = 146.0;
 const HEADING_SIZE: f32 = 20.0;
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(layout.modal_w, MODAL_MAX_W);
         assert_eq!(layout.modal_h, MODAL_H);
         assert!(
-            ACTION_GAP >= 24.0,
+            ACTION_GAP >= 48.0,
             "actions should have visible separation: {layout:?}"
         );
     }
