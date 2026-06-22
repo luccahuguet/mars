@@ -150,6 +150,14 @@ impl Application<'_> {
     }
 }
 
+#[inline]
+fn should_request_redraw_after_event_frame(
+    route_path: &RoutePath,
+    pending_update_dirty: bool,
+) -> bool {
+    route_path == &RoutePath::Welcome || pending_update_dirty
+}
+
 impl ApplicationHandler<EventPayload> for Application<'_> {
     fn resumed(&mut self, _active_event_loop: &ActiveEventLoop) {}
 
@@ -436,7 +444,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 if let Some(route) = self.router.routes.get_mut(&window_id) {
                     if self.config.confirm_before_quit {
                         route.confirm_quit();
-                        route.request_redraw();
                     } else {
                         route.quit();
                     }
@@ -1009,7 +1016,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
 
                 if self.config.confirm_before_quit {
                     route.confirm_quit();
-                    route.request_redraw();
                     return;
                 } else {
                     self.router.routes.remove(&window_id);
@@ -1868,6 +1874,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
 
                 route.window.screen.resize(new_size);
+                if route.path == RoutePath::ConfirmQuit {
+                    route.request_overlay_redraw();
+                }
             }
 
             WindowEvent::ScaleFactorChanged {
@@ -1880,6 +1889,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     .screen
                     .set_scale(scale, route.window.winit_window.inner_size());
                 route.window.update_vblank_interval();
+                if route.path == RoutePath::ConfirmQuit {
+                    route.request_overlay_redraw();
+                }
             }
 
             WindowEvent::RedrawRequested => {
@@ -1961,17 +1973,18 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.request_redraw();
                     event_loop.set_control_flow(ControlFlow::Poll);
                 } else {
-                    if route.path == RoutePath::Welcome
-                        || route.path == RoutePath::ConfirmQuit
-                        || route
-                            .window
-                            .screen
-                            .ctx()
-                            .current()
-                            .renderable_content
-                            .pending_update
-                            .is_dirty()
-                    {
+                    let pending_update_dirty = route
+                        .window
+                        .screen
+                        .ctx()
+                        .current()
+                        .renderable_content
+                        .pending_update
+                        .is_dirty();
+                    if should_request_redraw_after_event_frame(
+                        &route.path,
+                        pending_update_dirty,
+                    ) {
                         route.request_redraw();
                     }
                     event_loop.set_control_flow(ControlFlow::Wait);
@@ -2120,4 +2133,33 @@ where
     std::thread::sleep(crate::constants::BELL_DURATION);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod redraw_tests {
+    use super::*;
+
+    #[test]
+    fn confirm_quit_does_not_self_schedule_static_redraw() {
+        assert!(!should_request_redraw_after_event_frame(
+            &RoutePath::ConfirmQuit,
+            false,
+        ));
+    }
+
+    #[test]
+    fn welcome_still_self_schedules_redraw() {
+        assert!(should_request_redraw_after_event_frame(
+            &RoutePath::Welcome,
+            false,
+        ));
+    }
+
+    #[test]
+    fn dirty_terminal_content_still_schedules_redraw() {
+        assert!(should_request_redraw_after_event_frame(
+            &RoutePath::Terminal,
+            true,
+        ));
+    }
 }
