@@ -197,9 +197,18 @@ instead of a public Mars guarantee.
 ## Upstream
 
 Mars inherits substantial code and history from
-[Rio](https://github.com/raphamorim/rio). Upstream Rio remains the baseline for
-terminal behavior, renderer fixes, and cross-platform packaging context. Mars
-should upstream generic fixes when they are useful beyond Yazelix.
+[Rio](https://github.com/raphamorim/rio). Rio is an incredible project, and
+Mars is grateful to Raphael Amorim, Rio's creator, and to everyone who has
+contributed to Rio.
+
+Upstream Rio remains the baseline for terminal behavior, renderer fixes, and
+cross-platform packaging context. Mars should upstream generic fixes when they
+are useful beyond Yazelix.
+
+## Trivia
+
+Mars carries a small Rio coincidence: like Rio's creator, Mars' maintainer was
+born in Rio de Janeiro.
 
 ## License
 
