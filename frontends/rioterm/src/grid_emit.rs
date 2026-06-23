@@ -352,7 +352,9 @@ use rio_backend::sugarloaf::font::glyph_registry::CUSTOM_GLYPH_FONT_ID_U32;
 
 const NERD_FONT_GLYPH_KEY_FLAG: u32 = 0x8000_0000;
 const EMOJI_GLYPH_KEY_FLAG: u32 = 0x4000_0000;
+const SYMBOL_GLYPH_KEY_FLAG: u32 = 0x2000_0000;
 const CONSTRAINED_CODEPOINT_MASK: u32 = 0x001F_FFFF;
+const CONSTRAINT_WIDTH_SHIFT: u32 = 21;
 // Ghostty derives icon height from cap/face metrics before rasterization.
 // This grid-emitter path only has cell metrics after rasterization; applying
 // a reduced single-cell icon band here double-shrinks broad PUA status icons
@@ -1010,13 +1012,23 @@ mod cursor_tests {
         let emoji_wide_constraint = glyph_constraint(0x1F600, true).unwrap();
         let emoji_narrow_constraint = glyph_constraint(0x23, true).unwrap();
         let emoji_vs16_constraint = glyph_constraint(0x2601, true).unwrap();
+        let symbol_constraint = glyph_constraint(0x25A0, false).unwrap();
         let mut emoji_vs16_cell = Square::from_char('\u{2601}');
         emoji_vs16_cell.set_wide(Wide::Wide);
 
+        assert!(glyph_constraint(
+            rio_backend::ansi::kitty_virtual::PLACEHOLDER as u32,
+            false
+        )
+        .is_none());
         assert_eq!(atlas_glyph_id(42, 0xEA73, 1, None), 42);
         assert_eq!(
             atlas_glyph_id(42, 0xEA73, 1, Some(nerd_constraint)),
-            NERD_FONT_GLYPH_KEY_FLAG | 0xEA73
+            NERD_FONT_GLYPH_KEY_FLAG | (1 << CONSTRAINT_WIDTH_SHIFT) | 0xEA73
+        );
+        assert_eq!(
+            atlas_glyph_id(42, 0xEA73, 2, Some(nerd_constraint)),
+            NERD_FONT_GLYPH_KEY_FLAG | (2 << CONSTRAINT_WIDTH_SHIFT) | 0xEA73
         );
         assert_eq!(
             atlas_glyph_id(42, 0x1F600, 2, Some(emoji_wide_constraint)),
@@ -1036,6 +1048,58 @@ mod cursor_tests {
             ),
             EMOJI_GLYPH_KEY_FLAG | (2 << 16) | 42
         );
+        assert_eq!(
+            atlas_glyph_id(42, 0x25A0, 2, Some(symbol_constraint)),
+            SYMBOL_GLYPH_KEY_FLAG | (2 << 16) | 42
+        );
+    }
+
+    #[test]
+    fn symbol_constraint_width_matches_ghostty_spacing_rules() {
+        let row = |chars: &[char]| {
+            let mut row = Row::new(chars.len().max(1));
+            for (idx, ch) in chars.iter().copied().enumerate() {
+                row[Column(idx)] = Square::from_char(ch);
+            }
+            row
+        };
+        let lightbulb = '\u{EA61}';
+        let powerline = '\u{E0B2}';
+
+        let symbol_then_empty = row(&[lightbulb, '\0', '\0', '\0']);
+        assert_eq!(constraint_width_for_row(&symbol_then_empty, 4, 0), 2);
+
+        let symbol_then_character = row(&[lightbulb, 'z', '\0', '\0']);
+        assert_eq!(constraint_width_for_row(&symbol_then_character, 4, 0), 1);
+
+        let symbol_then_space = row(&[lightbulb, ' ', 'z', '\0']);
+        assert_eq!(constraint_width_for_row(&symbol_then_space, 4, 0), 2);
+
+        let symbol_then_no_break_space = row(&[lightbulb, '\u{00A0}', 'z', '\0']);
+        assert_eq!(
+            constraint_width_for_row(&symbol_then_no_break_space, 4, 0),
+            1
+        );
+
+        let symbol_at_end = row(&[' ', ' ', ' ', lightbulb]);
+        assert_eq!(constraint_width_for_row(&symbol_at_end, 4, 3), 1);
+
+        let character_then_symbol = row(&['z', lightbulb, '\0', '\0']);
+        assert_eq!(constraint_width_for_row(&character_then_symbol, 4, 1), 2);
+
+        let adjacent_symbols = row(&[lightbulb, lightbulb, '\0', '\0']);
+        assert_eq!(constraint_width_for_row(&adjacent_symbols, 4, 0), 1);
+        assert_eq!(constraint_width_for_row(&adjacent_symbols, 4, 1), 1);
+
+        let spaced_symbols = row(&[lightbulb, ' ', lightbulb, '\0']);
+        assert_eq!(constraint_width_for_row(&spaced_symbols, 4, 0), 2);
+        assert_eq!(constraint_width_for_row(&spaced_symbols, 4, 2), 2);
+
+        let symbol_then_powerline = row(&[lightbulb, powerline, '\0', '\0']);
+        assert_eq!(constraint_width_for_row(&symbol_then_powerline, 4, 0), 1);
+
+        let powerline_then_symbol = row(&[powerline, lightbulb, '\0', '\0']);
+        assert_eq!(constraint_width_for_row(&powerline_then_symbol, 4, 1), 2);
     }
 
     #[test]
@@ -2392,7 +2456,7 @@ pub fn build_row_fg(
             }
             let src_col = (grid_col as usize).min(cols.saturating_sub(1));
             let src_sq = row[Column(src_col)];
-            let constraint_width = constraint_width_for_square(src_sq);
+            let constraint_width = constraint_width_for_row(row, cols, src_col);
 
             let Some((_, slot, is_color)) = ensure_glyph_by_id(
                 rasterizer,
@@ -2627,6 +2691,7 @@ fn emit_strikethroughs(
 enum GlyphConstraint {
     NerdFont(rio_backend::sugarloaf::font::nerd_font_attributes::Constraint),
     Emoji(rio_backend::sugarloaf::font::nerd_font_attributes::Constraint),
+    Symbol(rio_backend::sugarloaf::font::nerd_font_attributes::Constraint),
 }
 
 impl GlyphConstraint {
@@ -2634,7 +2699,9 @@ impl GlyphConstraint {
         self,
     ) -> rio_backend::sugarloaf::font::nerd_font_attributes::Constraint {
         match self {
-            Self::NerdFont(constraint) | Self::Emoji(constraint) => constraint,
+            Self::NerdFont(constraint)
+            | Self::Emoji(constraint)
+            | Self::Symbol(constraint) => constraint,
         }
     }
 }
@@ -2643,6 +2710,10 @@ fn glyph_constraint(codepoint: u32, is_emoji: bool) -> Option<GlyphConstraint> {
     use rio_backend::sugarloaf::font::nerd_font_attributes::{
         get_constraint, Align, Constraint, Size,
     };
+
+    if codepoint == rio_backend::ansi::kitty_virtual::PLACEHOLDER as u32 {
+        return None;
+    }
 
     if let Some(constraint) = get_constraint(codepoint) {
         return Some(GlyphConstraint::NerdFont(constraint));
@@ -2659,6 +2730,13 @@ fn glyph_constraint(codepoint: u32, is_emoji: bool) -> Option<GlyphConstraint> {
         }));
     }
 
+    if is_symbol_like_codepoint(codepoint) {
+        return Some(GlyphConstraint::Symbol(Constraint {
+            size: Size::Fit,
+            ..Constraint::DEFAULT
+        }));
+    }
+
     None
 }
 
@@ -2670,14 +2748,25 @@ fn atlas_glyph_id(
     constraint: Option<GlyphConstraint>,
 ) -> u32 {
     match constraint {
-        Some(GlyphConstraint::NerdFont(_)) => {
-            NERD_FONT_GLYPH_KEY_FLAG | (codepoint & CONSTRAINED_CODEPOINT_MASK)
-        }
+        Some(GlyphConstraint::NerdFont(_)) => constrained_codepoint_key(
+            NERD_FONT_GLYPH_KEY_FLAG,
+            codepoint,
+            constraint_width,
+        ),
         Some(GlyphConstraint::Emoji(_)) => {
             EMOJI_GLYPH_KEY_FLAG | ((constraint_width as u32) << 16) | glyph_id as u32
         }
+        Some(GlyphConstraint::Symbol(_)) => {
+            SYMBOL_GLYPH_KEY_FLAG | ((constraint_width as u32) << 16) | glyph_id as u32
+        }
         None => glyph_id as u32,
     }
+}
+
+#[inline]
+fn constrained_codepoint_key(flag: u32, codepoint: u32, constraint_width: u8) -> u32 {
+    flag | ((constraint_width.clamp(1, 2) as u32) << CONSTRAINT_WIDTH_SHIFT)
+        | (codepoint & CONSTRAINED_CODEPOINT_MASK)
 }
 
 #[inline]
@@ -2765,12 +2854,89 @@ fn constrain_rasterized_glyph(
     }
 }
 
+fn constraint_width_for_row(row: &Row<Square>, cols: usize, col: usize) -> u8 {
+    let sq = row[Column(col)];
+    let grid_width = constraint_width_for_square(sq);
+    if grid_width > 1 {
+        return grid_width;
+    }
+
+    let codepoint = cell_codepoint(sq);
+    if !is_symbol_like_codepoint(codepoint) {
+        return grid_width;
+    }
+
+    // Mirrors Ghostty's renderer/cell.zig `constraintWidth`: a symbol in
+    // the final terminal column cannot borrow another cell.
+    if col >= cols.saturating_sub(1) {
+        return 1;
+    }
+
+    // Keep adjacent non-graphics symbols aligned to one cell each. Graphics
+    // symbols such as Powerline are allowed to precede a wider icon.
+    if col > 0 {
+        let prev_codepoint = cell_codepoint(row[Column(col - 1)]);
+        if is_symbol_like_codepoint(prev_codepoint)
+            && !is_graphics_symbol_codepoint(prev_codepoint)
+        {
+            return 1;
+        }
+    }
+
+    let next_codepoint = cell_codepoint(row[Column(col + 1)]);
+    if next_codepoint == 0 || is_constraint_space_codepoint(next_codepoint) {
+        2
+    } else {
+        1
+    }
+}
+
 fn constraint_width_for_square(sq: Square) -> u8 {
     if matches!(sq.wide(), Wide::Wide) {
         2
     } else {
         constraint_width_for_codepoint(sq.c() as u32)
     }
+}
+
+#[inline]
+fn cell_codepoint(sq: Square) -> u32 {
+    if sq.is_bg_only() {
+        0
+    } else {
+        sq.c() as u32
+    }
+}
+
+fn is_symbol_like_codepoint(codepoint: u32) -> bool {
+    matches!(
+        codepoint,
+        // Private Use Areas, where Nerd Font and custom symbol fonts live.
+        0xE000..=0xF8FF | 0xF0000..=0xFFFFD | 0x100000..=0x10FFFD
+            // Arrows and symbol blocks used by terminal UIs.
+            | 0x2190..=0x21FF
+            | 0x2460..=0x24FF
+            | 0x2500..=0x25FF
+            | 0x2600..=0x27BF
+            | 0x27F0..=0x27FF
+            | 0x2900..=0x297F
+            | 0x2B00..=0x2BFF
+            | 0x1F100..=0x1F1FF
+            | 0x1F300..=0x1F6FF
+            | 0x1F800..=0x1F8FF
+    )
+}
+
+fn is_graphics_symbol_codepoint(codepoint: u32) -> bool {
+    matches!(
+        codepoint,
+        0x2500..=0x259F | 0x1FB00..=0x1FBFF | 0x1CC00..=0x1CEBF | 0xE0B0..=0xE0D7
+    )
+}
+
+#[inline]
+fn is_constraint_space_codepoint(codepoint: u32) -> bool {
+    matches!(codepoint, 0x0020 | 0x2002)
 }
 
 fn constraint_width_for_codepoint(codepoint: u32) -> u8 {
