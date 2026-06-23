@@ -62,6 +62,10 @@ table below is the README-sized feature view.
 | Nix runtime hardening | The Mars wrapper supplies a package-owned Vulkan ICD default when needed, preserves explicit overrides, and includes launch tracing for dogfooding failures. | [`3dd8210e70`](https://github.com/luccahuguet/mars/commit/3dd8210e70), [`01d732997c`](https://github.com/luccahuguet/mars/commit/01d732997c), [`a650371806`](https://github.com/luccahuguet/mars/commit/a650371806) |
 | Performance evidence | Mars carries reproducible perf gates, parser/terminal/render benchmarks, and gated internal metrics for agent-driven diagnosis. | [`52952ad0c7`](https://github.com/luccahuguet/mars/commit/52952ad0c7), [`3cf912b9bf`](https://github.com/luccahuguet/mars/commit/3cf912b9bf), [`c69d02a716`](https://github.com/luccahuguet/mars/commit/c69d02a716), [`9f6d3a8fcd`](https://github.com/luccahuguet/mars/commit/9f6d3a8fcd) |
 
+Mars renders Yazi image previews through Kitty graphics in the Yazelix runtime:
+
+![Mars rendering a Yazi image preview](docs/assets/mars-yazi-preview.png)
+
 ## Install
 
 Build the Mars package with Nix:
