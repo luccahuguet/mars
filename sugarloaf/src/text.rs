@@ -493,6 +493,7 @@ impl Text {
             font_id: run.font_id,
             glyph_id: glyph_id as u32,
             size_bucket: run.size_bucket,
+            metrics_signature: 0,
         };
 
         // CPU path takes precedence whenever it's initialized

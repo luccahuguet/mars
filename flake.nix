@@ -54,7 +54,7 @@
           )
           toolchains;
         marsPackage = pkgs.callPackage ./pkgMars.nix {
-          firaCodeNerdFont = pkgs.nerd-fonts.fira-code;
+          jetbrainsMonoFont = pkgs.jetbrains-mono;
           notoEmojiFont = pkgs.noto-fonts-color-emoji;
           notoFonts = pkgs.noto-fonts;
           rioPackage = rioPackages.rio;

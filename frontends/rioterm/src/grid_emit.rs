@@ -31,6 +31,7 @@ use rio_backend::crosswords::search::Match;
 use rio_backend::crosswords::square::{ContentTag, Extras, Square, Wide};
 use rio_backend::crosswords::style::{Style, StyleFlags};
 use rio_backend::selection::SelectionRange;
+use rio_backend::sugarloaf::layout::CellMetrics;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use unicode_width::UnicodeWidthChar;
@@ -41,6 +42,71 @@ use unicode_width::UnicodeWidthChar;
 pub(crate) type ExtrasMap = FxHashMap<u16, Extras>;
 
 use crate::renderer::Renderer;
+
+/// Cell metrics needed by the grid text atlas. `cell_width` and
+/// `cell_height` are the integer grid stride; `cell_baseline`,
+/// `face_height`, and `face_y` preserve the font baseline model used
+/// to center text inside that stride.
+#[derive(Clone, Copy, Debug)]
+pub struct GridCellMetrics {
+    cell_width: f32,
+    cell_height: f32,
+    cell_baseline: f64,
+    face_width: f64,
+    face_height: f64,
+    face_y: f64,
+}
+
+impl From<CellMetrics> for GridCellMetrics {
+    fn from(cell: CellMetrics) -> Self {
+        let cell_width = cell.cell_width.max(1);
+        let cell_height = cell.cell_height.max(1);
+        let face_width = if cell.face_width.is_finite() && cell.face_width > 0.0 {
+            cell.face_width
+        } else {
+            f64::from(cell_width)
+        };
+        let face_height = if cell.face_height.is_finite() && cell.face_height > 0.0 {
+            cell.face_height
+        } else {
+            f64::from(cell_height)
+        };
+        let face_y = if cell.face_y.is_finite() {
+            cell.face_y
+        } else {
+            0.0
+        };
+        Self {
+            cell_width: cell_width as f32,
+            cell_height: cell_height as f32,
+            cell_baseline: f64::from(cell.cell_baseline.min(cell_height)),
+            face_width,
+            face_height,
+            face_y,
+        }
+    }
+}
+
+impl GridCellMetrics {
+    #[inline]
+    fn atlas_signature(self) -> u32 {
+        let mut hasher = rapidhash::fast::RapidHasher::default();
+        hasher.write_u16(self.cell_width.round().clamp(1.0, u16::MAX as f32) as u16);
+        hasher.write_u16(self.cell_height.round().clamp(1.0, u16::MAX as f32) as u16);
+        hasher.write_u16(self.cell_baseline.round().clamp(0.0, u16::MAX as f64) as u16);
+        hasher.write_i32(quantize_metric(self.face_width));
+        hasher.write_i32(quantize_metric(self.face_height));
+        hasher.write_i32(quantize_metric(self.face_y));
+        (hasher.finish() & u32::MAX as u64) as u32
+    }
+}
+
+#[inline]
+fn quantize_metric(value: f64) -> i32 {
+    (value * 64.0)
+        .round()
+        .clamp(i32::MIN as f64, i32::MAX as f64) as i32
+}
 
 #[inline(always)]
 pub(crate) fn resolve_style(style_table: &[Style], sq: Square) -> Style {
@@ -626,6 +692,7 @@ fn ensure_cursor_sprite_slot(
         font_id: CURSOR_FONT_ID_BASE + style as u32,
         glyph_id: cell_w,
         size_bucket: ((thickness as u16 & 0xF) << 12) | (cell_h.min(0xFFF) as u16),
+        metrics_signature: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some(slot);
@@ -750,6 +817,7 @@ fn ensure_split_cursor_sprite_slot(
             + part as u32,
         glyph_id: cell_w,
         size_bucket: ((thickness as u16 & 0xF) << 12) | (cell_h.min(0xFFF) as u16),
+        metrics_signature: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some(slot);
@@ -797,6 +865,7 @@ fn ensure_drawable_sprite(
         // are always single-cell; wide (CJK-ambiguous) cells aren't
         // special-cased.
         size_bucket: cell_h.min(u16::MAX as u32) as u16,
+        metrics_signature: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some(slot);
@@ -1103,7 +1172,95 @@ mod cursor_tests {
     }
 
     #[test]
+    fn glyph_bearing_y_uses_cell_baseline() {
+        let metrics = GridCellMetrics {
+            cell_width: 10.0,
+            cell_height: 22.0,
+            cell_baseline: 5.0,
+            face_width: 9.6,
+            face_height: 21.12,
+            face_y: 0.2,
+        };
+
+        assert_eq!(glyph_bearing_y(metrics, 12), 17);
+        assert_eq!(glyph_bearing_y(metrics, -2), 3);
+    }
+
+    #[test]
+    fn atlas_signature_tracks_cell_metrics() {
+        let metrics = GridCellMetrics {
+            cell_width: 10.0,
+            cell_height: 22.0,
+            cell_baseline: 5.0,
+            face_width: 9.6,
+            face_height: 21.12,
+            face_y: 0.2,
+        };
+        let shifted_baseline = GridCellMetrics {
+            cell_baseline: 6.0,
+            ..metrics
+        };
+        let shifted_face = GridCellMetrics {
+            face_y: 1.2,
+            ..metrics
+        };
+
+        assert_ne!(
+            metrics.atlas_signature(),
+            shifted_baseline.atlas_signature()
+        );
+        assert_ne!(metrics.atlas_signature(), shifted_face.atlas_signature());
+    }
+
+    #[test]
+    fn constrained_glyph_uses_face_metrics_for_vertical_alignment() {
+        use rio_backend::sugarloaf::font::nerd_font_attributes::{Align, Constraint};
+
+        let metrics = GridCellMetrics {
+            cell_width: 10.0,
+            cell_height: 20.0,
+            cell_baseline: 5.0,
+            face_width: 10.0,
+            face_height: 10.0,
+            face_y: 3.0,
+        };
+        let mut raw = RawGlyph {
+            width: 4,
+            height: 4,
+            left: 0,
+            top: 0,
+            is_color: false,
+            bytes: vec![255; 4 * 4],
+        };
+        let mut bearing_x = 0;
+        let mut bearing_y = 4;
+
+        constrain_rasterized_glyph(
+            &mut raw,
+            &mut bearing_x,
+            &mut bearing_y,
+            Constraint {
+                align_vertical: Align::Center,
+                ..Constraint::DEFAULT
+            },
+            1,
+            metrics,
+        );
+
+        assert_eq!(bearing_y, 10);
+    }
+
+    #[test]
     fn constrain_rasterized_glyph_preserves_status_icon_weight() {
+        let metrics = GridCellMetrics {
+            cell_width: 10.0,
+            cell_height: 20.0,
+            cell_baseline: 5.0,
+            face_width: 10.0,
+            face_height: 20.0,
+            face_y: 0.0,
+        };
+
         for codepoint in [0xEA73, 0xEBCA] {
             let constraint =
                 rio_backend::sugarloaf::font::nerd_font_attributes::get_constraint(
@@ -1127,8 +1284,7 @@ mod cursor_tests {
                 &mut bearing_y,
                 constraint,
                 1,
-                10.0,
-                20.0,
+                metrics,
             );
 
             assert!(
@@ -1318,6 +1474,7 @@ fn ensure_decoration_slot(
         font_id: DECORATION_FONT_ID_BASE + style as u32,
         glyph_id: cell_w,
         size_bucket: thickness as u16,
+        metrics_signature: 0,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some(slot);
@@ -1582,7 +1739,6 @@ pub struct GridGlyphRasterizer {
     /// across panes; the duplication is cheap (a few bytes per
     /// (char, route) pair) compared to the cost of mis-rendering.
     font_resolve: FxHashMap<(char, u8, usize), (u32, bool)>,
-    ascent_cache: FxHashMap<(u32, u16), i16>,
     /// `(should_embolden, should_italicize)` per font_id. Read from
     /// `FontData` synthesis flags; matches the rich-text rasterizer's
     /// convention.
@@ -1650,7 +1806,6 @@ impl GridGlyphRasterizer {
     pub fn new() -> Self {
         Self {
             font_resolve: FxHashMap::default(),
-            ascent_cache: FxHashMap::default(),
             synthesis_cache: FxHashMap::default(),
             run_cache: (0..RUN_BUCKET_COUNT)
                 .map(|_| Vec::with_capacity(RUN_BUCKET_SIZE))
@@ -1837,17 +1992,15 @@ fn run_cache_put(buckets: &mut [Vec<RunCacheEntry>], entry: RunCacheEntry) {
 
 // Platform-specific shape + ascent helpers
 
-/// Shape a single run on macOS via CoreText and populate
-/// `out.ascent_px` as a side effect via the rasterizer's cache.
-/// Returns the glyph list if the handle is available.
+/// Shape a single run on macOS via CoreText. Returns the glyph list if the
+/// handle is available.
 #[cfg(target_os = "macos")]
 fn shape_run_ct(
     rasterizer: &mut GridGlyphRasterizer,
     font_id: u32,
     size_u16: u16,
-    size_bucket: u16,
     font_library: &FontLibrary,
-) -> Option<(Vec<ShapedGlyph>, i16)> {
+) -> Option<Vec<ShapedGlyph>> {
     let handle = match rasterizer.handle_cache.entry(font_id) {
         std::collections::hash_map::Entry::Occupied(e) => e.into_mut().clone(),
         std::collections::hash_map::Entry::Vacant(e) => {
@@ -1856,16 +2009,6 @@ fn shape_run_ct(
             h
         }
     };
-    let ascent_px = *rasterizer
-        .ascent_cache
-        .entry((font_id, size_bucket))
-        .or_insert_with(|| {
-            let m = rio_backend::sugarloaf::font::macos::font_metrics(
-                &handle,
-                size_u16 as f32,
-            );
-            m.ascent.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
-        });
     let ct_glyphs = rio_backend::sugarloaf::font::macos::shape_text_utf16(
         &handle,
         &rasterizer.run_utf16_scratch,
@@ -1881,20 +2024,18 @@ fn shape_run_ct(
             cluster: g.cluster,
         })
         .collect();
-    Some((glyphs, ascent_px))
+    Some(glyphs)
 }
 
 /// Shape a single run on non-macOS via swash. Populates
-/// `rasterizer.ascent_cache` + `rasterizer.font_data_cache` as a side
-/// effect.
+/// `rasterizer.font_data_cache` as a side effect.
 #[cfg(not(target_os = "macos"))]
 fn shape_run_swash(
     rasterizer: &mut GridGlyphRasterizer,
     font_id: u32,
     size_u16: u16,
-    size_bucket: u16,
     font_library: &FontLibrary,
-) -> Option<(Vec<ShapedGlyph>, i16)> {
+) -> Option<Vec<ShapedGlyph>> {
     use rio_backend::sugarloaf::swash::FontRef;
 
     let font_entry = rasterizer
@@ -1910,14 +2051,6 @@ fn shape_run_swash(
         offset: font_entry.1,
         key: font_entry.2,
     };
-
-    let ascent_px = *rasterizer
-        .ascent_cache
-        .entry((font_id, size_bucket))
-        .or_insert_with(|| {
-            let m = font_ref.metrics(&[]).scale(size_u16 as f32);
-            m.ascent.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16
-        });
 
     let mut shaper = rasterizer
         .shape_ctx
@@ -1938,7 +2071,7 @@ fn shape_run_swash(
             });
         }
     });
-    Some((glyphs, ascent_px))
+    Some(glyphs)
 }
 
 // Emission
@@ -1961,8 +2094,7 @@ pub fn build_row_fg(
     rasterizer: &mut GridGlyphRasterizer,
     grid: &mut GridRenderer,
     size_px: f32,
-    cell_w: f32,
-    cell_h: f32,
+    cell_metrics: GridCellMetrics,
     row_sel: Option<RowSelection>,
     row_hints: &[RowHint],
     font_library: &FontLibrary,
@@ -1980,7 +2112,10 @@ pub fn build_row_fg(
 
     let size_bucket = (size_px * 4.0).round().clamp(0.0, u16::MAX as f32) as u16;
     let size_u16 = size_px.round().clamp(1.0, u16::MAX as f32) as u16;
+    let metrics_signature = cell_metrics.atlas_signature();
 
+    let cell_w = cell_metrics.cell_width;
+    let cell_h = cell_metrics.cell_height;
     let cell_w_u32 = cell_w.round().clamp(1.0, u32::MAX as f32) as u32;
     let cell_h_u32 = cell_h.round().clamp(1.0, u32::MAX as f32) as u32;
     let thickness = decoration_thickness(size_px);
@@ -2068,21 +2203,6 @@ pub fn build_row_fg(
                 continue;
             };
 
-            // Borrow the primary font's ascent at this size if the
-            // run-shaper has populated it; otherwise approximate at
-            // 80% of the glyph size. The approximation only fires
-            // when no regular text has been laid out at this size yet
-            // — once the user types real text the cache fills and
-            // subsequent registered cells use the precise ascent.
-            let ascent_px = rasterizer
-                .ascent_cache
-                .get(&(
-                    rio_backend::sugarloaf::font::FONT_ID_REGULAR as u32,
-                    size_bucket,
-                ))
-                .copied()
-                .unwrap_or_else(|| (size_u16 as i16).saturating_mul(4) / 5);
-
             // fg colour, mirroring the regular emit loop's
             // selection / hint precedence.
             let style = resolve_style(style_table, sq);
@@ -2109,9 +2229,9 @@ pub fn build_row_fg(
                 registry,
                 ch as u32,
                 size_bucket,
+                metrics_signature,
                 size_u16,
-                cell_h,
-                ascent_px,
+                cell_metrics,
                 color,
             ) {
                 if slot.w != 0 && slot.h != 0 {
@@ -2366,28 +2486,17 @@ pub fn build_row_fg(
         rasterizer.run_hasher.write_u16(size_bucket);
         let hash = rasterizer.run_hasher.finish();
 
-        // Shape (cached) and capture ascent for this (font_id, size).
-        let ascent_px = if run_cache_get(&mut rasterizer.run_cache, hash).is_some() {
-            // Cache hit — ascent already stored.
-            rasterizer
-                .ascent_cache
-                .get(&(font_id, size_bucket))
-                .copied()
-                .unwrap_or(0)
-        } else {
+        if run_cache_get(&mut rasterizer.run_cache, hash).is_none() {
             #[cfg(target_os = "macos")]
-            let shaped_opt =
-                shape_run_ct(rasterizer, font_id, size_u16, size_bucket, font_library);
+            let shaped_opt = shape_run_ct(rasterizer, font_id, size_u16, font_library);
             #[cfg(not(target_os = "macos"))]
-            let shaped_opt =
-                shape_run_swash(rasterizer, font_id, size_u16, size_bucket, font_library);
-            let Some((glyphs, ascent_px)) = shaped_opt else {
+            let shaped_opt = shape_run_swash(rasterizer, font_id, size_u16, font_library);
+            let Some(glyphs) = shaped_opt else {
                 x = end;
                 continue;
             };
             run_cache_put(&mut rasterizer.run_cache, RunCacheEntry { hash, glyphs });
-            ascent_px
-        };
+        }
 
         let (synthetic_bold, synthetic_italic) =
             rasterizer.get_synthesis(font_id, font_library);
@@ -2466,10 +2575,9 @@ pub fn build_row_fg(
                 src_sq.c() as u32,
                 constraint_width,
                 size_bucket,
+                metrics_signature,
                 size_u16,
-                cell_w,
-                cell_h,
-                ascent_px,
+                cell_metrics,
                 is_emoji,
                 synthetic_italic,
                 synthetic_bold,
@@ -2770,10 +2878,8 @@ fn constrained_codepoint_key(flag: u32, codepoint: u32, constraint_width: u8) ->
 }
 
 #[inline]
-fn glyph_bearing_y(cell_h: f32, ascent_px: i16, top: i32) -> i16 {
-    let top_i16 = top.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-    let cell_h_i16 = cell_h.round().clamp(0.0, i16::MAX as f32) as i16;
-    cell_h_i16.saturating_sub(ascent_px).saturating_add(top_i16)
+fn glyph_bearing_y(cell_metrics: GridCellMetrics, top: i32) -> i16 {
+    round_to_i16(cell_metrics.cell_baseline + f64::from(top))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2783,8 +2889,7 @@ fn constrain_rasterized_glyph(
     bearing_y: &mut i16,
     constraint: rio_backend::sugarloaf::font::nerd_font_attributes::Constraint,
     constraint_width: u8,
-    cell_w: f32,
-    cell_h: f32,
+    cell_metrics: GridCellMetrics,
 ) {
     use rio_backend::sugarloaf::font::nerd_font_attributes::{
         GlyphSize, Metrics as ConstraintMetrics,
@@ -2806,7 +2911,7 @@ fn constrain_rasterized_glyph(
         y: f64::from(*bearing_y) - raw.height as f64,
     };
     let constrained =
-        constraint.constrain(glyph, constraint_metrics(cell_w, cell_h), constraint_width);
+        constraint.constrain(glyph, constraint_metrics(cell_metrics), constraint_width);
     if !constrained.width.is_finite()
         || !constrained.height.is_finite()
         || !constrained.x.is_finite()
@@ -2836,15 +2941,17 @@ fn constrain_rasterized_glyph(
     *bearing_x = round_to_i16(constrained.x);
     *bearing_y = round_to_i16(constrained.y + constrained.height);
 
-    fn constraint_metrics(cell_w: f32, cell_h: f32) -> ConstraintMetrics {
-        let cell_width = cell_w.round().clamp(1.0, u32::MAX as f32) as u32;
-        let cell_height = cell_h.round().clamp(1.0, u32::MAX as f32) as u32;
-        let face_width = f64::from(cell_w.max(1.0));
-        let face_height = f64::from(cell_h.max(1.0));
+    fn constraint_metrics(cell_metrics: GridCellMetrics) -> ConstraintMetrics {
+        let cell_width =
+            cell_metrics.cell_width.round().clamp(1.0, u32::MAX as f32) as u32;
+        let cell_height =
+            cell_metrics.cell_height.round().clamp(1.0, u32::MAX as f32) as u32;
+        let face_width = cell_metrics.face_width.max(1.0);
+        let face_height = cell_metrics.face_height.max(1.0);
         ConstraintMetrics {
             face_width,
             face_height,
-            face_y: 0.0,
+            face_y: cell_metrics.face_y,
             cell_width,
             cell_height,
             icon_height_single: (face_height * NERD_FONT_ICON_HEIGHT_SINGLE_FACTOR)
@@ -2996,10 +3103,9 @@ fn ensure_glyph_by_id(
     codepoint: u32,
     constraint_width: u8,
     size_bucket: u16,
+    metrics_signature: u32,
     size_u16: u16,
-    cell_w: f32,
-    cell_h: f32,
-    ascent_px: i16,
+    cell_metrics: GridCellMetrics,
     is_emoji: bool,
     synthetic_italic: bool,
     synthetic_bold: bool,
@@ -3009,6 +3115,7 @@ fn ensure_glyph_by_id(
         font_id,
         glyph_id: atlas_glyph_id(glyph_id, codepoint, constraint_width, constraint),
         size_bucket,
+        metrics_signature,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some((key, slot, false));
@@ -3029,11 +3136,10 @@ fn ensure_glyph_by_id(
     )?;
     let is_color = raw.is_color;
 
-    // Convert CG-convention `left`/`top` into grid-convention
-    // `bearing_y` = `cell_h - ascent + top`. See the long comment in
-    // the original macOS rasterizer for the geometry.
+    // Convert baseline-relative `top` into grid-convention
+    // `bearing_y`, the distance from cell bottom to glyph top.
     let mut bearing_x = raw.left.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-    let mut bearing_y = glyph_bearing_y(cell_h, ascent_px, raw.top);
+    let mut bearing_y = glyph_bearing_y(cell_metrics, raw.top);
     if let Some(constraint) = constraint {
         constrain_rasterized_glyph(
             &mut raw,
@@ -3041,8 +3147,7 @@ fn ensure_glyph_by_id(
             &mut bearing_y,
             constraint.constraint(),
             constraint_width,
-            cell_w,
-            cell_h,
+            cell_metrics,
         );
     }
     let raster = RasterizedGlyph {
@@ -3069,12 +3174,9 @@ fn ensure_glyph_by_id(
 /// previous-version slots become unreachable and the atlas LRU evicts
 /// them in due course.
 ///
-/// `ascent_px` matches the primary font's ascent at the same size
-/// bucket — Glyph Protocol payloads have no font-of-their-own, so we
-/// align registered glyphs to the surrounding text baseline. A more
-/// faithful rendering would walk the registered outline's bbox to
-/// compute per-glyph bearings, but for icon-style PUA glyphs the
-/// primary-font baseline produces the expected appearance.
+/// `cell_metrics` carries the primary font's baseline for this panel.
+/// Glyph Protocol payloads have no font-of-their-own grid metrics, so
+/// registered glyphs align to the same cell baseline as normal text.
 ///
 /// `registry` is the active terminal's glyph registry, cloned once
 /// per row by `build_row_fg`. Passing it in (instead of going through
@@ -3090,9 +3192,9 @@ fn ensure_custom_glyph_by_codepoint(
     registry: &rio_backend::sugarloaf::font::glyph_registry::GlyphRegistry,
     codepoint: u32,
     size_bucket: u16,
+    metrics_signature: u32,
     size_u16: u16,
-    cell_h: f32,
-    ascent_px: i16,
+    cell_metrics: GridCellMetrics,
     foreground_rgba: [u8; 4],
 ) -> Option<(GlyphKey, AtlasSlot, bool)> {
     use rio_backend::sugarloaf::font::glyph_registry::pack_atlas_glyph_id;
@@ -3105,6 +3207,7 @@ fn ensure_custom_glyph_by_codepoint(
         font_id: CUSTOM_GLYPH_FONT_ID_U32,
         glyph_id: pack_atlas_glyph_id(codepoint, entry.version),
         size_bucket,
+        metrics_signature,
     };
     if let Some(slot) = grid.lookup_glyph(key) {
         return Some((key, slot, false));
@@ -3120,12 +3223,7 @@ fn ensure_custom_glyph_by_codepoint(
         foreground_rgba,
     )?;
 
-    let bearing_y = {
-        let cell_h_i16 = cell_h.round().clamp(0.0, i16::MAX as f32) as i16;
-        cell_h_i16
-            .saturating_sub(ascent_px)
-            .saturating_add(raster.top.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
-    };
+    let bearing_y = glyph_bearing_y(cell_metrics, raster.top);
     let raster_in = RasterizedGlyph {
         width: raster.width,
         height: raster.height,
