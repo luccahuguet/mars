@@ -132,6 +132,13 @@ impl Route<'_> {
     #[inline]
     pub fn confirm_quit(&mut self) {
         self.path = RoutePath::ConfirmQuit;
+        self.request_overlay_redraw();
+    }
+
+    #[inline]
+    fn cancel_confirm_quit(&mut self) {
+        self.path = RoutePath::Terminal;
+        self.request_overlay_redraw();
     }
 
     #[inline]
@@ -333,10 +340,10 @@ impl Route<'_> {
             if key_event.state == rio_window::event::ElementState::Pressed {
                 match &key_event.logical_key {
                     Key::Character(c) if c.as_str() == "n" || c.as_str() == "N" => {
-                        self.path = RoutePath::Terminal;
+                        self.cancel_confirm_quit();
                     }
                     Key::Named(NamedKey::Escape) => {
-                        self.path = RoutePath::Terminal;
+                        self.cancel_confirm_quit();
                     }
                     Key::Character(c) if c.as_str() == "y" || c.as_str() == "Y" => {
                         self.quit();
