@@ -10,10 +10,11 @@ const MODAL_MIN_H: f32 = 132.0;
 const CONTENT_PAD_X: f32 = 34.0;
 const ACTION_GAP: f32 = 56.0;
 const BUTTON_H: f32 = 38.0;
-const BUTTON_MAX_W: f32 = 146.0;
+const BUTTON_MAX_W: f32 = 170.0;
 const HEADING_SIZE: f32 = 20.0;
 const ACTION_SIZE: f32 = 14.0;
 const MIN_TEXT_ACTION_GAP: f32 = 10.0;
+const BUTTON_BG: [f32; 4] = [0.145, 0.160, 0.180, 0.98];
 
 #[derive(Debug)]
 struct DialogLayout {
@@ -21,7 +22,6 @@ struct DialogLayout {
     modal_y: f32,
     modal_w: f32,
     modal_h: f32,
-    accent_w: f32,
     button_w: f32,
     action_gap: f32,
     actions_x: f32,
@@ -61,7 +61,6 @@ fn compute_layout(win_w: f32, win_h: f32) -> DialogLayout {
         modal_y,
         modal_w,
         modal_h,
-        accent_w: 64.0_f32.min((modal_w - 32.0).max(24.0)),
         button_w,
         action_gap: ACTION_GAP,
         actions_x,
@@ -91,15 +90,10 @@ pub fn screen(
         bold: true,
         ..DrawOpts::default()
     };
-    let confirm_opts = DrawOpts {
+    let action_opts = DrawOpts {
         font_size: ACTION_SIZE,
-        color: [255, 255, 255, 255],
+        color: [235, 240, 246, 255],
         bold: true,
-        ..DrawOpts::default()
-    };
-    let quit_opts = DrawOpts {
-        font_size: ACTION_SIZE,
-        color: [220, 225, 232, 255],
         ..DrawOpts::default()
     };
 
@@ -107,8 +101,8 @@ pub fn screen(
         let ui = sugarloaf.text_mut();
         (
             ui.measure(heading_content, &heading_opts),
-            ui.measure(confirm_content, &confirm_opts),
-            ui.measure(quit_content, &quit_opts),
+            ui.measure(confirm_content, &action_opts),
+            ui.measure(quit_content, &action_opts),
         )
     };
 
@@ -149,23 +143,11 @@ pub fn screen(
     );
     sugarloaf.rounded_rect(
         None,
-        layout.modal_x + (layout.modal_w - layout.accent_w) / 2.0,
-        layout.modal_y + 18.0,
-        layout.accent_w,
-        3.0,
-        [0.95, 0.36, 0.14, 0.92],
-        0.05,
-        2.0,
-        22,
-    );
-
-    sugarloaf.rounded_rect(
-        None,
         layout.actions_x,
         layout.button_y,
         layout.button_w,
         BUTTON_H,
-        [0.95, 0.36, 0.14, 0.98],
+        BUTTON_BG,
         0.05,
         10.0,
         22,
@@ -176,7 +158,7 @@ pub fn screen(
         layout.button_y,
         layout.button_w,
         BUTTON_H,
-        [0.145, 0.160, 0.180, 0.98],
+        BUTTON_BG,
         0.05,
         10.0,
         22,
@@ -192,8 +174,8 @@ pub fn screen(
 
     let ui = sugarloaf.text_mut();
     ui.draw(heading_x, layout.heading_y, heading_content, &heading_opts);
-    ui.draw(confirm_x, action_y, confirm_content, &confirm_opts);
-    ui.draw(quit_x, action_y, quit_content, &quit_opts);
+    ui.draw(confirm_x, action_y, confirm_content, &action_opts);
+    ui.draw(quit_x, action_y, quit_content, &action_opts);
 }
 
 #[cfg(test)]
@@ -234,6 +216,10 @@ mod tests {
         assert!(
             layout.action_gap >= 48.0,
             "actions should have visible separation: {layout:?}"
+        );
+        assert!(
+            layout.button_w >= 160.0,
+            "standard actions should be wider: {layout:?}"
         );
     }
 }
