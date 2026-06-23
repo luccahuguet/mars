@@ -52,6 +52,9 @@ table below is the README-sized feature view.
 | Area | Mars Behavior | Evidence |
 | --- | --- | --- |
 | Yazelix packaging | `.#mars` is the first-class package, with Mars metadata, config roots, launcher wrappers, desktop identity, and icon assets. | [`9df072cdfe`](https://github.com/luccahuguet/mars/commit/9df072cdfe), [`d9e303e8b7`](https://github.com/luccahuguet/mars/commit/d9e303e8b7) |
+| Text and status glyphs | Mars uses Yazelix-tuned font defaults, Ghostty-style cell-baseline glyph placement, and constrained Nerd Font/status glyph sizing for balanced Yazelix bars. | [`ca72d7c581`](https://github.com/luccahuguet/mars/commit/ca72d7c581), [`f8e5fa60ee`](https://github.com/luccahuguet/mars/commit/f8e5fa60ee), [`b089bd1d97`](https://github.com/luccahuguet/mars/commit/b089bd1d97) |
+| Theme and palette defaults | Packaged Mars profiles keep Yazelix palette values consistent across adaptive theme files and `[colors]`, avoiding washed-out status and glider colors. | [`809d8bece0`](https://github.com/luccahuguet/mars/commit/809d8bece0) |
+| Quit confirmation | The quit confirmation overlay is a one-shot rounded modal with clear spacing and matching action buttons. | [`5820a9abf0`](https://github.com/luccahuguet/mars/commit/5820a9abf0), [`d44cf8e15e`](https://github.com/luccahuguet/mars/commit/d44cf8e15e), [`260a862d02`](https://github.com/luccahuguet/mars/commit/260a862d02) |
 | Split cursors | Mars accepts hard-validated `[yazelix.cursor]` split-color config and renders split block, hollow, beam, underline, and trail sprites without mono fallback for malformed split config. | [`b545e539ec`](https://github.com/luccahuguet/mars/commit/b545e539ec), [`6b108cba5a`](https://github.com/luccahuguet/mars/commit/6b108cba5a) |
 | Kitty graphics | Yazi previews that were fully broken render well through Kitty graphics; Mars derives omitted virtual-placement sizes and uses correct WGPU source-rect endpoint semantics for nonzero-origin slices. | [`f2d1ff45a8`](https://github.com/luccahuguet/mars/commit/f2d1ff45a8), [`011d648d83`](https://github.com/luccahuguet/mars/commit/011d648d83) |
 | Link handling | Non-macOS link hints use Ctrl-click, URL hit spans are clipped to useful targets, and edge punctuation remains clickable without opening punctuation. | [`c2a49e7421`](https://github.com/luccahuguet/mars/commit/c2a49e7421), [`1a9dc553ec`](https://github.com/luccahuguet/mars/commit/1a9dc553ec), [`8e43f00c1d`](https://github.com/luccahuguet/mars/commit/8e43f00c1d) |
@@ -183,6 +186,28 @@ plus MSYS2 release builds for `MINGW64`, `UCRT64`, and `CLANG64`.
 
 The GitHub `Nix Build` workflow builds the flake package on Linux ARM.
 
+## Current Limits
+
+Nix and source builds are the validated first-party Mars surfaces. Inherited
+Rio release packaging still needs Mars-specific identity, smoke tests, and
+support decisions before it is described as supported.
+
+Packaging follow-ups are tracked in public issues:
+
+| Surface | Status |
+| --- | --- |
+| Linux `.deb`/`.rpm` | Native package artifact restoration is tracked in [#2](https://github.com/luccahuguet/mars/issues/2). |
+| Flatpak | Flatpak graphics packaging is tracked in [#3](https://github.com/luccahuguet/mars/issues/3). |
+| AppImage / portable Linux | Portable Linux packaging is tracked in [#4](https://github.com/luccahuguet/mars/issues/4). |
+| macOS | macOS artifact support is tracked in [#5](https://github.com/luccahuguet/mars/issues/5). |
+| Windows | Windows artifact support is tracked in [#6](https://github.com/luccahuguet/mars/issues/6). |
+| Release secrets | GoReleaser and signing policy is tracked in [#7](https://github.com/luccahuguet/mars/issues/7). |
+
+Runtime dogfooding is strongest on Linux through Yazelix and Nix. The test
+workflow runs Rust checks on Linux, macOS, and Windows, and MSYS2 release-build
+checks on Windows, but interactive macOS validation and broad Windows runtime
+validation remain limited.
+
 ## Release Status
 
 The release workflow is intentionally limited to `v*.*.*` tags and manual
@@ -190,10 +215,11 @@ dispatch. It uses inherited GoReleaser Pro release machinery, requires
 `GORELEASER_KEY` for release execution, and only configures Apple signing when
 signing secrets are present.
 
-The release-secrets decision is tracked in Bead `yzt-c2d`. Until that is
-resolved, treat Nix builds and source builds as the validated first-party
-surfaces, and treat inherited Rio release packaging as a path to evaluate
-instead of a public Mars guarantee.
+The release-secrets decision is tracked in
+[#7](https://github.com/luccahuguet/mars/issues/7) and Bead `yzt-c2d`. Until
+that is resolved, treat Nix builds and source builds as the validated
+first-party surfaces, and treat inherited Rio release packaging as a path to
+evaluate instead of a public Mars guarantee.
 
 ## Upstream
 
