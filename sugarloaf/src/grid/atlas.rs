@@ -11,17 +11,16 @@
 //! (`GlyphKey`), where it landed in the atlas (`AtlasSlot`), and the
 //! caller-supplied rasterized pixels (`RasterizedGlyph`).
 
-/// Identifier for a rasterized glyph. `(font_id, glyph_id)` is
-/// enough when a grid renders at one font size; `size_bucket` lets
-/// us share the atlas across minor size changes (e.g. during a
-/// resize animation) without re-rasterizing. Quantize to 1/4 of a
-/// physical pixel to keep the cache hit rate high:
-/// `size_bucket = (scaled_px * 4.0).round() as u16`.
+/// Identifier for a rasterized glyph. `(font_id, glyph_id)` is enough when a
+/// grid renders at one font size; `size_bucket` separates raster sizes and
+/// `metrics_signature` separates cell metrics that affect bearings or
+/// constrained glyph dimensions.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct GlyphKey {
     pub font_id: u32,
     pub glyph_id: u32,
     pub size_bucket: u16,
+    pub metrics_signature: u32,
 }
 
 /// Atlas position + glyph metrics for one rasterized glyph. Exactly

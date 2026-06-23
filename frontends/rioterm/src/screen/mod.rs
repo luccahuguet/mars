@@ -3829,6 +3829,7 @@ impl Screen<'_> {
                 rows: u32,
                 cell_w: f32,
                 cell_h: f32,
+                cell_metrics: crate::grid_emit::GridCellMetrics,
                 font_px: f32,
                 visible_rows: Vec<
                     rio_backend::crosswords::grid::row::Row<
@@ -3927,6 +3928,7 @@ impl Screen<'_> {
                 // show up.
                 let cell_w = dim.cell.cell_width as f32;
                 let cell_h = dim.cell.cell_height as f32;
+                let cell_metrics = crate::grid_emit::GridCellMetrics::from(dim.cell);
                 // Per-panel font size lives on `ContextDimension` since
                 // the panel-state migration; sugarloaf is no longer
                 // consulted. Per-panel zoom mutates
@@ -4003,6 +4005,7 @@ impl Screen<'_> {
                     rows: ctx.renderable_content.screen_lines.max(1) as u32,
                     cell_w,
                     cell_h,
+                    cell_metrics,
                     font_px,
                     visible_rows,
                     style_table,
@@ -4167,8 +4170,7 @@ impl Screen<'_> {
                             rasterizer,
                             grid,
                             p.font_px,
-                            p.cell_w,
-                            p.cell_h,
+                            p.cell_metrics,
                             row_sel,
                             &hint_scratch,
                             &font_library,

@@ -1,6 +1,6 @@
 {
-  firaCodeNerdFont,
   imagemagick,
+  jetbrainsMonoFont,
   lib,
   makeWrapper,
   mesa,
@@ -71,7 +71,7 @@
     emoji_fonts = lib.mapAttrs (_: roots: {config_roots = roots;}) emojiConfigRoots;
   };
   packageMetadataJson = builtins.toJSON marsPackageMetadata;
-  firaCodeNerdDir = "${firaCodeNerdFont}/share/fonts/truetype/NerdFonts/FiraCode";
+  jetbrainsMonoDir = "${jetbrainsMonoFont}/share/fonts/truetype";
   symbolsNerdDir = "${symbolsNerdFont}/share/fonts/truetype/NerdFonts/Symbols";
   notoSymbolsDir = "${notoFonts}/share/fonts/noto";
   notoEmojiDir = "${notoEmojiFont}/share/fonts/noto";
@@ -117,6 +117,7 @@
     scrollback-history-limit = 0
     force-theme = "dark"
     enable-scroll-bar = false
+    line-height = 1.12
 
     [adaptive-theme]
     dark = "yazelix-dark"
@@ -146,10 +147,10 @@
     border-width = 0.0
 
     [fonts]
-    family = "FiraCode Nerd Font Mono"
-    size = 18.0
+    family = "JetBrains Mono"
+    size = 16.0
     additional-dirs = [
-      "${firaCodeNerdDir}",
+      "${jetbrainsMonoDir}",
       "${symbolsNerdDir}",
       "${notoSymbolsDir}",
       "${emojiDir}"
