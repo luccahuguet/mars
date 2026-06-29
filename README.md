@@ -14,9 +14,9 @@ terminal behavior matters. Mars aims for practical Ghostty parity, strong Kitty
 protocol support, good Nix/runtime integration, and small measured changes
 instead of broad fork drift.
 
-Mars is the default packaged terminal for Yazelix. Ghostty remains the mature
-alternate in Yazelix; Mars exists so the Rust terminal/runtime boundary can move
-with Yazelix when protocol, cursor, graphics, and packaging work needs it.
+Mars is the default packaged terminal for Yazelix, with Ghostty as a strong alternative.
+
+Mars exists so the Rust terminal/runtime boundary can move with Yazelix if and when protocol, cursor, graphics, and packaging work needs it.
 
 Mars adopts (carefully) agent-driven development with plenty of testing. 
 
