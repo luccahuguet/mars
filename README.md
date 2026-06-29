@@ -6,8 +6,7 @@
 
 **Born from Rio. Built for Mars.**
 
-Mars is a Rio-derived Rust terminal fork maintained for Yazelix and
-agent-driven development.
+Mars is a Rio-derived Rust terminal fork maintained by the author of Yazelix.
 
 The project keeps Rio close enough to upstream to rebase deliberately, while
 giving Yazelix a terminal stack it can control, test, package, and adapt when
@@ -18,6 +17,8 @@ instead of broad fork drift.
 Mars is the default packaged terminal for Yazelix. Ghostty remains the mature
 alternate in Yazelix; Mars exists so the Rust terminal/runtime boundary can move
 with Yazelix when protocol, cursor, graphics, and packaging work needs it.
+
+Mars adopts (carefully) agent-driven development with plenty of testing. 
 
 ![Mars running Yazelix](docs/assets/mars-yazelix-session.png)
 
