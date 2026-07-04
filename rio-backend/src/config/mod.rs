@@ -6,6 +6,7 @@ pub mod effects;
 pub mod hints;
 pub mod keyboard;
 pub mod layout;
+pub mod mars;
 pub mod navigation;
 pub mod platform;
 pub mod renderer;
@@ -21,6 +22,7 @@ use crate::config::defaults::*;
 use crate::config::hints::Hints;
 use crate::config::keyboard::Keyboard;
 use crate::config::layout::{Margin, Panel};
+use crate::config::mars::{Mars, MarsAppearancePreset};
 use crate::config::navigation::Navigation;
 use crate::config::platform::{Platform, PlatformConfig};
 use crate::config::renderer::Renderer;
@@ -38,6 +40,7 @@ use tracing::warn;
 
 const CONFIG_HOME_ENV: &str = "MARS_CONFIG_HOME";
 const CONFIG_DIR_NAME: &str = "mars";
+const APPEARANCE_ENV: &str = "MARS_APPEARANCE";
 
 #[derive(Clone, Debug)]
 pub enum ConfigError {
@@ -174,6 +177,8 @@ pub struct Config {
     pub scrollback_history_limit: usize,
     #[serde(default = "effects::Effects::default")]
     pub effects: effects::Effects,
+    #[serde(default = "Mars::default", skip_serializing_if = "Mars::is_empty")]
+    pub mars: Mars,
     #[serde(
         default = "Yazelix::default",
         skip_serializing_if = "Yazelix::is_empty"
@@ -295,12 +300,21 @@ impl Config {
     }
     #[cfg(test)]
     fn load_from_path_without_fallback(path: &PathBuf) -> Result<Self, String> {
+        Self::load_from_path_without_fallback_with_appearance_env(path, None)
+    }
+
+    #[cfg(test)]
+    fn load_from_path_without_fallback_with_appearance_env(
+        path: &PathBuf,
+        appearance_env: Option<&str>,
+    ) -> Result<Self, String> {
         if path.exists() {
             let content = std::fs::read_to_string(path).unwrap();
             match toml::from_str::<Config>(&content) {
                 Ok(mut decoded) => {
                     let theme = &decoded.theme;
                     if theme.is_empty() {
+                        decoded.apply_mars_appearance_with_env(appearance_env);
                         return Ok(decoded);
                     }
 
@@ -341,6 +355,7 @@ impl Config {
                         }
                     }
 
+                    decoded.apply_mars_appearance_with_env(appearance_env);
                     Ok(decoded)
                 }
                 Err(err_message) => Err(format!("error parsing: {err_message:?}")),
@@ -375,6 +390,7 @@ impl Config {
                 Ok(mut decoded) => {
                     let theme = &decoded.theme;
                     if theme.is_empty() {
+                        decoded.apply_mars_appearance();
                         return decoded;
                     }
 
@@ -388,6 +404,7 @@ impl Config {
                         warn!("failed to load theme: {}", theme);
                     }
 
+                    decoded.apply_mars_appearance();
                     decoded
                 }
                 Err(err_message) => {
@@ -465,6 +482,7 @@ impl Config {
                             }
                         }
 
+                        decoded.apply_mars_appearance();
                         Ok(decoded)
                     }
                     Err(err_message) => {
@@ -633,6 +651,33 @@ impl Config {
             self.theme = theme_overwrite.clone();
         }
     }
+
+    fn apply_mars_appearance(&mut self) {
+        let env_preset = std::env::var(APPEARANCE_ENV).ok();
+        self.apply_mars_appearance_with_env(env_preset.as_deref());
+    }
+
+    fn apply_mars_appearance_with_env(&mut self, env_preset_raw: Option<&str>) {
+        let env_preset = env_preset_raw
+            .map(str::trim)
+            .filter(|raw| !raw.is_empty())
+            .and_then(|raw| match MarsAppearancePreset::parse(raw) {
+                Ok(preset) => Some(preset),
+                Err(error) => {
+                    warn!("{error}");
+                    None
+                }
+            });
+
+        let preset = env_preset
+            .or_else(|| self.mars.appearance.map(|appearance| appearance.preset));
+        if let Some(preset) = preset {
+            self.force_theme = preset.forced_theme();
+            if let Some(colors) = preset.colors() {
+                self.colors = colors;
+            }
+        }
+    }
 }
 
 impl Default for Config {
@@ -673,6 +718,7 @@ impl Default for Config {
             enable_scroll_bar: true,
             scrollback_history_limit: default_scrollback_history_limit(),
             effects: effects::Effects::default(),
+            mars: Mars::default(),
             yazelix: Yazelix::default(),
         }
     }
@@ -705,6 +751,24 @@ mod tests {
         writeln!(file, "{toml_str}").unwrap();
 
         match Config::load_from_path_without_fallback(&file_name) {
+            Ok(config) => config,
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    fn create_temporary_config_with_appearance_env(
+        prefix: &str,
+        toml_str: &str,
+        appearance_env: &str,
+    ) -> Config {
+        let file_name = tmp_dir().join(format!("test-rio-{prefix}-config.toml"));
+        let mut file = std::fs::File::create(&file_name).unwrap();
+        writeln!(file, "{toml_str}").unwrap();
+
+        match Config::load_from_path_without_fallback_with_appearance_env(
+            &file_name,
+            Some(appearance_env),
+        ) {
             Ok(config) => config,
             Err(e) => panic!("{e}"),
         }
@@ -865,6 +929,54 @@ mod tests {
             cursor.cursor_color,
             Some(colors::hex_to_color_arr("#ff1600"))
         );
+    }
+
+    #[test]
+    fn test_mars_appearance_preset_config() {
+        let dark = create_temporary_config(
+            "mars-appearance-dark",
+            r##"
+            [mars.appearance]
+            preset = "dark"
+        "##,
+        );
+        let light = create_temporary_config(
+            "mars-appearance-light",
+            r##"
+            [mars.appearance]
+            preset = "light"
+        "##,
+        );
+
+        assert_eq!(dark.force_theme, Some(AppearanceTheme::Dark));
+        assert_eq!(dark.colors.background.0, hex_to_color_arr("#111416"));
+        assert_eq!(dark.colors.foreground, hex_to_color_arr("#eeeeec"));
+        assert_eq!(
+            dark.colors.dim_foreground,
+            Some(hex_to_color_arr("#9d9d9c"))
+        );
+        assert_eq!(light.force_theme, Some(AppearanceTheme::Light));
+        assert_eq!(light.colors.background.0, hex_to_color_arr("#f5f3ef"));
+        assert_eq!(light.colors.foreground, hex_to_color_arr("#202124"));
+        assert_eq!(
+            light.colors.dim_foreground,
+            Some(hex_to_color_arr("#62666d"))
+        );
+    }
+
+    #[test]
+    fn test_mars_appearance_env_overrides_config() {
+        let result = create_temporary_config_with_appearance_env(
+            "mars-appearance-env",
+            r##"
+            [mars.appearance]
+            preset = "dark"
+        "##,
+            "light",
+        );
+
+        assert_eq!(result.force_theme, Some(AppearanceTheme::Light));
+        assert_eq!(result.colors.background.0, hex_to_color_arr("#f5f3ef"));
     }
 
     #[test]

@@ -4,7 +4,6 @@
 
 confirm-before-quit = false
 scrollback-history-limit = 0
-force-theme = "dark"
 enable-scroll-bar = false
 line-height = 1.12
 
@@ -14,6 +13,9 @@ visual = true
 
 [effects]
 trail-cursor = true
+
+[mars.appearance]
+preset = "dark"
 
 [yazelix.cursor]
 preset = "reef"

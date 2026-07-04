@@ -39,6 +39,8 @@ Mars adopts (carefully) agent-driven development with plenty of testing.
 - The package metadata advertises `MARS_APPEARANCE`, `MARS_EMOJI_FONT`,
   `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the runtime environment
   contract consumed by Yazelix
+- Mars config accepts `[mars.appearance] preset = "dark"`, `"light"`, or
+  `"auto"`; `MARS_APPEARANCE` overrides that config value for package consumers
 - Mars config accepts `[yazelix.cursor] preset = "reef"` using the Yazelix
   cursor registry names `blaze`, `snow`, `ice`, `midnight`, `cosmic`, `ocean`,
   `forest`, `sunset`, `eclipse`, `dusk`, `orchid`, `reef`, and `magma`; package
@@ -114,7 +116,7 @@ Package metadata exposes the current runtime environment contract to Yazelix:
 | Variable | Purpose |
 | --- | --- |
 | `MARS_PROFILE` | Selects the full, baseline, or shaders profile config root. |
-| `MARS_APPEARANCE` | Selects the dark, light, or auto palette mode. |
+| `MARS_APPEARANCE` | Overrides `[mars.appearance] preset` with the dark, light, or auto palette mode. |
 | `MARS_EMOJI_FONT` | Selects the Noto, Twitter/Twemoji, or SerenityOS emoji config root. |
 | `MARS_EMOJI_FONT_SOURCE` | Carries the Yazelix-owned emoji source marker paired with `MARS_EMOJI_FONT`. |
 

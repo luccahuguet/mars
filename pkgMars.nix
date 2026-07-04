@@ -132,7 +132,6 @@
   }: ''
     confirm-before-quit = false
     scrollback-history-limit = 0
-    force-theme = "dark"
     enable-scroll-bar = false
     line-height = 1.12
 
@@ -150,6 +149,9 @@
       then "true"
       else "false"
     }
+
+    [mars.appearance]
+    preset = "dark"
 
     [yazelix.cursor]
     preset = "reef"
