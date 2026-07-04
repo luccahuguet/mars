@@ -847,6 +847,27 @@ mod tests {
     }
 
     #[test]
+    fn test_yazelix_cursor_preset_config() {
+        let result = create_temporary_config(
+            "yazelix-cursor-preset",
+            r##"
+            [yazelix.cursor]
+            preset = "magma"
+        "##,
+        );
+
+        let cursor = result.yazelix.cursor.unwrap();
+        assert_eq!(cursor.divider, yazelix::YazelixCursorDivider::Horizontal);
+        assert_eq!(cursor.transition, yazelix::YazelixCursorTransition::Soft);
+        assert_eq!(cursor.colors[0], colors::hex_to_color_arr("#ff1600"));
+        assert_eq!(cursor.colors[1], colors::hex_to_color_arr("#2a3340"));
+        assert_eq!(
+            cursor.cursor_color,
+            Some(colors::hex_to_color_arr("#ff1600"))
+        );
+    }
+
+    #[test]
     fn test_yazelix_split_cursor_invalid_config_errors() {
         let file_name = tmp_dir()
             .join("test-rio-yazelix-invalid-config")

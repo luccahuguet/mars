@@ -39,6 +39,11 @@ Mars adopts (carefully) agent-driven development with plenty of testing.
 - The package metadata advertises `MARS_APPEARANCE`, `MARS_EMOJI_FONT`,
   `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the runtime environment
   contract consumed by Yazelix
+- Mars config accepts `[yazelix.cursor] preset = "reef"` using the Yazelix
+  cursor registry names `blaze`, `snow`, `ice`, `midnight`, `cosmic`, `ocean`,
+  `forest`, `sunset`, `eclipse`, `dusk`, `orchid`, `reef`, and `magma`; package
+  metadata exposes the same list as `supported_cursor_presets` with
+  `default_cursor_preset = "reef"`
 - On Linux, the Nix wrapper provides a package-owned default Vulkan ICD path
   when `VK_ICD_FILENAMES` is unset, while preserving explicit user overrides
 - Rio package outputs remain exposed as `.#rio`, `.#rio-msrv`, `.#rio-stable`,

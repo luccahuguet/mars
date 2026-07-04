@@ -16,11 +16,7 @@ visual = true
 trail-cursor = true
 
 [yazelix.cursor]
-family = "split"
-divider = "vertical"
-transition = "hard"
-colors = ["#00e6ff", "#00ff66"]
-cursor_color = "#00e6ff"
+preset = "reef"
 
 [window]
 width = 960
