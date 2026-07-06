@@ -58,7 +58,6 @@
           notoEmojiFont = pkgs.noto-fonts-color-emoji;
           notoFonts = pkgs.noto-fonts;
           rioPackage = rioPackages.rio;
-          serenityOsEmojiFont = pkgs.serenityos-emoji-font;
           symbolsNerdFont = pkgs.nerd-fonts.symbols-only;
           twitterEmojiFont = pkgs.twitter-color-emoji;
         };

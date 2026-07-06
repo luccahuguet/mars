@@ -34,8 +34,7 @@ Mars adopts (carefully) agent-driven development with plenty of testing.
   at `share/mars/package-metadata.json`
 - The package includes generated Mars config roots for Yazelix:
   `share/mars`, `share/mars/baseline`, `share/mars/profiles/shaders`,
-  `share/mars/emoji/twitter`, and, where supported by nixpkgs,
-  `share/mars/emoji/serenityos`
+  and `share/mars/emoji/twitter`
 - The package metadata advertises `MARS_APPEARANCE`, `MARS_EMOJI_FONT`,
   `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the runtime environment
   contract consumed by Yazelix
@@ -117,7 +116,7 @@ Package metadata exposes the current runtime environment contract to Yazelix:
 | --- | --- |
 | `MARS_PROFILE` | Selects the full, baseline, or shaders profile config root. |
 | `MARS_APPEARANCE` | Overrides `[mars.appearance] preset` with the dark, light, or auto palette mode. |
-| `MARS_EMOJI_FONT` | Selects the Noto, Twitter/Twemoji, or SerenityOS emoji config root. |
+| `MARS_EMOJI_FONT` | Selects the Noto or Twitter/Twemoji emoji config root. |
 | `MARS_EMOJI_FONT_SOURCE` | Carries the Yazelix-owned emoji source marker paired with `MARS_EMOJI_FONT`. |
 
 Mars config roots are designed for generated Yazelix runtime state. User-facing
