@@ -32,13 +32,15 @@ use crate::config::yazelix::Yazelix;
 use colors::Colors;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{default::Default, fs::File};
 use sugarloaf::font::fonts::SugarloafFonts;
 use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme};
+use toml::Value;
 use tracing::warn;
 
 const CONFIG_HOME_ENV: &str = "MARS_CONFIG_HOME";
+const BASE_CONFIG_HOME_ENV: &str = "MARS_BASE_CONFIG_HOME";
 const CONFIG_DIR_NAME: &str = "mars";
 const APPEARANCE_ENV: &str = "MARS_APPEARANCE";
 
@@ -150,7 +152,7 @@ pub struct Config {
         rename = "ignore-selection-foreground-color"
     )]
     pub ignore_selection_fg_color: bool,
-    #[serde(default = "default_bool_true", rename = "confirm-before-quit")]
+    #[serde(default = "bool::default", rename = "confirm-before-quit")]
     pub confirm_before_quit: bool,
     #[serde(default = "bool::default", rename = "copy-on-select")]
     pub copy_on_select: bool,
@@ -233,6 +235,12 @@ pub fn config_dir_path() -> PathBuf {
 #[inline]
 pub fn config_file_path() -> PathBuf {
     config_dir_path().join("config.toml")
+}
+
+fn base_config_dir_path() -> Option<PathBuf> {
+    std::env::var_os(BASE_CONFIG_HOME_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 #[inline]
@@ -382,120 +390,103 @@ impl Config {
     }
 
     pub fn load() -> Self {
-        let config_path = config_dir_path();
-        let path = config_file_path();
-        if path.exists() {
-            let content = std::fs::read_to_string(path).unwrap();
-            match toml::from_str::<Config>(&content) {
-                Ok(mut decoded) => {
-                    let theme = &decoded.theme;
-                    if theme.is_empty() {
-                        decoded.apply_mars_appearance();
-                        return decoded;
-                    }
-
-                    let path = config_path
-                        .join("themes")
-                        .join(theme)
-                        .with_extension("toml");
-                    if let Ok(loaded_theme) = Config::load_theme(&path) {
-                        decoded.colors = loaded_theme.colors;
-                    } else {
-                        warn!("failed to load theme: {}", theme);
-                    }
-
-                    decoded.apply_mars_appearance();
-                    decoded
-                }
-                Err(err_message) => {
-                    warn!("failure to parse config file, falling back to default...\n{err_message:?}");
-                    Config::default()
-                }
+        match Self::try_load() {
+            Ok(config) => config,
+            Err(error) => {
+                warn!("failure to load config, falling back to default: {error:?}");
+                Config::default()
             }
-        } else {
-            Config::default()
         }
     }
 
     pub fn try_load() -> Result<Self, ConfigError> {
-        let path = config_file_path();
-        if path.exists() {
-            match std::fs::read_to_string(path) {
-                Ok(content) => match toml::from_str::<Config>(&content) {
-                    Ok(mut decoded) => {
-                        let theme = &decoded.theme;
-                        let theme_path = config_dir_path().join("themes");
-                        if !theme.is_empty() {
-                            let path = theme_path.join(theme).with_extension("toml");
-                            match Config::load_theme(&path) {
-                                Ok(loaded_theme) => {
-                                    decoded.colors = loaded_theme.colors;
-                                }
-                                Err(err_message) => {
-                                    return Err(ConfigError::ErrLoadingTheme(
-                                        err_message,
-                                    ));
-                                }
-                            }
-                        }
+        Self::try_load_from_dirs(&config_dir_path(), base_config_dir_path().as_deref())
+    }
 
-                        if let Some(adaptive_theme) = &decoded.adaptive_theme {
-                            let mut adaptive_colors = AdaptiveColors {
-                                dark: None,
-                                light: None,
-                            };
+    fn try_load_from_dirs(
+        config_dir: &Path,
+        base_config_dir: Option<&Path>,
+    ) -> Result<Self, ConfigError> {
+        let user_path = config_dir.join("config.toml");
+        let mut merged = match base_config_dir {
+            Some(base_dir) => Self::read_config_value(&base_dir.join("config.toml"))?,
+            None if user_path.is_file() => Self::read_config_value(&user_path)?,
+            None => return Err(ConfigError::PathNotFound),
+        };
 
-                            let light_theme = &adaptive_theme.light;
-                            let path =
-                                theme_path.join(light_theme).with_extension("toml");
-                            match Config::load_theme(&path) {
-                                Ok(light_loaded_theme) => {
-                                    adaptive_colors.light =
-                                        Some(light_loaded_theme.colors)
-                                }
-                                Err(err_message) => {
-                                    warn!("failed to load light theme: {}", light_theme);
-                                    return Err(ConfigError::ErrLoadingTheme(
-                                        err_message,
-                                    ));
-                                }
-                            }
-
-                            let dark_theme = &adaptive_theme.dark;
-                            let path = theme_path.join(dark_theme).with_extension("toml");
-                            match Config::load_theme(&path) {
-                                Ok(dark_loaded_theme) => {
-                                    adaptive_colors.dark = Some(dark_loaded_theme.colors)
-                                }
-                                Err(err_message) => {
-                                    warn!("failed to load dark theme: {}", dark_theme);
-                                    return Err(ConfigError::ErrLoadingTheme(
-                                        err_message,
-                                    ));
-                                }
-                            }
-
-                            if adaptive_colors.light.is_some()
-                                && adaptive_colors.dark.is_some()
-                            {
-                                decoded.adaptive_colors = Some(adaptive_colors);
-                            }
-                        }
-
-                        decoded.apply_mars_appearance();
-                        Ok(decoded)
-                    }
-                    Err(err_message) => {
-                        Err(ConfigError::ErrLoadingConfig(err_message.to_string()))
-                    }
-                },
-                Err(err_message) => {
-                    Err(ConfigError::ErrLoadingConfig(err_message.to_string()))
-                }
-            }
-        } else {
-            Err(ConfigError::PathNotFound)
+        if base_config_dir.is_some() && user_path.is_file() {
+            let user = Self::read_config_value(&user_path)?;
+            merge_toml(&mut merged, user);
         }
+
+        let mut decoded: Config = merged.try_into().map_err(|error| {
+            ConfigError::ErrLoadingConfig(format!("merged Mars config: {error}"))
+        })?;
+        let mut theme_dirs = vec![config_dir.join("themes")];
+        if let Some(base_dir) = base_config_dir {
+            let base_themes = base_dir.join("themes");
+            if base_themes != theme_dirs[0] {
+                theme_dirs.push(base_themes);
+            }
+        }
+        decoded.load_configured_themes(&theme_dirs)?;
+        decoded.apply_mars_appearance();
+        Ok(decoded)
+    }
+
+    fn read_config_value(path: &Path) -> Result<Value, ConfigError> {
+        let content = std::fs::read_to_string(path).map_err(|error| {
+            ConfigError::ErrLoadingConfig(format!("{}: {error}", path.display()))
+        })?;
+        toml::from_str(&content).map_err(|error| {
+            ConfigError::ErrLoadingConfig(format!("{}: {error}", path.display()))
+        })
+    }
+
+    fn load_configured_themes(
+        &mut self,
+        theme_dirs: &[PathBuf],
+    ) -> Result<(), ConfigError> {
+        if !self.theme.is_empty() {
+            self.colors = Self::load_named_theme(&self.theme, theme_dirs)?.colors;
+        }
+
+        if let Some(adaptive_theme) = &self.adaptive_theme {
+            self.adaptive_colors = Some(AdaptiveColors {
+                dark: Some(
+                    Self::load_named_theme(&adaptive_theme.dark, theme_dirs)?.colors,
+                ),
+                light: Some(
+                    Self::load_named_theme(&adaptive_theme.light, theme_dirs)?.colors,
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn load_named_theme(
+        name: &str,
+        theme_dirs: &[PathBuf],
+    ) -> Result<Theme, ConfigError> {
+        let paths: Vec<PathBuf> = theme_dirs
+            .iter()
+            .map(|dir| dir.join(name).with_extension("toml"))
+            .collect();
+        for path in &paths {
+            if path.is_file() {
+                return Self::load_theme(path).map_err(|error| {
+                    ConfigError::ErrLoadingTheme(format!("{}: {error}", path.display()))
+                });
+            }
+        }
+        Err(ConfigError::ErrLoadingTheme(format!(
+            "theme {name:?} was not found in {}",
+            paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )))
     }
 
     pub fn overwrite_based_on_platform(&mut self) {
@@ -709,7 +700,7 @@ impl Default for Config {
             window: Window::default(),
             working_dir: default_working_dir(),
             ignore_selection_fg_color: false,
-            confirm_before_quit: true,
+            confirm_before_quit: false,
             copy_on_select: false,
             hide_cursor_when_typing: false,
             draw_bold_text_with_light_colors: false,
@@ -724,6 +715,22 @@ impl Default for Config {
     }
 }
 
+fn merge_toml(base: &mut Value, overlay: Value) {
+    match (base, overlay) {
+        (Value::Table(base), Value::Table(overlay)) => {
+            for (key, value) in overlay {
+                match base.get_mut(&key) {
+                    Some(base_value) => merge_toml(base_value, value),
+                    None => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base, overlay) => *base = overlay,
+    }
+}
+
 impl Default for CursorConfig {
     fn default() -> Self {
         Self {
@@ -734,6 +741,7 @@ impl Default for CursorConfig {
     }
 }
 
+// Test lane: default
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -778,6 +786,104 @@ mod tests {
         let file_name = tmp_dir().join(theme).with_extension("toml");
         let mut file = std::fs::File::create(file_name).unwrap();
         writeln!(file, "{toml_str}").unwrap();
+    }
+
+    fn isolated_config_dirs(name: &str) -> (PathBuf, PathBuf) {
+        let root = tmp_dir().join(format!("mars-config-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let user = root.join("user");
+        let base = root.join("base");
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::create_dir_all(&base).unwrap();
+        (user, base)
+    }
+
+    fn write_config(dir: &Path, content: &str) {
+        std::fs::write(dir.join("config.toml"), content).unwrap();
+    }
+
+    fn write_theme(dir: &Path, name: &str, background: &str) {
+        let themes = dir.join("themes");
+        std::fs::create_dir_all(&themes).unwrap();
+        std::fs::write(
+            themes.join(name).with_extension("toml"),
+            format!("[colors]\nbackground = {background:?}\n"),
+        )
+        .unwrap();
+    }
+
+    // Defends: a sparse user table changes only its leaf while package-owned defaults remain live.
+    #[test]
+    fn sparse_user_config_recursively_overlays_packaged_base() {
+        let (user, base) = isolated_config_dirs("sparse-overlay");
+        write_config(
+            &base,
+            r#"
+confirm-before-quit = false
+
+[window]
+width = 960
+opacity = 0.78
+decorations = "Disabled"
+"#,
+        );
+        write_config(&user, "[window]\nopacity = 0.85\n");
+
+        let config = Config::try_load_from_dirs(&user, Some(&base)).unwrap();
+
+        assert_eq!(config.window.width, 960);
+        assert_eq!(config.window.opacity, 0.85);
+        assert_eq!(config.window.decorations, window::Decorations::Disabled);
+        assert!(!config.confirm_before_quit);
+    }
+
+    // Defends: user themes take precedence while inherited package theme names still find package assets.
+    #[test]
+    fn themes_resolve_user_first_then_packaged_base() {
+        let (user, base) = isolated_config_dirs("theme-order");
+        write_config(
+            &base,
+            r#"
+theme = "shared"
+
+[adaptive-theme]
+dark = "base-dark"
+light = "base-light"
+"#,
+        );
+        write_config(&user, "[window]\nopacity = 0.85\n");
+        write_theme(&base, "shared", "#111111");
+        write_theme(&base, "base-dark", "#222222");
+        write_theme(&base, "base-light", "#eeeeee");
+        write_theme(&user, "shared", "#333333");
+
+        let config = Config::try_load_from_dirs(&user, Some(&base)).unwrap();
+        let adaptive = config.adaptive_colors.unwrap();
+
+        assert_eq!(config.colors.background.0, hex_to_color_arr("#333333"));
+        assert_eq!(
+            adaptive.dark.unwrap().background.0,
+            hex_to_color_arr("#222222")
+        );
+        assert_eq!(
+            adaptive.light.unwrap().background.0,
+            hex_to_color_arr("#eeeeee")
+        );
+    }
+
+    // Regression: theme errors identify every searched path instead of reporting only "filepath does not exist".
+    #[test]
+    fn missing_theme_error_identifies_user_and_base_paths() {
+        let (user, base) = isolated_config_dirs("missing-theme");
+        write_config(&base, "theme = \"missing\"\n");
+
+        let error = Config::try_load_from_dirs(&user, Some(&base)).unwrap_err();
+        let ConfigError::ErrLoadingTheme(message) = error else {
+            panic!("expected theme error");
+        };
+
+        assert!(message.contains(&user.join("themes/missing.toml").display().to_string()));
+        assert!(message.contains(&base.join("themes/missing.toml").display().to_string()));
     }
 
     #[test]

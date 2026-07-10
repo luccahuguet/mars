@@ -114,14 +114,15 @@ Package metadata exposes the current runtime environment contract to Yazelix:
 
 | Variable | Purpose |
 | --- | --- |
+| `MARS_BASE_CONFIG_HOME` | Supplies the immutable base config and theme assets; the packaged wrapper defaults it to `share/mars`. |
 | `MARS_PROFILE` | Selects the full, baseline, or shaders profile config root. |
 | `MARS_APPEARANCE` | Overrides `[mars.appearance] preset` with the dark, light, or auto palette mode. |
 | `MARS_EMOJI_FONT` | Selects the Noto or Twitter/Twemoji emoji config root. |
 | `MARS_EMOJI_FONT_SOURCE` | Carries the Yazelix-owned emoji source marker paired with `MARS_EMOJI_FONT`. |
 
-Mars config roots are designed for generated Yazelix runtime state. User-facing
-Yazelix configuration belongs in Yazelix; terminal implementation details stay
-in Mars.
+Packaged Mars config roots are immutable bases with their theme and font assets.
+`MARS_CONFIG_HOME` may point at a sparse user override; Mars merges it over the
+base without copying package paths into mutable state.
 
 For local Yazelix dogfooding, use the private launcher:
 
@@ -134,7 +135,7 @@ Local dogfooding helpers also accept focused overrides:
 | Variable | Purpose |
 | --- | --- |
 | `MARS_BINARY` | Runs a specific Mars binary instead of `mars`. |
-| `MARS_CONFIG_HOME` | Uses a specific Mars config directory for the terminal process. |
+| `MARS_CONFIG_HOME` | Uses a specific sparse user config directory over the package base. |
 | `MARS_PRIVATE_CONFIG_HOME` | Uses a private launcher config root when `MARS_CONFIG_HOME` is unset. |
 
 ## Development

@@ -69,6 +69,7 @@
     default_cursor_preset = "reef";
     wrapper_env = {
       appearance = "MARS_APPEARANCE";
+      base_config_home = "MARS_BASE_CONFIG_HOME";
       emoji_font = "MARS_EMOJI_FONT";
       emoji_font_source = "MARS_EMOJI_FONT_SOURCE";
       profile = "MARS_PROFILE";
@@ -210,6 +211,7 @@ in
       ''}
       wrapper_args=(
         --add-flags "--app-id mars"
+        --set-default MARS_BASE_CONFIG_HOME "$out/share/mars"
       )
       ${lib.optionalString stdenv.isLinux ''
         wrapper_args+=(--run 'if [ -z "''${VK_ICD_FILENAMES:-}" ]; then export VK_ICD_FILENAMES='"$mesa_vulkan_icd_files"'; fi')
