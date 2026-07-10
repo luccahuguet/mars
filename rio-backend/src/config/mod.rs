@@ -882,8 +882,20 @@ light = "base-light"
             panic!("expected theme error");
         };
 
-        assert!(message.contains(&user.join("themes/missing.toml").display().to_string()));
-        assert!(message.contains(&base.join("themes/missing.toml").display().to_string()));
+        assert!(message.contains(
+            &user
+                .join("themes")
+                .join("missing.toml")
+                .display()
+                .to_string()
+        ));
+        assert!(message.contains(
+            &base
+                .join("themes")
+                .join("missing.toml")
+                .display()
+                .to_string()
+        ));
     }
 
     #[test]
