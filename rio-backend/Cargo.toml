@@ -15,7 +15,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 tracing = { workspace = true }
-yazelix_cursors = { git = "https://github.com/luccahuguet/yazelix-cursors", rev = "0b832de2f8d954164e18a03ea0be0a84c3a5ebdc" }
+yazelix_cursors = { git = "https://github.com/luccahuguet/yazelix-cursors", rev = "e4523a7eadce92146416295bb179f09058a8554e" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 toml = "0.9.2"

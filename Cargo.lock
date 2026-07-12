@@ -6355,7 +6355,7 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 [[package]]
 name = "yazelix_cursors"
 version = "0.1.0"
-source = "git+https://github.com/luccahuguet/yazelix-cursors?rev=0b832de2f8d954164e18a03ea0be0a84c3a5ebdc#0b832de2f8d954164e18a03ea0be0a84c3a5ebdc"
+source = "git+https://github.com/luccahuguet/yazelix-cursors?rev=e4523a7eadce92146416295bb179f09058a8554e#e4523a7eadce92146416295bb179f09058a8554e"
 dependencies = [
  "jsonc-parser",
  "ratconfig",

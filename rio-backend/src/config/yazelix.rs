@@ -116,7 +116,6 @@ trail_effect = "tail"
 mode_effect = "none"
 glow = "none"
 duration = 1.0
-kitty_enable_cursor = true
 
 [[cursor]]
 name = "custom_split"
