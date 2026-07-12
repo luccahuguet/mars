@@ -92,8 +92,11 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(config: &Config) -> Renderer {
-        let colors = List::from(&config.colors);
-        let named_colors = config.colors;
+        let mut named_colors = config.colors;
+        if let Some(cursor) = config.yazelix.cursor {
+            named_colors.cursor = cursor.cursor_color;
+        }
+        let colors = List::from(&named_colors);
 
         let mut dynamic_background =
             (named_colors.background.0, named_colors.background.1, false);

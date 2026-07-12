@@ -17,9 +17,6 @@ trail-cursor = true
 [mars.appearance]
 preset = "dark"
 
-[yazelix.cursor]
-preset = "reef"
-
 [window]
 width = 960
 height = 620

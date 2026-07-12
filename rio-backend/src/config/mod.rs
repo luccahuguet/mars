@@ -181,10 +181,7 @@ pub struct Config {
     pub effects: effects::Effects,
     #[serde(default = "Mars::default", skip_serializing_if = "Mars::is_empty")]
     pub mars: Mars,
-    #[serde(
-        default = "Yazelix::default",
-        skip_serializing_if = "Yazelix::is_empty"
-    )]
+    #[serde(skip)]
     pub yazelix: Yazelix,
 }
 
@@ -431,6 +428,7 @@ impl Config {
         }
         decoded.load_configured_themes(&theme_dirs)?;
         decoded.apply_mars_appearance();
+        decoded.apply_yazelix_cursor()?;
         Ok(decoded)
     }
 
@@ -668,6 +666,25 @@ impl Config {
                 self.colors = colors;
             }
         }
+    }
+
+    fn apply_yazelix_cursor(&mut self) -> Result<(), ConfigError> {
+        let Some(path) = std::env::var_os(yazelix::CURSOR_CONFIG_ENV).map(PathBuf::from)
+        else {
+            return Ok(());
+        };
+        let appearance = match self.force_theme {
+            Some(AppearanceTheme::Dark) => "dark",
+            Some(AppearanceTheme::Light) => "light",
+            None => "auto",
+        };
+        let state =
+            yazelix::load_cursor_state_once(&path, appearance).map_err(|error| {
+                ConfigError::ErrLoadingConfig(format!("{}: {error}", path.display()))
+            })?;
+        self.yazelix.cursor = state.cursor;
+        self.effects.trail_cursor = state.trail_cursor;
+        Ok(())
     }
 }
 
@@ -1004,52 +1021,6 @@ light = "base-light"
     }
 
     #[test]
-    fn test_yazelix_split_cursor_config() {
-        let result = create_temporary_config(
-            "yazelix-split-cursor",
-            r##"
-            [yazelix.cursor]
-            family = "split"
-            divider = "horizontal"
-            transition = "hard"
-            colors = ["#ff1600", "#20242f"]
-            cursor_color = "#ff1600"
-        "##,
-        );
-
-        let cursor = result.yazelix.cursor.unwrap();
-        assert_eq!(cursor.divider, yazelix::YazelixCursorDivider::Horizontal);
-        assert_eq!(cursor.transition, yazelix::YazelixCursorTransition::Hard);
-        assert_eq!(cursor.colors[0], colors::hex_to_color_arr("#ff1600"));
-        assert_eq!(cursor.colors[1], colors::hex_to_color_arr("#20242f"));
-        assert_eq!(
-            cursor.cursor_color,
-            Some(colors::hex_to_color_arr("#ff1600"))
-        );
-    }
-
-    #[test]
-    fn test_yazelix_cursor_preset_config() {
-        let result = create_temporary_config(
-            "yazelix-cursor-preset",
-            r##"
-            [yazelix.cursor]
-            preset = "magma"
-        "##,
-        );
-
-        let cursor = result.yazelix.cursor.unwrap();
-        assert_eq!(cursor.divider, yazelix::YazelixCursorDivider::Horizontal);
-        assert_eq!(cursor.transition, yazelix::YazelixCursorTransition::Soft);
-        assert_eq!(cursor.colors[0], colors::hex_to_color_arr("#ff1600"));
-        assert_eq!(cursor.colors[1], colors::hex_to_color_arr("#2a3340"));
-        assert_eq!(
-            cursor.cursor_color,
-            Some(colors::hex_to_color_arr("#ff1600"))
-        );
-    }
-
-    #[test]
     fn test_mars_appearance_preset_config() {
         let dark = create_temporary_config(
             "mars-appearance-dark",
@@ -1095,28 +1066,6 @@ light = "base-light"
 
         assert_eq!(result.force_theme, Some(AppearanceTheme::Light));
         assert_eq!(result.colors.background.0, hex_to_color_arr("#f5f3ef"));
-    }
-
-    #[test]
-    fn test_yazelix_split_cursor_invalid_config_errors() {
-        let file_name = tmp_dir()
-            .join("test-rio-yazelix-invalid-config")
-            .with_extension("toml");
-        let mut file = std::fs::File::create(&file_name).unwrap();
-        writeln!(
-            file,
-            r##"
-            [yazelix.cursor]
-            family = "split"
-            divider = "vertical"
-            transition = "hard"
-            colors = ["#00e6ff"]
-        "##
-        )
-        .unwrap();
-
-        let err = Config::load_from_path_without_fallback(&file_name).unwrap_err();
-        assert!(err.contains("split cursors require exactly two colors"));
     }
 
     #[test]

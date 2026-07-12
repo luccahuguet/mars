@@ -66,7 +66,13 @@ in
         ]
         ++ (map (x: ./. + "/${x}") cargoToml.workspace.members));
     };
-    cargoLock.lockFile = ./Cargo.lock;
+    cargoLock = {
+      lockFile = ./Cargo.lock;
+      outputHashes = {
+        "ratconfig-2.0.0" = "sha256-NXnn7WOBEa7uQl8rs52gpIhpEGTeanRL5+au9ltjQyE=";
+        "yazelix_cursors-0.1.0" = "sha256-bP2koOhBSw7oyn7rQ1LRkfrtHiSNjAOXa6yTdnL+OD0=";
+      };
+    };
 
     cargoBuildFlags = "-p rioterm";
 

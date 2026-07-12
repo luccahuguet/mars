@@ -36,15 +36,14 @@ Mars adopts (carefully) agent-driven development with plenty of testing.
   `share/mars`, `share/mars/baseline`, `share/mars/profiles/shaders`,
   and `share/mars/emoji/twitter`
 - The package metadata advertises `MARS_APPEARANCE`, `MARS_EMOJI_FONT`,
-  `MARS_EMOJI_FONT_SOURCE`, and `MARS_PROFILE` as the runtime environment
-  contract consumed by Yazelix
+  `MARS_EMOJI_FONT_SOURCE`, `MARS_PROFILE`, and `YAZELIX_CURSOR_CONFIG` as the
+  runtime environment contract consumed by Yazelix
 - Mars config accepts `[mars.appearance] preset = "dark"`, `"light"`, or
   `"auto"`; `MARS_APPEARANCE` overrides that config value for package consumers
-- Mars config accepts `[yazelix.cursor] preset = "reef"` using the Yazelix
-  cursor registry names `blaze`, `snow`, `ice`, `midnight`, `cosmic`, `ocean`,
-  `forest`, `sunset`, `eclipse`, `dusk`, `orchid`, `reef`, and `magma`; package
-  metadata exposes the same list as `supported_cursor_presets` with
-  `default_cursor_preset = "reef"`
+- When `YAZELIX_CURSOR_CONFIG` points to a Yazelix Cursors TOML file, Mars loads
+  it once and renders the resolved fixed, random, custom mono/split, or disabled
+  cursor using its native cursor and trail primitives. Without the variable,
+  standalone Mars keeps its normal cursor behavior
 - On Linux, the Nix wrapper provides a package-owned default Vulkan ICD path
   when `VK_ICD_FILENAMES` is unset, while preserving explicit user overrides
 - Rio package outputs remain exposed as `.#rio`, `.#rio-msrv`, `.#rio-stable`,
@@ -62,7 +61,7 @@ table below is the README-sized feature view.
 | Text and status glyphs | Mars uses Yazelix-tuned font defaults, Ghostty-style cell-baseline glyph placement, and constrained Nerd Font/status glyph sizing for balanced Yazelix bars. | [`ca72d7c581`](https://github.com/luccahuguet/mars/commit/ca72d7c581), [`f8e5fa60ee`](https://github.com/luccahuguet/mars/commit/f8e5fa60ee), [`b089bd1d97`](https://github.com/luccahuguet/mars/commit/b089bd1d97) |
 | Theme and palette defaults | Packaged Mars profiles keep Yazelix palette values consistent across adaptive theme files and `[colors]`, avoiding washed-out status and glider colors. | [`809d8bece0`](https://github.com/luccahuguet/mars/commit/809d8bece0) |
 | Quit confirmation | The quit confirmation overlay is a one-shot rounded modal with clear spacing and matching action buttons. | [`5820a9abf0`](https://github.com/luccahuguet/mars/commit/5820a9abf0), [`d44cf8e15e`](https://github.com/luccahuguet/mars/commit/d44cf8e15e), [`260a862d02`](https://github.com/luccahuguet/mars/commit/260a862d02) |
-| Split cursors | Mars accepts hard-validated `[yazelix.cursor]` split-color config and renders split block, hollow, beam, underline, and trail sprites without mono fallback for malformed split config. | [`b545e539ec`](https://github.com/luccahuguet/mars/commit/b545e539ec), [`6b108cba5a`](https://github.com/luccahuguet/mars/commit/6b108cba5a) |
+| Yazelix cursors | Mars consumes the pinned Yazelix Cursors TOML contract directly, resolves it once per process for the active appearance, and renders mono or split block, hollow, beam, underline, and trail sprites with native primitives. | [`b545e539ec`](https://github.com/luccahuguet/mars/commit/b545e539ec), [`6b108cba5a`](https://github.com/luccahuguet/mars/commit/6b108cba5a) |
 | Kitty graphics | Yazi previews that were fully broken render well through Kitty graphics; Mars derives omitted virtual-placement sizes and uses correct WGPU source-rect endpoint semantics for nonzero-origin slices. | [`f2d1ff45a8`](https://github.com/luccahuguet/mars/commit/f2d1ff45a8), [`011d648d83`](https://github.com/luccahuguet/mars/commit/011d648d83) |
 | Link handling | Non-macOS link hints use Ctrl-click, URL hit spans are clipped to useful targets, and edge punctuation remains clickable without opening punctuation. | [`c2a49e7421`](https://github.com/luccahuguet/mars/commit/c2a49e7421), [`1a9dc553ec`](https://github.com/luccahuguet/mars/commit/1a9dc553ec), [`8e43f00c1d`](https://github.com/luccahuguet/mars/commit/8e43f00c1d) |
 | Visual bell | `[bell].visual` draws a short full-window cue on BEL while keeping audio behavior independent. | [`1a80115ef9`](https://github.com/luccahuguet/mars/commit/1a80115ef9) |
@@ -119,6 +118,7 @@ Package metadata exposes the current runtime environment contract to Yazelix:
 | `MARS_APPEARANCE` | Overrides `[mars.appearance] preset` with the dark, light, or auto palette mode. |
 | `MARS_EMOJI_FONT` | Selects the Noto or Twitter/Twemoji emoji config root. |
 | `MARS_EMOJI_FONT_SOURCE` | Carries the Yazelix-owned emoji source marker paired with `MARS_EMOJI_FONT`. |
+| `YAZELIX_CURSOR_CONFIG` | Supplies an explicit Yazelix Cursors TOML file; invalid files use Mars's normal startup diagnostic path. |
 
 Packaged Mars config roots are immutable bases with their theme and font assets.
 `MARS_CONFIG_HOME` may point at a sparse user override; Mars merges it over the

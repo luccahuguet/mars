@@ -20,21 +20,6 @@
     baseline = "share/mars/baseline";
     shaders = "share/mars/profiles/shaders";
   };
-  cursorPresetNames = [
-    "blaze"
-    "snow"
-    "ice"
-    "midnight"
-    "cosmic"
-    "ocean"
-    "forest"
-    "sunset"
-    "eclipse"
-    "dusk"
-    "orchid"
-    "reef"
-    "magma"
-  ];
   emojiConfigRoots = {
     noto = configRoots;
     twitter = {
@@ -65,11 +50,10 @@
       "auto"
     ];
     default_appearance_mode = "dark";
-    supported_cursor_presets = cursorPresetNames;
-    default_cursor_preset = "reef";
     wrapper_env = {
       appearance = "MARS_APPEARANCE";
       base_config_home = "MARS_BASE_CONFIG_HOME";
+      cursor_config = "YAZELIX_CURSOR_CONFIG";
       emoji_font = "MARS_EMOJI_FONT";
       emoji_font_source = "MARS_EMOJI_FONT_SOURCE";
       profile = "MARS_PROFILE";
@@ -140,9 +124,6 @@
 
     [mars.appearance]
     preset = "dark"
-
-    [yazelix.cursor]
-    preset = "reef"
 
     [window]
     width = 960

@@ -2305,6 +2305,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonc-parser"
+version = "0.32.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "840785e1a8b4fdb27be18440a35a81af64820dc185c3973ff8b012d4c6282512"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3761,6 +3770,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratconfig"
+version = "2.0.0"
+source = "git+https://github.com/luccahuguet/ratconfig?rev=110e749a5fb10e146611427564bd6afda0750827#110e749a5fb10e146611427564bd6afda0750827"
+dependencies = [
+ "jsonc-parser",
+ "serde_json",
+ "toml 1.1.2+spec-1.1.0",
+ "toml_edit",
+]
+
+[[package]]
 name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3955,6 +3975,7 @@ dependencies = [
  "url",
  "wgpu",
  "windows-sys 0.60.2",
+ "yazelix_cursors",
 ]
 
 [[package]]
@@ -4907,6 +4928,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81f3d15e84cbcd896376e6730314d59fb5a87f31e4b038454184435cd57defee"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 1.0.3",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "0.7.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4933,6 +4969,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.3",
 ]
 
@@ -6314,6 +6351,19 @@ name = "yansi"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
+
+[[package]]
+name = "yazelix_cursors"
+version = "0.1.0"
+source = "git+https://github.com/luccahuguet/yazelix-cursors?rev=0b832de2f8d954164e18a03ea0be0a84c3a5ebdc#0b832de2f8d954164e18a03ea0be0a84c3a5ebdc"
+dependencies = [
+ "jsonc-parser",
+ "ratconfig",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml 1.1.2+spec-1.1.0",
+]
 
 [[package]]
 name = "yazi"
