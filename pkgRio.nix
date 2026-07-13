@@ -75,6 +75,8 @@ in
     };
 
     cargoBuildFlags = "-p rioterm";
+    # Cargo CI owns the workspace test suite; this derivation owns the optimized package build.
+    doCheck = false;
 
     buildInputs = rlinkLibs ++ (lib.optionals stdenv.isDarwin [darwin.libutil]);
     runtimeDependencies = rlinkLibs;
@@ -118,7 +120,6 @@ in
 
     buildNoDefaultFeatures = true;
     buildFeatures = (lib.optionals withX11 ["x11"]) ++ (lib.optionals withWayland ["wayland"]);
-    checkType = "debug";
     meta = {
       description = rioToml.package.description;
       longDescription = rioToml.package.extended-description;

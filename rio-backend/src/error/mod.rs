@@ -29,6 +29,10 @@ impl From<ConfigError> for RioError {
                 report: RioErrorType::InvalidConfigurationFormat(message),
                 level: RioErrorLevel::Warning,
             },
+            ConfigError::ErrLoadingCursor(message) => RioError {
+                report: RioErrorType::InvalidCursorConfiguration(message),
+                level: RioErrorLevel::Warning,
+            },
             ConfigError::ErrLoadingTheme(message) => RioError {
                 report: RioErrorType::InvalidConfigurationTheme(message),
                 level: RioErrorLevel::Warning,
@@ -54,6 +58,7 @@ pub enum RioErrorType {
     ConfigurationNotFound,
     // configuration file have an invalid format
     InvalidConfigurationFormat(String),
+    InvalidCursorConfiguration(String),
     // configuration invalid theme
     InvalidConfigurationTheme(String),
 
@@ -87,6 +92,9 @@ impl std::fmt::Display for RioErrorType {
             RioErrorType::IgnoredReport => write!(f, ""),
             RioErrorType::InvalidConfigurationFormat(message) => {
                 write!(f, "Found an issue loading the configuration file:\n\n{message}\n\nRio will proceed with the default configuration")
+            }
+            RioErrorType::InvalidCursorConfiguration(message) => {
+                write!(f, "Found an issue loading the Yazelix cursor configuration:\n\n{message}\n\nMars kept the loaded terminal configuration and ignored the invalid cursor projection")
             }
             RioErrorType::InvalidConfigurationTheme(message) => {
                 write!(f, "Found an issue in the configured theme:\n\n{message}")

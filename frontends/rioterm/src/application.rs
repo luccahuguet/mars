@@ -40,7 +40,7 @@ pub struct Application<'a> {
 
 impl Application<'_> {
     pub fn new<'app>(
-        config: rio_backend::config::Config,
+        mut config: rio_backend::config::Config,
         config_error: Option<rio_backend::config::ConfigError>,
         event_loop: &EventLoop<EventPayload>,
         app_id: Option<String>,
@@ -50,6 +50,7 @@ impl Application<'_> {
         let clipboard =
             unsafe { Clipboard::new(event_loop.display_handle().unwrap().as_raw()) };
 
+        let config_error = config_error.or_else(|| config.take_load_diagnostic());
         let mut router = Router::new(config.fonts.to_owned(), clipboard);
         if let Some(error) = config_error {
             router.propagate_error_to_next_route(error.into());
@@ -382,7 +383,10 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             RioEventType::Rio(RioEvent::UpdateConfig) => {
                 let (config, config_error) = match rio_backend::config::Config::try_load()
                 {
-                    Ok(config) => (config, None),
+                    Ok(mut config) => {
+                        let diagnostic = config.take_load_diagnostic();
+                        (config, diagnostic)
+                    }
                     Err(error) => (rio_backend::config::Config::default(), Some(error)),
                 };
 

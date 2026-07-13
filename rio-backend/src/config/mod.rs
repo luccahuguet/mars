@@ -44,9 +44,10 @@ const BASE_CONFIG_HOME_ENV: &str = "MARS_BASE_CONFIG_HOME";
 const CONFIG_DIR_NAME: &str = "mars";
 const APPEARANCE_ENV: &str = "MARS_APPEARANCE";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConfigError {
     ErrLoadingConfig(String),
+    ErrLoadingCursor(String),
     ErrLoadingTheme(String),
     PathNotFound,
 }
@@ -183,6 +184,9 @@ pub struct Config {
     pub mars: Mars,
     #[serde(skip)]
     pub yazelix: Yazelix,
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub load_diagnostic: Option<ConfigError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -428,7 +432,7 @@ impl Config {
         }
         decoded.load_configured_themes(&theme_dirs)?;
         decoded.apply_mars_appearance();
-        decoded.apply_yazelix_cursor()?;
+        decoded.apply_yazelix_cursor();
         Ok(decoded)
     }
 
@@ -668,23 +672,43 @@ impl Config {
         }
     }
 
-    fn apply_yazelix_cursor(&mut self) -> Result<(), ConfigError> {
+    pub fn take_load_diagnostic(&mut self) -> Option<ConfigError> {
+        self.load_diagnostic.take()
+    }
+
+    fn apply_yazelix_cursor(&mut self) {
         let Some(path) = std::env::var_os(yazelix::CURSOR_CONFIG_ENV).map(PathBuf::from)
         else {
-            return Ok(());
+            return;
         };
         let appearance = match self.force_theme {
             Some(AppearanceTheme::Dark) => "dark",
             Some(AppearanceTheme::Light) => "light",
             None => "auto",
         };
-        let state =
-            yazelix::load_cursor_state_once(&path, appearance).map_err(|error| {
-                ConfigError::ErrLoadingConfig(format!("{}: {error}", path.display()))
-            })?;
-        self.yazelix.cursor = state.cursor;
-        self.effects.trail_cursor = state.trail_cursor;
-        Ok(())
+        self.apply_yazelix_cursor_result(
+            &path,
+            yazelix::load_cursor_state_once(&path, appearance),
+        );
+    }
+
+    fn apply_yazelix_cursor_result(
+        &mut self,
+        path: &Path,
+        state: Result<yazelix::YazelixCursorState, String>,
+    ) {
+        match state {
+            Ok(state) => {
+                self.yazelix.cursor = state.cursor;
+                self.effects.trail_cursor = state.trail_cursor;
+            }
+            Err(error) => {
+                self.load_diagnostic = Some(ConfigError::ErrLoadingCursor(format!(
+                    "{}: {error}",
+                    path.display()
+                )));
+            }
+        }
     }
 }
 
@@ -728,6 +752,7 @@ impl Default for Config {
             effects: effects::Effects::default(),
             mars: Mars::default(),
             yazelix: Yazelix::default(),
+            load_diagnostic: None,
         }
     }
 }
@@ -852,6 +877,44 @@ decorations = "Disabled"
         assert_eq!(config.window.opacity, 0.85);
         assert_eq!(config.window.decorations, window::Decorations::Disabled);
         assert!(!config.confirm_before_quit);
+    }
+
+    // Regression: a cursor-only parse error cannot discard valid packaged and user Mars terminal settings.
+    #[test]
+    fn cursor_diagnostic_preserves_merged_terminal_config() {
+        let (user, base) = isolated_config_dirs("cursor-diagnostic");
+        write_config(
+            &base,
+            r#"
+[window]
+opacity = 0.78
+decorations = "Disabled"
+[effects]
+trail-cursor = true
+"#,
+        );
+        write_config(&user, "[window]\nopacity = 0.85\n");
+        let mut config = Config::try_load_from_dirs(&user, Some(&base)).unwrap();
+        let cursor_path = user.join("cursors.toml");
+
+        config.apply_yazelix_cursor_result(
+            &cursor_path,
+            Err("invalid cursor field".into()),
+        );
+
+        assert_eq!(config.window.opacity, 0.85);
+        assert_eq!(config.window.decorations, window::Decorations::Disabled);
+        assert_eq!(config.yazelix, Yazelix::default());
+        assert!(config.effects.trail_cursor);
+        let diagnostic = config.take_load_diagnostic().unwrap();
+        assert!(matches!(
+            &diagnostic,
+            ConfigError::ErrLoadingCursor(message)
+                if message.contains("cursors.toml") && message.contains("invalid cursor field")
+        ));
+        let rendered = crate::error::RioError::from(diagnostic).report.to_string();
+        assert!(rendered.contains("Mars kept the loaded terminal configuration"));
+        assert!(rendered.contains("ignored the invalid cursor projection"));
     }
 
     // Defends: user themes take precedence while inherited package theme names still find package assets.
