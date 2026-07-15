@@ -28,7 +28,7 @@ use crate::hints::{
     HintState,
 };
 use crate::layout::ContextDimension;
-use crate::mars::input::{LinkRelease, MarsInputState};
+use crate::mars::input::{LinkRelease, MarsInputState, ScreenKeyOwner};
 use crate::mouse::{calculate_mouse_position, Mouse};
 use crate::renderer::island::{self, TabStripLayout, ISLAND_HEIGHT};
 use crate::renderer::{utils::padding_top_from_config, Renderer};
@@ -441,6 +441,16 @@ impl Screen<'_> {
     }
 
     #[inline]
+    pub fn track_key_event_modifiers(&mut self, key: &rio_window::event::KeyEvent) {
+        self.mars_input.track_key_event(self.modifiers.state(), key);
+    }
+
+    #[inline]
+    pub fn capture_route_key_event(&mut self, key: &rio_window::event::KeyEvent) -> bool {
+        self.mars_input.route_owns_key_event(key)
+    }
+
+    #[inline]
     pub fn search_active(&self) -> bool {
         self.search_state.history_index.is_some()
     }
@@ -724,54 +734,104 @@ impl Screen<'_> {
         mode
     }
 
+    fn terminal_key_bytes(
+        key: &rio_window::event::KeyEvent,
+        mode: Mode,
+        mods: ModifiersState,
+    ) -> Vec<u8> {
+        if key.state == ElementState::Released
+            && (!mode.contains(Mode::REPORT_EVENT_TYPES)
+                || matches!(
+                    key.logical_key,
+                    Key::Named(NamedKey::Enter | NamedKey::Tab | NamedKey::Backspace)
+                ) && !mode.contains(Mode::REPORT_ALL_KEYS_AS_ESC))
+        {
+            return Vec::new();
+        }
+
+        let text = key.text_with_all_modifiers().unwrap_or_default();
+        if key.state == ElementState::Released
+            || Self::should_build_sequence(key, text, mode, mods)
+        {
+            return build_key_sequence(key, mods, mode);
+        }
+
+        let mut bytes = Vec::with_capacity(text.len() + 1);
+        if mods.alt_key() {
+            bytes.push(b'\x1b');
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        bytes
+    }
+
+    fn send_terminal_key_event(
+        &mut self,
+        key: &rio_window::event::KeyEvent,
+        route_id: usize,
+        mods: ModifiersState,
+    ) -> bool {
+        let text = key.text_with_all_modifiers().unwrap_or_default();
+        let mods = if self.alt_send_esc(key, text) {
+            mods
+        } else {
+            mods & !ModifiersState::ALT
+        };
+        let Some(context) = self.context_manager.get_by_route_id_anywhere(route_id)
+        else {
+            return false;
+        };
+        let context = context.context_mut();
+        let mode = {
+            let terminal = context.terminal.lock();
+            terminal.mode()
+        };
+        let bytes = Self::terminal_key_bytes(key, mode, mods);
+        if bytes.is_empty() {
+            return false;
+        }
+
+        if key.state == ElementState::Pressed {
+            let mut terminal = context.terminal.lock();
+            if terminal.display_offset() != 0 {
+                terminal.scroll_display(Scroll::Bottom);
+            }
+            terminal.selection.take();
+            drop(terminal);
+            context.set_selection(None);
+        }
+        context.messenger.send_write(bytes);
+        true
+    }
+
     #[inline]
     pub fn process_key_event(
         &mut self,
         key: &rio_window::event::KeyEvent,
         clipboard: &mut Clipboard,
     ) {
+        let captured_owner = self.mars_input.screen_key_owner(key);
+        match captured_owner {
+            ScreenKeyOwner::Route | ScreenKeyOwner::UnownedFollowup => return,
+            ScreenKeyOwner::Screen if key.state == ElementState::Released => return,
+            ScreenKeyOwner::Terminal(route_id) => {
+                self.send_terminal_key_event(key, route_id, self.modifiers.state());
+                return;
+            }
+            ScreenKeyOwner::Fresh | ScreenKeyOwner::Screen => {}
+        }
+
         if self.context_manager.current().ime.preedit().is_some() {
+            self.mars_input.capture_screen_key(key);
             return;
         }
 
         let mode = self.get_mode();
         let mods = self.modifiers.state();
 
-        if key.state == ElementState::Released {
-            if !mode.contains(Mode::REPORT_EVENT_TYPES)
-                || mode.contains(Mode::VI)
-                || self.search_active()
-                || self.hint_state.is_active()
-            {
-                return;
-            }
-
-            // Mask `Alt` modifier from input when we won't send esc.
-            let text = key.text_with_all_modifiers().unwrap_or_default();
-            let mods = if self.alt_send_esc(key, text) {
-                mods
-            } else {
-                mods & !ModifiersState::ALT
-            };
-
-            let bytes = match key.logical_key.as_ref() {
-                Key::Named(NamedKey::Enter)
-                | Key::Named(NamedKey::Tab)
-                | Key::Named(NamedKey::Backspace)
-                    if !mode.contains(Mode::REPORT_ALL_KEYS_AS_ESC) =>
-                {
-                    return
-                }
-                _ => build_key_sequence(key, mods, mode),
-            };
-
-            self.ctx_mut().current_mut().messenger.send_write(bytes);
-
-            return;
-        }
-
         // All key bindings are disabled while a hint is being selected (like Alacritty)
         if self.hint_state.is_active() {
+            self.mars_input.capture_screen_key(key);
+
             // Handle special keys first
             match key.logical_key {
                 rio_window::keyboard::Key::Named(
@@ -795,7 +855,6 @@ impl Screen<'_> {
                 _ => {}
             }
 
-            // Handle text input
             let text = key.text_with_all_modifiers().unwrap_or_default();
             self.input_hint_text(text, clipboard);
             return;
@@ -803,12 +862,14 @@ impl Screen<'_> {
 
         let ignore_chars = self.process_key_bindings(key, &mode, mods, clipboard);
         if ignore_chars {
+            self.mars_input.capture_screen_key(key);
             return;
         }
 
         let text = key.text_with_all_modifiers().unwrap_or_default();
 
         if self.search_active() {
+            self.mars_input.capture_screen_key(key);
             for character in text.chars() {
                 self.search_input(character);
             }
@@ -819,38 +880,20 @@ impl Screen<'_> {
 
         // Vi mode on its own doesn't have any input, the search input was done before.
         if mode.contains(Mode::VI) {
+            self.mars_input.capture_screen_key(key);
             return;
         }
 
-        // Mask `Alt` modifier from input when we won't send esc.
-        let mods = if self.alt_send_esc(key, text) {
-            mods
-        } else {
-            mods & !ModifiersState::ALT
-        };
+        // A screen-owned repeat stays local even if its original handler closed.
+        if captured_owner == ScreenKeyOwner::Screen {
+            return;
+        }
 
-        let build_key_sequence = Self::should_build_sequence(key, text, mode, mods);
-
-        let bytes = if build_key_sequence {
-            crate::bindings::kitty_keyboard::build_key_sequence(key, mods, mode)
-        } else {
-            let mut bytes = Vec::with_capacity(text.len() + 1);
-            if mods.alt_key() {
-                bytes.push(b'\x1b');
-            }
-
-            bytes.extend_from_slice(text.as_bytes());
-            bytes
-        };
-
-        if !bytes.is_empty() {
-            self.scroll_bottom_when_cursor_not_visible();
-            self.clear_selection();
-
-            self.ctx_mut().current_mut().messenger.send_write(bytes);
+        let route_id = self.context_manager.current_route();
+        if self.send_terminal_key_event(key, route_id, self.modifiers.state()) {
+            self.mars_input.capture_terminal_key(key, route_id);
         }
     }
-
     fn input_hint_text(&mut self, text: &str, clipboard: &mut Clipboard) {
         for character in text.chars() {
             let terminal = self.context_manager.current().terminal.lock();
@@ -3440,6 +3483,13 @@ impl Screen<'_> {
         }
         if !is_focused {
             self.cancel_pointer_interactions();
+            for release in self.mars_input.drain_focus_loss_keys() {
+                self.send_terminal_key_event(
+                    &release.event,
+                    release.route_id,
+                    release.modifiers,
+                );
+            }
             self.clear_ime_preedit();
             let rc = &mut self.context_manager.current_mut().renderable_content;
             if !rc.is_blinking_cursor_visible {

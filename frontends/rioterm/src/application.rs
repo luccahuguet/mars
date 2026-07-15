@@ -1761,6 +1761,8 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 event: key_event,
                 ..
             } => {
+                route.window.screen.cancel_link_gesture();
+                route.window.screen.track_key_event_modifiers(&key_event);
                 if route.has_key_wait(&key_event, &mut self.router.clipboard) {
                     if route.path != RoutePath::Terminal
                         && key_event.state == ElementState::Released

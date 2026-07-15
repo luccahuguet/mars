@@ -232,6 +232,11 @@ impl Route<'_> {
         clipboard: &mut Clipboard,
     ) -> bool {
         let owner = self.key_input_owner();
+        if owner.is_route_owned()
+            && !self.window.screen.capture_route_key_event(key_event)
+        {
+            return false;
+        }
         let text_input = accepted_text_input(
             key_event.text.as_deref(),
             self.window.screen.modifiers.state(),

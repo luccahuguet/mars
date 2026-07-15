@@ -776,6 +776,16 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     #[inline]
+    pub fn get_by_route_id_anywhere(
+        &mut self,
+        route_id: usize,
+    ) -> Option<&mut ContextGridItem<T>> {
+        self.contexts
+            .iter_mut()
+            .find_map(|grid| grid.get_by_route_id(route_id))
+    }
+
+    #[inline]
     pub fn contexts_mut(
         &mut self,
     ) -> &mut SmallVec<[ContextGrid<T>; DEFAULT_CONTEXT_CAPACITY]> {
@@ -1299,6 +1309,25 @@ pub mod test {
 
         context_manager.set_current(8);
         assert_eq!(context_manager.current_index, 3);
+    }
+
+    #[test]
+    fn route_lookup_can_find_a_background_tab() {
+        let window_id = WindowId::from(0);
+        let mut context_manager =
+            ContextManager::start_with_capacity(2, VoidListener {}, window_id).unwrap();
+
+        context_manager.add_context(false, 0);
+        let background_route = context_manager.contexts[1].current().route_id;
+
+        assert_eq!(context_manager.current_index, 0);
+        assert!(context_manager.get_by_route_id(background_route).is_none());
+        assert_eq!(
+            context_manager
+                .get_by_route_id_anywhere(background_route)
+                .map(|item| item.context().route_id),
+            Some(background_route)
+        );
     }
 
     fn set_tab_title(cm: &mut ContextManager<VoidListener>, index: usize, content: &str) {
