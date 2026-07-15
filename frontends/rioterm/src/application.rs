@@ -1796,7 +1796,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::Ime(ime) => {
-                if route.window.screen.renderer.assistant.is_active() {
+                if route.handle_owned_ime(&ime, &mut self.router.clipboard) {
                     return;
                 }
 

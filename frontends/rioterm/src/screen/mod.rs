@@ -797,23 +797,7 @@ impl Screen<'_> {
 
             // Handle text input
             let text = key.text_with_all_modifiers().unwrap_or_default();
-            for character in text.chars() {
-                let terminal = self.context_manager.current().terminal.lock();
-                if let Some(hint_match) =
-                    self.hint_state.keyboard_input(&*terminal, character)
-                {
-                    drop(terminal);
-                    self.execute_hint_action(&hint_match, clipboard);
-                    // Stop hint mode and update state with proper damage tracking
-                    self.hint_state.stop();
-                    self.update_hint_state();
-                    self.mark_dirty();
-                    return;
-                }
-                drop(terminal);
-            }
-            self.update_hint_state();
-            self.mark_dirty();
+            self.input_hint_text(text, clipboard);
             return;
         }
 
@@ -864,6 +848,37 @@ impl Screen<'_> {
             self.clear_selection();
 
             self.ctx_mut().current_mut().messenger.send_write(bytes);
+        }
+    }
+
+    fn input_hint_text(&mut self, text: &str, clipboard: &mut Clipboard) {
+        for character in text.chars() {
+            let terminal = self.context_manager.current().terminal.lock();
+            if let Some(hint_match) =
+                self.hint_state.keyboard_input(&*terminal, character)
+            {
+                drop(terminal);
+                self.execute_hint_action(&hint_match, clipboard);
+                self.hint_state.stop();
+                self.update_hint_state();
+                self.mark_dirty();
+                return;
+            }
+            drop(terminal);
+        }
+        self.update_hint_state();
+        self.mark_dirty();
+    }
+
+    pub fn handle_local_ime_commit(&mut self, text: &str, clipboard: &mut Clipboard) {
+        if self.hint_state.is_active() {
+            self.input_hint_text(text, clipboard);
+        } else {
+            debug_assert!(self.search_active());
+            for character in text.chars() {
+                self.search_input(character);
+            }
+            self.mark_dirty();
         }
     }
 
@@ -2901,6 +2916,7 @@ impl Screen<'_> {
                     &current_title,
                     &mut self.context_manager,
                 );
+                self.clear_ime_preedit();
                 self.mark_dirty();
             }
             return true;
@@ -3424,6 +3440,7 @@ impl Screen<'_> {
         }
         if !is_focused {
             self.cancel_pointer_interactions();
+            self.clear_ime_preedit();
             let rc = &mut self.context_manager.current_mut().renderable_content;
             if !rc.is_blinking_cursor_visible {
                 rc.is_blinking_cursor_visible = true;

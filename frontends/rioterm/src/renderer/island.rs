@@ -1022,6 +1022,7 @@ impl Island {
         &mut self,
         key_event: &rio_window::event::KeyEvent,
         context_manager: &mut ContextManager<EventProxy>,
+        text_input: Option<&str>,
     ) -> bool {
         use rio_window::event::ElementState;
         use rio_window::keyboard::{Key, NamedKey};
@@ -1030,35 +1031,38 @@ impl Island {
             return false;
         }
 
-        if key_event.state != ElementState::Pressed {
-            return true; // consume release events too
+        if key_event.state == ElementState::Released {
+            match &key_event.logical_key {
+                Key::Named(NamedKey::Escape) => self.color_picker_tab = None,
+                Key::Named(NamedKey::Enter) => {
+                    self.apply_rename(context_manager);
+                    self.color_picker_tab = None;
+                }
+                _ => {}
+            }
+            return true;
         }
 
         match &key_event.logical_key {
-            Key::Named(NamedKey::Escape) => {
-                // Cancel — discard input, close picker
-                self.color_picker_tab = None;
-            }
-            Key::Named(NamedKey::Enter) => {
-                // Confirm — apply rename and close
-                self.apply_rename(context_manager);
-                self.color_picker_tab = None;
-            }
+            // Keep the picker alive until release so it owns both halves of
+            // keys that close it.
+            Key::Named(NamedKey::Escape | NamedKey::Enter) => {}
             Key::Named(NamedKey::Backspace) => {
                 self.rename_input.pop();
                 self.rename_caret_time = Instant::now();
             }
             _ => {
-                if let Some(text) = key_event.text.as_ref() {
-                    let s = text.as_str();
-                    if !s.is_empty() && s.chars().all(|c| !c.is_control()) {
-                        self.rename_input.push_str(s);
-                        self.rename_caret_time = Instant::now();
-                    }
+                if let Some(text) = text_input {
+                    self.append_rename_input(text);
                 }
             }
         }
         true
+    }
+
+    pub fn append_rename_input(&mut self, text: &str) {
+        self.rename_input.push_str(text);
+        self.rename_caret_time = Instant::now();
     }
 
     /// Check if a click hits a color swatch in the picker.

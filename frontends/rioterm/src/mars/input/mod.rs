@@ -1,3 +1,4 @@
+mod keyboard;
 mod link_gesture;
 mod pointer;
 
