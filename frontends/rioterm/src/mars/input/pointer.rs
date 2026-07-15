@@ -1,3 +1,7 @@
+use crate::screen::Screen;
+use rio_backend::clipboard::Clipboard;
+use rio_window::event::{ElementState, MouseButton};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PointerOwner {
     Terminal,
@@ -159,6 +163,3 @@ mod tests {
         }
     }
 }
-use crate::screen::Screen;
-use rio_backend::clipboard::Clipboard;
-use rio_window::event::{ElementState, MouseButton};
