@@ -28,6 +28,7 @@ use crate::hints::{
     HintState,
 };
 use crate::layout::ContextDimension;
+use crate::mars::input::{LinkRelease, MarsInputState};
 use crate::mouse::{calculate_mouse_position, Mouse};
 use crate::renderer::island::{self, TabStripLayout, ISLAND_HEIGHT};
 use crate::renderer::{utils::padding_top_from_config, Renderer};
@@ -94,6 +95,7 @@ pub struct Screen<'screen> {
     pub grids: rustc_hash::FxHashMap<usize, rio_backend::sugarloaf::grid::GridRenderer>,
     pub grid_rasterizer: crate::grid_emit::GridGlyphRasterizer,
     visual_bell_until: Option<Instant>,
+    mars_input: MarsInputState,
 }
 
 pub struct ChromePress {
@@ -380,6 +382,7 @@ impl Screen<'_> {
             grids: rustc_hash::FxHashMap::default(),
             grid_rasterizer: crate::grid_emit::GridGlyphRasterizer::new(),
             visual_bell_until: None,
+            mars_input: MarsInputState::default(),
         })
     }
 
@@ -2007,9 +2010,61 @@ impl Screen<'_> {
     }
 
     #[inline]
+    pub fn begin_left_press(&mut self) {
+        self.mars_input.begin_left_press();
+    }
+
+    #[inline]
     pub fn prepare_hint_click(&mut self) -> bool {
         self.update_highlighted_hints();
-        self.has_highlighted_hint()
+        let Some(hint) = self
+            .context_manager
+            .current()
+            .renderable_content
+            .highlighted_hint
+            .clone()
+        else {
+            return false;
+        };
+
+        let origin = self.mouse_position(self.display_offset());
+        self.mars_input.start_link(origin, hint);
+        true
+    }
+
+    #[inline]
+    pub fn cancel_link_gesture(&mut self) {
+        self.mars_input.cancel_link();
+    }
+
+    #[inline]
+    pub fn cancel_link_gesture_if_moved(&mut self, position: Pos) {
+        self.mars_input.cancel_link_if_moved(position);
+    }
+
+    /// Finish a terminal-owned left press. Returns whether the release was owned.
+    #[inline]
+    pub fn finish_hint_click(&mut self, clipboard: &mut Clipboard) -> bool {
+        let (origin, target) = match self.mars_input.finish_link() {
+            LinkRelease::NotOwned => return false,
+            LinkRelease::Cancelled => return true,
+            LinkRelease::Activate { origin, target } => (origin, target),
+        };
+
+        if self.mouse_position(self.display_offset()) == origin {
+            self.update_highlighted_hints();
+            let hint = self
+                .context_manager
+                .current_mut()
+                .renderable_content
+                .highlighted_hint
+                .take_if(|hint| hint == &target);
+            if let Some(hint) = hint {
+                self.execute_hint_action(&hint, clipboard);
+            }
+        }
+
+        true
     }
 
     /// Check if current modifiers match the required modifiers
@@ -2196,77 +2251,6 @@ impl Screen<'_> {
         }
 
         None
-    }
-
-    #[inline]
-    pub fn trigger_hyperlink(&self) -> bool {
-        // Check if any hyperlink hint configuration has the required modifiers active
-        let mut is_hyperlink_key_active = false;
-        for hint_config in &self.hints_config {
-            if hint_config.hyperlinks && self.modifiers_match(&hint_config.mouse.mods) {
-                is_hyperlink_key_active = true;
-                break;
-            }
-        }
-
-        if !is_hyperlink_key_active
-            || !self.context_manager.current().has_hyperlink_range()
-        {
-            return false;
-        }
-
-        // Look up the cell under the mouse and dispatch open_hyperlink
-        // if it carries an OSC 8 link.
-        let terminal = self.context_manager.current().terminal.lock();
-        let display_offset = terminal.display_offset();
-        let pos = self.mouse_position(display_offset);
-        let pos_hyperlink = terminal.cell_hyperlink(pos.row, pos.col);
-        drop(terminal);
-
-        if let Some(hyperlink) = pos_hyperlink {
-            self.open_hyperlink(hyperlink);
-            return true;
-        }
-
-        false
-    }
-
-    /// Trigger hint action at mouse position
-    #[inline]
-    pub fn trigger_hint(&mut self, clipboard: &mut Clipboard) -> bool {
-        // Take the highlighted hint
-        let hint_match = self
-            .context_manager
-            .current_mut()
-            .renderable_content
-            .highlighted_hint
-            .take();
-
-        if let Some(hint_match) = hint_match {
-            self.execute_hint_action(&hint_match, clipboard);
-            true
-        } else {
-            false
-        }
-    }
-
-    fn open_hyperlink(&self, hyperlink: rio_backend::crosswords::square::Hyperlink) {
-        let Some(processed_uri) = process_hint_text(hyperlink.uri(), true) else {
-            return;
-        };
-        if crate::hints::has_uri_scheme(&processed_uri) {
-            Self::open_uri_direct(&processed_uri);
-            return;
-        }
-
-        #[cfg(not(any(target_os = "macos", windows)))]
-        self.exec("xdg-open", [&processed_uri]);
-
-        #[cfg(target_os = "macos")]
-        self.exec("open", [&processed_uri]);
-
-        #[cfg(windows)]
-        self.exec("cmd", ["/c", "start", "", &processed_uri]);
     }
 
     fn open_uri_direct(uri: &str) {
@@ -3439,6 +3423,7 @@ impl Screen<'_> {
             self.mark_dirty();
         }
         if !is_focused {
+            self.mars_input.cancel_link();
             let rc = &mut self.context_manager.current_mut().renderable_content;
             if !rc.is_blinking_cursor_visible {
                 rc.is_blinking_cursor_visible = true;
