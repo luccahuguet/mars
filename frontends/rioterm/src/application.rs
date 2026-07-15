@@ -1053,9 +1053,25 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    route.window.screen.begin_left_press();
+                }
+                if route.window.screen.renderer.assistant.is_active()
+                    || route.window.screen.renderer.command_palette.is_enabled()
+                {
+                    route.window.screen.cancel_link_gesture();
+                }
+
                 if route.path != RoutePath::Terminal
                     || route.window.screen.renderer.confirm_quit.is_active()
                 {
+                    route.window.screen.cancel_link_gesture();
+                    if button == MouseButton::Left && state == ElementState::Released {
+                        route
+                            .window
+                            .screen
+                            .finish_hint_click(&mut self.router.clipboard);
+                    }
                     #[cfg(target_os = "macos")]
                     if state == ElementState::Pressed
                         && button == MouseButton::Left
@@ -1237,7 +1253,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         } else if button == MouseButton::Left
                             && route.window.screen.prepare_hint_click()
                         {
-                            route.window.screen.mouse.link_gesture_active = true;
                             route.request_redraw();
                             return;
                         } else if !route.window.screen.modifiers.state().shift_key()
@@ -1266,10 +1281,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                                 &mut self.router.clipboard,
                             );
                         } else {
-                            if route.window.screen.trigger_hyperlink() {
-                                return;
-                            }
-
                             // Load mouse point, treating message bar and padding as the closest square.
                             let display_offset = route.window.screen.display_offset();
 
@@ -1300,18 +1311,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         }
 
                         if button == MouseButton::Left
-                            && route.window.screen.mouse.link_gesture_active
-                        {
-                            route.window.screen.mouse.link_gesture_active = false;
-                            route.window.screen.update_highlighted_hints();
-                            if route
+                            && route
                                 .window
                                 .screen
-                                .trigger_hint(&mut self.router.clipboard)
-                            {
-                                route.request_redraw();
-                                return;
-                            }
+                                .finish_hint_click(&mut self.router.clipboard)
+                        {
                             route.request_redraw();
                             return;
                         }
@@ -1363,16 +1367,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             return;
                         }
 
-                        // Trigger hints highlighted by the mouse
-                        if button == MouseButton::Left
-                            && route
-                                .window
-                                .screen
-                                .trigger_hint(&mut self.router.clipboard)
-                        {
-                            return;
-                        }
-
                         if let MouseButton::Left | MouseButton::Right = button {
                             if self.config.copy_on_select {
                                 route.window.screen.copy_selection(
@@ -1386,6 +1380,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::CursorLeft { .. } => {
+                route.window.screen.cancel_link_gesture();
                 if route.window.screen.clear_close_button_hover() {
                     route.request_redraw();
                 }
@@ -1407,6 +1402,10 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 route.window.screen.mouse.x = x;
                 route.window.screen.mouse.y = y;
                 route.window.screen.mouse.raw_y = position.y;
+
+                let display_offset = route.window.screen.display_offset();
+                let point = route.window.screen.mouse_position(display_offset);
+                route.window.screen.cancel_link_gesture_if_moved(point);
 
                 if route.path != RoutePath::Terminal
                     || route.window.screen.renderer.confirm_quit.is_active()
@@ -1678,23 +1677,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         };
 
                     route.window.winit_window.set_cursor(cursor_icon);
-
-                    // In case hyperlink range has cleaned trigger one more render
-                    if route
-                        .window
-                        .screen
-                        .context_manager
-                        .current()
-                        .has_hyperlink_range()
-                    {
-                        route
-                            .window
-                            .screen
-                            .context_manager
-                            .current_mut()
-                            .set_hyperlink_range(None);
-                        route.window.screen.context_manager.request_render();
-                    }
                 }
 
                 route.window.screen.mouse.inside_text_area = inside_text_area;
@@ -1861,6 +1843,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
             }
             WindowEvent::Touch(touch) => {
+                route.window.screen.cancel_link_gesture();
                 on_touch(route, touch, &mut self.router.clipboard);
             }
 
