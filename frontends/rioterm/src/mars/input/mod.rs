@@ -1,10 +1,12 @@
 mod link_gesture;
+mod pointer;
 
 use crate::hints::HintMatch;
 use link_gesture::LinkGesture;
 use rio_backend::crosswords::pos::Pos;
 
 pub(crate) use link_gesture::LinkRelease;
+pub(crate) use pointer::PointerOwner;
 
 /// Mars-owned cross-event input state. Keep Rio integration to one Screen field.
 #[derive(Debug, Default)]
@@ -19,6 +21,10 @@ impl MarsInputState {
 
     pub(crate) fn start_link(&mut self, origin: Pos, hint: HintMatch) {
         self.link_gesture.start(origin, hint);
+    }
+
+    pub(crate) fn consume_left_press(&mut self) {
+        self.link_gesture.consume_press();
     }
 
     pub(crate) fn cancel_link(&mut self) {

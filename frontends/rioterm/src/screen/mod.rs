@@ -1918,29 +1918,13 @@ impl Screen<'_> {
     /// Update hint highlighting based on mouse position and modifiers
     pub fn update_highlighted_hints(&mut self) -> bool {
         // Check if any hint configuration has matching modifiers
-        let should_highlight = self.hints_config.iter().any(|hint_config| {
-            hint_config.mouse.enabled && self.modifiers_match(&hint_config.mouse.mods)
-        });
-
-        let had_highlight = self
-            .context_manager
-            .current()
-            .renderable_content
-            .highlighted_hint
-            .is_some();
+        let should_highlight = self.mouse.last_cell.is_some()
+            && self.hints_config.iter().any(|hint_config| {
+                hint_config.mouse.enabled && self.modifiers_match(&hint_config.mouse.mods)
+            });
 
         if !should_highlight {
-            let current = self.context_manager.current_mut();
-
-            // Clear any previous hint damage
-            if current.renderable_content.highlighted_hint.is_some() {
-                let mut terminal = current.terminal.lock();
-                let display_offset = terminal.display_offset();
-                terminal.update_selection_damage(None, display_offset);
-            }
-
-            current.renderable_content.highlighted_hint = None;
-            return had_highlight;
+            return self.clear_highlighted_hint();
         }
 
         let terminal = self.context_manager.current().terminal.lock();
@@ -1982,22 +1966,33 @@ impl Screen<'_> {
             current.renderable_content.highlighted_hint = Some(hint_match);
             true
         } else {
-            if current.renderable_content.highlighted_hint.is_some() {
-                let mut terminal = current.terminal.lock();
-                let display_offset = terminal.display_offset();
-                terminal.update_selection_damage(None, display_offset);
-            }
-
-            // Force a render so the previously-highlighted line clears.
-            if had_highlight {
-                current
-                    .renderable_content
-                    .pending_update
-                    .set_terminal_damage(rio_backend::event::TerminalDamage::Full);
-            }
-            current.renderable_content.highlighted_hint = None;
-            had_highlight
+            self.clear_highlighted_hint()
         }
+    }
+
+    fn clear_highlighted_hint(&mut self) -> bool {
+        let current = self.context_manager.current_mut();
+        if current.renderable_content.highlighted_hint.is_none() {
+            return false;
+        }
+
+        let mut terminal = current.terminal.lock();
+        let display_offset = terminal.display_offset();
+        terminal.update_selection_damage(None, display_offset);
+        drop(terminal);
+
+        current.renderable_content.highlighted_hint = None;
+        current
+            .renderable_content
+            .pending_update
+            .set_terminal_damage(rio_backend::event::TerminalDamage::Full);
+        true
+    }
+
+    pub fn on_terminal_pointer_exit(&mut self) -> bool {
+        self.mouse.last_cell = None;
+        self.mars_input.cancel_link();
+        self.clear_highlighted_hint()
     }
 
     #[inline]
@@ -2012,6 +2007,11 @@ impl Screen<'_> {
     #[inline]
     pub fn begin_left_press(&mut self) {
         self.mars_input.begin_left_press();
+    }
+
+    #[inline]
+    pub fn consume_left_press(&mut self) {
+        self.mars_input.consume_left_press();
     }
 
     #[inline]
@@ -3423,7 +3423,7 @@ impl Screen<'_> {
             self.mark_dirty();
         }
         if !is_focused {
-            self.mars_input.cancel_link();
+            self.cancel_pointer_interactions();
             let rc = &mut self.context_manager.current_mut().renderable_content;
             if !rc.is_blinking_cursor_visible {
                 rc.is_blinking_cursor_visible = true;
@@ -3431,14 +3431,6 @@ impl Screen<'_> {
             rc.last_blink_toggle = None;
             rc.pending_update
                 .set_terminal_damage(rio_backend::event::TerminalDamage::CursorOnly);
-
-            if let Some(ref mut island) = self.renderer.island {
-                if island.is_dragging() {
-                    island.cancel_drag();
-                    self.mark_dirty();
-                }
-            }
-            self.mouse.left_button_state = ElementState::Released;
         }
 
         if self.get_mode().contains(Mode::FOCUS_IN_OUT) {

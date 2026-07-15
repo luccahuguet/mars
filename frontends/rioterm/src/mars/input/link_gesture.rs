@@ -28,6 +28,10 @@ impl<T> LinkGesture<T> {
         *self = Self::Pending { origin, target };
     }
 
+    pub(super) fn consume_press(&mut self) {
+        *self = Self::Cancelled;
+    }
+
     pub(super) fn cancel(&mut self) {
         if matches!(self, Self::Pending { .. }) {
             *self = Self::Cancelled;
@@ -105,6 +109,15 @@ mod tests {
         gesture.start(pos(3), "pressed");
         gesture.cancel();
         gesture.cancel();
+
+        assert_eq!(gesture.finish(), LinkRelease::Cancelled);
+        assert_eq!(gesture.finish(), LinkRelease::NotOwned);
+    }
+
+    #[test]
+    fn a_consumed_non_link_press_owns_one_release() {
+        let mut gesture = LinkGesture::<()>::default();
+        gesture.consume_press();
 
         assert_eq!(gesture.finish(), LinkRelease::Cancelled);
         assert_eq!(gesture.finish(), LinkRelease::NotOwned);

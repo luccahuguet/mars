@@ -19,7 +19,7 @@ use rio_window::keyboard::{Key, NamedKey};
 use rio_window::platform::startup_notify::{
     self, EventLoopExtStartupNotify, WindowAttributesExtStartupNotify,
 };
-use rio_window::window::{Window, WindowId};
+use rio_window::window::{CursorIcon, Window, WindowId};
 use routes::{assistant, RoutePath};
 use rustc_hash::FxHashMap;
 use std::time::{Duration, Instant};
@@ -76,6 +76,19 @@ impl Route<'_> {
             .pending_update
             .set_dirty();
         self.request_redraw();
+    }
+
+    #[inline]
+    pub fn leave_terminal_pointer(&mut self) {
+        if self.window.screen.on_terminal_pointer_exit() {
+            self.request_redraw();
+        }
+    }
+
+    #[inline]
+    pub fn enter_pointer_overlay(&mut self) {
+        self.window.winit_window.set_cursor(CursorIcon::Default);
+        self.leave_terminal_pointer();
     }
 
     #[inline]
