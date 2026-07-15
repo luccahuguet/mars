@@ -131,13 +131,7 @@ impl Route<'_> {
 
     #[inline]
     pub fn confirm_quit(&mut self) {
-        self.path = RoutePath::ConfirmQuit;
-        self.request_overlay_redraw();
-    }
-
-    #[inline]
-    fn cancel_confirm_quit(&mut self) {
-        self.path = RoutePath::Terminal;
+        self.window.screen.renderer.confirm_quit.set_active(true);
         self.request_overlay_redraw();
     }
 
@@ -320,6 +314,27 @@ impl Route<'_> {
             return true; // Block all input when command palette is active
         }
 
+        if self.window.screen.renderer.confirm_quit.is_active() {
+            if key_event.state == rio_window::event::ElementState::Pressed {
+                match &key_event.logical_key {
+                    Key::Character(c) if c.as_str() == "n" || c.as_str() == "N" => {
+                        self.window.screen.renderer.confirm_quit.set_active(false);
+                        self.request_overlay_redraw();
+                    }
+                    Key::Named(NamedKey::Escape) => {
+                        self.window.screen.renderer.confirm_quit.set_active(false);
+                        self.request_overlay_redraw();
+                    }
+                    Key::Character(c) if c.as_str() == "y" || c.as_str() == "Y" => {
+                        self.quit();
+                        return true;
+                    }
+                    _ => {}
+                }
+            }
+            return true;
+        }
+
         if self.path == RoutePath::Terminal {
             return false;
         }
@@ -332,25 +347,6 @@ impl Route<'_> {
                 self.assistant.clear();
                 self.window.screen.renderer.assistant.clear();
                 self.request_overlay_redraw();
-            }
-            return true;
-        }
-
-        if self.path == RoutePath::ConfirmQuit {
-            if key_event.state == rio_window::event::ElementState::Pressed {
-                match &key_event.logical_key {
-                    Key::Character(c) if c.as_str() == "n" || c.as_str() == "N" => {
-                        self.cancel_confirm_quit();
-                    }
-                    Key::Named(NamedKey::Escape) => {
-                        self.cancel_confirm_quit();
-                    }
-                    Key::Character(c) if c.as_str() == "y" || c.as_str() == "Y" => {
-                        self.quit();
-                        return true;
-                    }
-                    _ => {}
-                }
             }
             return true;
         }
