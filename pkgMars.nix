@@ -51,6 +51,7 @@
     ];
     default_appearance_mode = "dark";
     wrapper_env = {
+      app_id = "MARS_APP_ID";
       appearance = "MARS_APPEARANCE";
       base_config_home = "MARS_BASE_CONFIG_HOME";
       cursor_config = "YAZELIX_CURSOR_CONFIG";
@@ -191,7 +192,7 @@ in
         mesa_vulkan_icd_files="''${mesa_vulkan_icd_files%:}"
       ''}
       wrapper_args=(
-        --add-flags "--app-id mars"
+        --run 'mars_app_id="''${MARS_APP_ID:-mars}"; unset MARS_APP_ID; set -- --app-id "$mars_app_id" "$@"'
         --set-default MARS_BASE_CONFIG_HOME "$out/share/mars"
       )
       ${lib.optionalString stdenv.isLinux ''
