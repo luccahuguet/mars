@@ -89,25 +89,6 @@ impl<T: EventListener> Context<T> {
     }
 
     #[inline]
-    pub fn set_hyperlink_range(&mut self, hyperlink_range: Option<SelectionRange>) {
-        let old_hyperlink = self.renderable_content.hyperlink_range;
-
-        if old_hyperlink != hyperlink_range {
-            // Hyperlinks affect terminal line rendering, so use terminal damage
-            self.renderable_content
-                .pending_update
-                .set_terminal_damage(rio_backend::event::TerminalDamage::Full);
-        }
-
-        self.renderable_content.hyperlink_range = hyperlink_range;
-    }
-
-    #[inline]
-    pub fn has_hyperlink_range(&self) -> bool {
-        self.renderable_content.hyperlink_range.is_some()
-    }
-
-    #[inline]
     pub fn cursor_from_ref(&self) -> Cursor {
         Cursor {
             state: self.renderable_content.cursor.state.new_from_self(),
@@ -540,6 +521,14 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
     }
 
     #[inline]
+    pub fn schedule_render_on_route(&mut self, millis: u64) {
+        self.event_proxy.send_event(
+            RioEvent::PrepareRenderOnRoute(millis, self.current_route),
+            self.window_id,
+        );
+    }
+
+    #[inline]
     pub fn report_error_fonts_not_found(&mut self, fonts_not_found: Vec<SugarloafFont>) {
         if !fonts_not_found.is_empty() {
             self.event_proxy.send_event(
@@ -784,6 +773,16 @@ impl<T: EventListener + Clone + std::marker::Send + 'static> ContextManager<T> {
         route_id: usize,
     ) -> Option<&mut ContextGridItem<T>> {
         self.contexts[self.current_index].get_by_route_id(route_id)
+    }
+
+    #[inline]
+    pub fn get_by_route_id_anywhere(
+        &mut self,
+        route_id: usize,
+    ) -> Option<&mut ContextGridItem<T>> {
+        self.contexts
+            .iter_mut()
+            .find_map(|grid| grid.get_by_route_id(route_id))
     }
 
     #[inline]
@@ -1310,6 +1309,25 @@ pub mod test {
 
         context_manager.set_current(8);
         assert_eq!(context_manager.current_index, 3);
+    }
+
+    #[test]
+    fn route_lookup_can_find_a_background_tab() {
+        let window_id = WindowId::from(0);
+        let mut context_manager =
+            ContextManager::start_with_capacity(2, VoidListener {}, window_id).unwrap();
+
+        context_manager.add_context(false, 0);
+        let background_route = context_manager.contexts[1].current().route_id;
+
+        assert_eq!(context_manager.current_index, 0);
+        assert!(context_manager.get_by_route_id(background_route).is_none());
+        assert_eq!(
+            context_manager
+                .get_by_route_id_anywhere(background_route)
+                .map(|item| item.context().route_id),
+            Some(background_route)
+        );
     }
 
     fn set_tab_title(cm: &mut ContextManager<VoidListener>, index: usize, content: &str) {

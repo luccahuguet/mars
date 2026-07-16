@@ -1,5 +1,6 @@
 use crate::event::{ClickState, EventPayload, EventProxy, RioEvent, RioEventType};
 use crate::ime::Preedit;
+use crate::mars::input::{apply_modifiers, PointerOwner};
 use crate::renderer::utils::update_colors_based_on_theme;
 use crate::router::{routes::RoutePath, Router};
 use crate::scheduler::{Scheduler, TimerId, Topic};
@@ -16,7 +17,8 @@ use rio_backend::clipboard::{Clipboard, ClipboardType};
 use rio_backend::config::colors::{ColorRgb, NamedColor};
 use rio_window::application::ApplicationHandler;
 use rio_window::event::{
-    ElementState, Ime, MouseButton, MouseScrollDelta, StartCause, TouchPhase, WindowEvent,
+    ElementState, Ime, Modifiers, MouseButton, MouseScrollDelta, StartCause, TouchPhase,
+    WindowEvent,
 };
 use rio_window::event_loop::ActiveEventLoop;
 use rio_window::event_loop::ControlFlow;
@@ -82,10 +84,7 @@ impl Application<'_> {
     fn skip_window_event(event: &WindowEvent) -> bool {
         matches!(
             event,
-            WindowEvent::KeyboardInput {
-                is_synthetic: true,
-                ..
-            } | WindowEvent::ActivationTokenDone { .. }
+            WindowEvent::ActivationTokenDone { .. }
                 | WindowEvent::DoubleTapGesture { .. }
                 | WindowEvent::TouchpadPressure { .. }
                 | WindowEvent::RotationGesture { .. }
@@ -253,6 +252,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         if self.config.renderer.disable_unfocused_render
                             && !route.window.is_focused
                         {
+                            if route.window.screen.renderer.scrollbar.needs_redraw() {
+                                route.request_redraw();
+                            }
                             return;
                         }
 
@@ -442,9 +444,11 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     } else {
                         route.clear_errors();
                     }
+
+                    route.request_redraw();
                 }
             }
-            RioEventType::Rio(RioEvent::Exit) => {
+            RioEventType::Rio(RioEvent::Exit | RioEvent::Quit) => {
                 if let Some(route) = self.router.routes.get_mut(&window_id) {
                     if self.config.confirm_before_quit {
                         route.confirm_quit();
@@ -620,7 +624,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
             }
             RioEventType::Rio(RioEvent::PrepareRenderOnRoute(millis, route_id)) => {
-                let timer_id = TimerId::new(Topic::RenderRoute, route_id);
+                let timer_id = TimerId::new(Topic::ScheduledRenderRoute, route_id);
                 let event = EventPayload::new(
                     RioEventType::Rio(RioEvent::RenderRoute(route_id)),
                     window_id,
@@ -1030,55 +1034,73 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
             }
 
-            WindowEvent::ModifiersChanged(modifiers) => {
-                route.window.screen.set_modifiers(modifiers);
-                if route.window.screen.update_highlighted_hints() {
-                    let cursor_icon = if route.window.screen.has_highlighted_hint() {
-                        CursorIcon::Pointer
-                    } else if !route.window.screen.modifiers.state().shift_key()
-                        && route.window.screen.mouse_mode()
-                    {
-                        CursorIcon::Default
-                    } else {
-                        CursorIcon::Text
-                    };
-                    route.window.winit_window.set_cursor(cursor_icon);
-                    route.request_redraw();
-                }
-            }
+            WindowEvent::ModifiersChanged(modifiers) => apply_modifiers(route, modifiers),
 
             WindowEvent::MouseInput { state, button, .. } => {
-                if route.path != RoutePath::Terminal {
-                    #[cfg(target_os = "macos")]
-                    if state == ElementState::Pressed
-                        && button == MouseButton::Left
-                        && route.window.screen.allow_manual_dragging
-                    {
-                        use crate::renderer::island::ISLAND_HEIGHT;
-                        let scale = route.window.screen.sugarloaf.scale_factor();
-                        if route.window.screen.mouse.y <= (ISLAND_HEIGHT * scale) as f64 {
-                            let _ = route.window.winit_window.drag_window();
+                if state == ElementState::Released
+                    && matches!(button, MouseButton::Left | MouseButton::Right)
+                {
+                    let timer_id = TimerId::new(
+                        Topic::SelectionScrolling,
+                        route.window.screen.ctx().current_route(),
+                    );
+                    self.scheduler.unschedule(timer_id);
+                }
+
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    route.window.screen.begin_left_press();
+                }
+
+                let pointer_owner = route
+                    .window
+                    .screen
+                    .pointer_owner(route.path == RoutePath::Terminal);
+                match pointer_owner {
+                    PointerOwner::Assistant | PointerOwner::CommandPalette => {
+                        let changed = route.window.screen.cancel_pointer_interactions();
+                        let handled =
+                            route.window.screen.handle_pointer_overlay_mouse_input(
+                                pointer_owner,
+                                button,
+                                state,
+                                &mut self.router.clipboard,
+                            );
+                        if changed || handled {
+                            route.request_redraw();
                         }
+                        return;
                     }
-                    return;
+                    PointerOwner::ConfirmQuit | PointerOwner::OtherRoute => {
+                        if button == MouseButton::Left && state == ElementState::Pressed {
+                            route.window.screen.consume_left_press();
+                        }
+                        #[cfg(target_os = "macos")]
+                        if pointer_owner == PointerOwner::OtherRoute
+                            && state == ElementState::Pressed
+                            && button == MouseButton::Left
+                            && route.window.screen.allow_manual_dragging
+                        {
+                            use crate::renderer::island::ISLAND_HEIGHT;
+                            let scale = route.window.screen.sugarloaf.scale_factor();
+                            if route.window.screen.mouse.y
+                                <= (ISLAND_HEIGHT * scale) as f64
+                            {
+                                let _ = route.window.winit_window.drag_window();
+                            }
+                        }
+                        if route.window.screen.cancel_pointer_interactions() {
+                            route.request_redraw();
+                        }
+                        return;
+                    }
+                    PointerOwner::Terminal => (),
                 }
 
                 if self.config.hide_cursor_when_typing {
                     route.window.winit_window.set_cursor_visible(true);
                 }
 
-                match button {
-                    MouseButton::Left => {
-                        route.window.screen.mouse.left_button_state = state
-                    }
-                    MouseButton::Middle => {
-                        route.window.screen.mouse.middle_button_state = state
-                    }
-                    MouseButton::Right => {
-                        route.window.screen.mouse.right_button_state = state
-                    }
-                    _ => (),
-                }
+                route.window.screen.update_mouse_button_state(button, state);
 
                 match state {
                     ElementState::Pressed => {
@@ -1089,7 +1111,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             now - route.window.screen.mouse.last_click_timestamp;
                         route.window.screen.mouse.last_click_timestamp = now;
 
-                        let threshold = Duration::from_millis(300);
+                        let threshold = crate::constants::MULTI_CLICK_THRESHOLD;
                         let mouse = &route.window.screen.mouse;
                         route.window.screen.mouse.click_state = match mouse.click_state {
                             // Reset click state if button has changed.
@@ -1105,6 +1127,8 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             }
                             _ => ClickState::Click,
                         };
+
+                        let chrome_press = route.window.screen.take_chrome_press();
 
                         if let MouseButton::Left = button {
                             // Check if clicking on a panel border to start resize
@@ -1137,20 +1161,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                                 }
                             }
 
-                            if route.window.screen.handle_assistant_click() {
-                                route.request_redraw();
-                                return;
-                            }
-
-                            if route
-                                .window
-                                .screen
-                                .handle_palette_click(&mut self.router.clipboard)
-                            {
-                                route.request_redraw();
-                                return;
-                            }
-
                             if route
                                 .window
                                 .screen
@@ -1165,6 +1175,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                                     &route.window.winit_window,
                                     &mut self.router.clipboard,
                                     false,
+                                    chrome_press,
                                 );
 
                             if handled_by_island {
@@ -1196,6 +1207,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                                     &route.window.winit_window,
                                     &mut self.router.clipboard,
                                     true,
+                                    chrome_press,
                                 );
 
                             if handled_by_island {
@@ -1212,7 +1224,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         } else if button == MouseButton::Left
                             && route.window.screen.prepare_hint_click()
                         {
-                            route.window.screen.mouse.link_gesture_active = true;
                             route.request_redraw();
                             return;
                         } else if !route.window.screen.modifiers.state().shift_key()
@@ -1241,10 +1252,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                                 &mut self.router.clipboard,
                             );
                         } else {
-                            if route.window.screen.trigger_hyperlink() {
-                                return;
-                            }
-
                             // Load mouse point, treating message bar and padding as the closest square.
                             let display_offset = route.window.screen.display_offset();
 
@@ -1265,28 +1272,12 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             .process_mouse_bindings(button, &mut self.router.clipboard);
                     }
                     ElementState::Released => {
-                        // Stop selection auto-scroll on button release.
-                        if let MouseButton::Left | MouseButton::Right = button {
-                            let scroll_timer_id =
-                                route.window.screen.ctx().current_route();
-                            let timer_id =
-                                TimerId::new(Topic::SelectionScrolling, scroll_timer_id);
-                            self.scheduler.unschedule(timer_id);
-                        }
-
                         if button == MouseButton::Left
-                            && route.window.screen.mouse.link_gesture_active
-                        {
-                            route.window.screen.mouse.link_gesture_active = false;
-                            route.window.screen.update_highlighted_hints();
-                            if route
+                            && route
                                 .window
                                 .screen
-                                .trigger_hint(&mut self.router.clipboard)
-                            {
-                                route.request_redraw();
-                                return;
-                            }
+                                .finish_hint_click(&mut self.router.clipboard)
+                        {
                             route.request_redraw();
                             return;
                         }
@@ -1338,16 +1329,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             return;
                         }
 
-                        // Trigger hints highlighted by the mouse
-                        if button == MouseButton::Left
-                            && route
-                                .window
-                                .screen
-                                .trigger_hint(&mut self.router.clipboard)
-                        {
-                            return;
-                        }
-
                         if let MouseButton::Left | MouseButton::Right = button {
                             if self.config.copy_on_select {
                                 route.window.screen.copy_selection(
@@ -1357,6 +1338,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             }
                         }
                     }
+                }
+            }
+
+            WindowEvent::CursorLeft { .. } => {
+                route.leave_terminal_pointer();
+                if route.window.screen.clear_close_button_hover() {
+                    route.request_redraw();
                 }
             }
 
@@ -1377,59 +1365,69 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 route.window.screen.mouse.y = y;
                 route.window.screen.mouse.raw_y = position.y;
 
-                if route.path != RoutePath::Terminal {
-                    route.window.winit_window.set_cursor(CursorIcon::Default);
-                    return;
-                }
+                let display_offset = route.window.screen.display_offset();
+                let point = route.window.screen.mouse_position(display_offset);
+                route.window.screen.cancel_link_gesture_if_moved(point);
 
-                // Handle assistant overlay hover
-                if route.window.screen.renderer.assistant.is_active() {
-                    let scale = route.window.screen.sugarloaf.scale_factor();
-                    let win_w = route.window.screen.sugarloaf.window_size().width;
-                    let mx = x as f32 / scale;
-                    let my = y as f32 / scale;
-                    if route
-                        .window
-                        .screen
-                        .renderer
-                        .assistant
-                        .hover(mx, my, win_w, scale)
-                    {
-                        route.request_redraw();
+                let pointer_owner = route
+                    .window
+                    .screen
+                    .pointer_owner(route.path == RoutePath::Terminal);
+                match pointer_owner {
+                    PointerOwner::ConfirmQuit | PointerOwner::OtherRoute => {
+                        route.enter_pointer_overlay();
+                        return;
                     }
+                    PointerOwner::Assistant => {
+                        let scale = route.window.screen.sugarloaf.scale_factor();
+                        let win_w = route.window.screen.sugarloaf.window_size().width;
+                        let mx = x as f32 / scale;
+                        let my = y as f32 / scale;
+                        if route
+                            .window
+                            .screen
+                            .renderer
+                            .assistant
+                            .hover(mx, my, win_w, scale)
+                        {
+                            route.request_overlay_redraw();
+                        }
 
-                    if route
-                        .window
-                        .screen
-                        .renderer
-                        .assistant
-                        .hovered_button()
-                        .is_some()
-                    {
-                        route.window.winit_window.set_cursor(CursorIcon::Pointer);
-                    } else {
+                        let cursor = if route
+                            .window
+                            .screen
+                            .renderer
+                            .assistant
+                            .hovered_button()
+                            .is_some()
+                        {
+                            CursorIcon::Pointer
+                        } else {
+                            CursorIcon::Default
+                        };
+                        route.window.winit_window.set_cursor(cursor);
+                        route.leave_terminal_pointer();
+                        return;
+                    }
+                    PointerOwner::CommandPalette => {
+                        let scale = route.window.screen.sugarloaf.scale_factor();
+                        let win_w = route.window.screen.sugarloaf.window_size().width;
+                        let mx = x as f32 / scale;
+                        let my = y as f32 / scale;
+                        if route
+                            .window
+                            .screen
+                            .renderer
+                            .command_palette
+                            .hover(mx, my, win_w, scale)
+                        {
+                            route.request_overlay_redraw();
+                        }
                         route.window.winit_window.set_cursor(CursorIcon::Default);
+                        route.leave_terminal_pointer();
+                        return;
                     }
-                    return;
-                }
-
-                // Handle command palette hover
-                if route.window.screen.renderer.command_palette.is_enabled() {
-                    let scale = route.window.screen.sugarloaf.scale_factor();
-                    let win_w = route.window.screen.sugarloaf.window_size().width;
-                    let mx = x as f32 / scale;
-                    let my = y as f32 / scale;
-                    if route
-                        .window
-                        .screen
-                        .renderer
-                        .command_palette
-                        .hover(mx, my, win_w, scale)
-                    {
-                        route.request_redraw();
-                    }
-                    route.window.winit_window.set_cursor(CursorIcon::Default);
-                    return;
+                    PointerOwner::Terminal => (),
                 }
 
                 // Handle search overlay hover
@@ -1438,6 +1436,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     let win_w = route.window.screen.sugarloaf.window_size().width;
                     let mx = x as f32 / scale;
                     let my = y as f32 / scale;
+                    let search_action = route
+                        .window
+                        .screen
+                        .renderer
+                        .search
+                        .hit_test(mx, my, win_w, scale)
+                        .ok();
                     if route
                         .window
                         .screen
@@ -1462,6 +1467,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                             .set_dirty();
                         route.request_redraw();
                     }
+                    if let Some(action) = search_action {
+                        let cursor =
+                            action.map_or(CursorIcon::Text, |_| CursorIcon::Pointer);
+                        route.window.winit_window.set_cursor(cursor);
+                        route.leave_terminal_pointer();
+                        return;
+                    }
                 }
 
                 if route.window.screen.mouse.left_button_state == ElementState::Pressed
@@ -1477,7 +1489,12 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.window.screen.handle_tab_drag_move(x as f32 / scale);
                     route.window.winit_window.set_cursor(CursorIcon::Default);
                     route.request_redraw();
+                    route.leave_terminal_pointer();
                     return;
+                }
+
+                if route.window.screen.update_close_button_hover(x, y) {
+                    route.request_redraw();
                 }
 
                 // Only force the default cursor while the island is
@@ -1492,6 +1509,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 let nav = &route.window.screen.renderer.navigation;
                 if nav.island_visible(num_tabs) && y <= island_height_px {
                     route.window.winit_window.set_cursor(CursorIcon::Default);
+                    route.leave_terminal_pointer();
                     return;
                 }
 
@@ -1502,6 +1520,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.window.screen.handle_scrollbar_drag(mouse_y);
                     route.window.winit_window.set_cursor(CursorIcon::Default);
                     route.request_redraw();
+                    route.leave_terminal_pointer();
                     return;
                 }
 
@@ -1535,6 +1554,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.window.winit_window.set_cursor(cursor);
                     route.window.screen.context_manager.request_render();
                     route.request_redraw();
+                    route.leave_terminal_pointer();
                     return;
                 }
 
@@ -1553,6 +1573,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         };
                         route.window.winit_window.set_cursor(cursor);
                         route.window.screen.mouse.on_border = true;
+                        route.leave_terminal_pointer();
                         return;
                     }
                 }
@@ -1560,6 +1581,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 // Check if hovering over scrollbar
                 if route.window.screen.is_hovering_scrollbar() {
                     route.window.winit_window.set_cursor(CursorIcon::Default);
+                    route.leave_terminal_pointer();
                     return;
                 }
 
@@ -1641,23 +1663,6 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                         };
 
                     route.window.winit_window.set_cursor(cursor_icon);
-
-                    // In case hyperlink range has cleaned trigger one more render
-                    if route
-                        .window
-                        .screen
-                        .context_manager
-                        .current()
-                        .has_hyperlink_range()
-                    {
-                        route
-                            .window
-                            .screen
-                            .context_manager
-                            .current_mut()
-                            .set_hyperlink_range(None);
-                        route.window.screen.context_manager.request_render();
-                    }
                 }
 
                 route.window.screen.mouse.inside_text_area = inside_text_area;
@@ -1685,7 +1690,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::MouseWheel { delta, phase, .. } => {
-                if route.path != RoutePath::Terminal {
+                if route.path != RoutePath::Terminal
+                    || route.window.screen.renderer.confirm_quit.is_active()
+                {
                     return;
                 }
 
@@ -1733,10 +1740,22 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::KeyboardInput {
-                is_synthetic: false,
+                is_synthetic,
                 event: key_event,
                 ..
             } => {
+                if is_synthetic {
+                    route
+                        .window
+                        .screen
+                        .track_key_event_modifiers(&key_event, true);
+                    return;
+                }
+                route.window.screen.cancel_link_gesture();
+                route
+                    .window
+                    .screen
+                    .track_key_event_modifiers(&key_event, false);
                 if route.has_key_wait(&key_event, &mut self.router.clipboard) {
                     if route.path != RoutePath::Terminal
                         && key_event.state == ElementState::Released
@@ -1751,10 +1770,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
 
                 route.window.screen.context_manager.set_last_typing();
-                route
-                    .window
-                    .screen
-                    .process_key_event(&key_event, &mut self.router.clipboard);
+                route.process_unowned_key_event(&key_event, &mut self.router.clipboard);
                 // `process_key_event` used to call `self.render()` for
                 // local-only keystrokes (VI mode, search input, hint
                 // mode). Now it just marks `pending_update.set_dirty()`
@@ -1772,7 +1788,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::Ime(ime) => {
-                if route.window.screen.renderer.assistant.is_active() {
+                if route.handle_owned_ime(&ime, &mut self.router.clipboard) {
                     return;
                 }
 
@@ -1822,6 +1838,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
             }
             WindowEvent::Touch(touch) => {
+                route.window.screen.cancel_link_gesture();
                 on_touch(route, touch, &mut self.router.clipboard);
             }
 
@@ -1830,10 +1847,13 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     route.window.winit_window.set_cursor_visible(true);
                 }
 
-                let has_regained_focus = !route.window.is_focused && focused;
+                let focus_changed = route.window.is_focused != focused;
                 route.window.is_focused = focused;
 
-                if has_regained_focus {
+                if !focused {
+                    apply_modifiers(route, Modifiers::default());
+                }
+                if focus_changed {
                     route.request_redraw();
                 }
 
@@ -1861,6 +1881,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     false,
                 );
                 route.window.configure_window(&self.config);
+                route.request_redraw();
             }
 
             WindowEvent::DroppedFile(path) => {
@@ -1878,9 +1899,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
 
                 route.window.screen.resize(new_size);
-                if route.path == RoutePath::ConfirmQuit {
-                    route.request_overlay_redraw();
-                }
+                route.request_redraw();
             }
 
             WindowEvent::ScaleFactorChanged {
@@ -1893,9 +1912,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     .screen
                     .set_scale(scale, route.window.winit_window.inner_size());
                 route.window.update_vblank_interval();
-                if route.path == RoutePath::ConfirmQuit {
-                    route.request_overlay_redraw();
-                }
+                route.request_redraw();
             }
 
             WindowEvent::RedrawRequested => {
@@ -1905,18 +1922,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                     RoutePath::Welcome => {
                         route.window.screen.render_welcome();
                     }
-                    RoutePath::Terminal | RoutePath::ConfirmQuit => {
-                        if route.path == RoutePath::ConfirmQuit {
-                            let dim = route.window.screen.ctx().current().dimension;
-                            crate::router::routes::dialog::screen(
-                                &mut route.window.screen.sugarloaf,
-                                &dim,
-                                "want to quit?",
-                                "yes (y)",
-                                "no (n)",
-                            );
-                        }
-
+                    RoutePath::Terminal => {
                         if let Some(window_update) = route.window.screen.render() {
                             use crate::context::renderable::{
                                 BackgroundState, WindowUpdate,
@@ -2038,17 +2044,16 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         // since menu events don't trigger ModifiersChanged events.
         let original_modifiers = route.window.screen.modifiers;
 
-        // Use the modifiers passed from the menu action
+        route.window.screen.cancel_link_gesture();
         route.window.screen.set_modifiers(*modifiers);
-
-        // Process the key event
-        route
-            .window
-            .screen
-            .process_key_event(key, &mut self.router.clipboard);
-
-        // Restore the original modifiers
+        let consumed = route.has_key_wait(key, &mut self.router.clipboard);
+        if !consumed {
+            route.process_unowned_key_event(key, &mut self.router.clipboard);
+        }
         route.window.screen.set_modifiers(original_modifiers);
+        if !consumed {
+            route.request_redraw();
+        }
     }
 
     // Emitted when the event loop is being shut down.
@@ -2144,9 +2149,9 @@ mod redraw_tests {
     use super::*;
 
     #[test]
-    fn confirm_quit_does_not_self_schedule_static_redraw() {
+    fn static_terminal_does_not_self_schedule_redraw() {
         assert!(!should_request_redraw_after_event_frame(
-            &RoutePath::ConfirmQuit,
+            &RoutePath::Terminal,
             false,
         ));
     }

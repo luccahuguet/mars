@@ -20,13 +20,17 @@ use crate::context::{next_rich_text_id, process_open_url, ContextManager};
 use crate::crosswords::{
     grid::{Dimensions, Scroll},
     pos::{Column, Pos, Side},
-    square::Hyperlink,
     vi_mode::ViMotion,
     Mode,
 };
-use crate::hints::{trim_trailing_link_blank_cells, HintState};
+use crate::hints::{
+    is_trailing_hint_delimiter, process_hint_text, trim_trailing_link_blank_cells,
+    HintState,
+};
 use crate::layout::ContextDimension;
+use crate::mars::input::{LinkRelease, MarsInputState, ScreenKeyOwner};
 use crate::mouse::{calculate_mouse_position, Mouse};
+use crate::renderer::island::{self, TabStripLayout, ISLAND_HEIGHT};
 use crate::renderer::{utils::padding_top_from_config, Renderer};
 use crate::screen::hint::HintMatches;
 use crate::selection::{Selection, SelectionType};
@@ -86,9 +90,27 @@ pub struct Screen<'screen> {
     pub resize_state: Option<crate::layout::ResizeState>,
     #[cfg(target_os = "macos")]
     pub allow_manual_dragging: bool,
+    last_chrome_press: Option<ChromePress>,
+    last_close_press: Option<(std::time::Instant, f32)>,
     pub grids: rustc_hash::FxHashMap<usize, rio_backend::sugarloaf::grid::GridRenderer>,
     pub grid_rasterizer: crate::grid_emit::GridGlyphRasterizer,
     visual_bell_until: Option<Instant>,
+    mars_input: MarsInputState,
+}
+
+pub struct ChromePress {
+    window_origin: Option<rio_window::dpi::PhysicalPosition<i32>>,
+    at: std::time::Instant,
+}
+
+impl ChromePress {
+    fn validates_double_click(
+        &self,
+        window_origin: Option<rio_window::dpi::PhysicalPosition<i32>>,
+    ) -> bool {
+        self.at.elapsed() <= crate::constants::MULTI_CLICK_THRESHOLD
+            && self.window_origin == window_origin
+    }
 }
 
 pub struct ScreenWindowProperties {
@@ -355,9 +377,12 @@ impl Screen<'_> {
             resize_state: None,
             #[cfg(target_os = "macos")]
             allow_manual_dragging: config.navigation.is_enabled(),
+            last_chrome_press: None,
+            last_close_press: None,
             grids: rustc_hash::FxHashMap::default(),
             grid_rasterizer: crate::grid_emit::GridGlyphRasterizer::new(),
             visual_bell_until: None,
+            mars_input: MarsInputState::default(),
         })
     }
 
@@ -413,6 +438,21 @@ impl Screen<'_> {
     #[inline]
     pub fn set_modifiers(&mut self, modifiers: Modifiers) {
         self.modifiers = modifiers;
+    }
+
+    #[inline]
+    pub fn track_key_event_modifiers(
+        &mut self,
+        key: &rio_window::event::KeyEvent,
+        is_synthetic: bool,
+    ) {
+        self.mars_input
+            .track_key_event(self.modifiers.state(), key, is_synthetic);
+    }
+
+    #[inline]
+    pub fn capture_route_key_event(&mut self, key: &rio_window::event::KeyEvent) -> bool {
+        self.mars_input.route_owns_key_event(key)
     }
 
     #[inline]
@@ -491,13 +531,11 @@ impl Screen<'_> {
 
         // Preserve existing Island (tab state) and update its colors
         let old_island = self.renderer.island.take();
+        let was_focused = self.renderer.is_window_focused;
         self.renderer = Renderer::new(config);
+        self.renderer.is_window_focused = was_focused;
         if let Some(mut island) = old_island {
-            island.update_colors(
-                config.colors.tabs,
-                config.colors.tabs_active,
-                config.colors.tab_border,
-            );
+            island.update_colors(config.colors.tabs, config.colors.tabs_active);
             self.renderer.island = Some(island);
         }
 
@@ -701,54 +739,104 @@ impl Screen<'_> {
         mode
     }
 
+    fn terminal_key_bytes(
+        key: &rio_window::event::KeyEvent,
+        mode: Mode,
+        mods: ModifiersState,
+    ) -> Vec<u8> {
+        if key.state == ElementState::Released
+            && (!mode.contains(Mode::REPORT_EVENT_TYPES)
+                || matches!(
+                    key.logical_key,
+                    Key::Named(NamedKey::Enter | NamedKey::Tab | NamedKey::Backspace)
+                ) && !mode.contains(Mode::REPORT_ALL_KEYS_AS_ESC))
+        {
+            return Vec::new();
+        }
+
+        let text = key.text_with_all_modifiers().unwrap_or_default();
+        if key.state == ElementState::Released
+            || Self::should_build_sequence(key, text, mode, mods)
+        {
+            return build_key_sequence(key, mods, mode);
+        }
+
+        let mut bytes = Vec::with_capacity(text.len() + 1);
+        if mods.alt_key() {
+            bytes.push(b'\x1b');
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        bytes
+    }
+
+    fn send_terminal_key_event(
+        &mut self,
+        key: &rio_window::event::KeyEvent,
+        route_id: usize,
+        mods: ModifiersState,
+    ) -> bool {
+        let text = key.text_with_all_modifiers().unwrap_or_default();
+        let mods = if self.alt_send_esc(key, text) {
+            mods
+        } else {
+            mods & !ModifiersState::ALT
+        };
+        let Some(context) = self.context_manager.get_by_route_id_anywhere(route_id)
+        else {
+            return false;
+        };
+        let context = context.context_mut();
+        let mode = {
+            let terminal = context.terminal.lock();
+            terminal.mode()
+        };
+        let bytes = Self::terminal_key_bytes(key, mode, mods);
+        if bytes.is_empty() {
+            return false;
+        }
+
+        if key.state == ElementState::Pressed {
+            let mut terminal = context.terminal.lock();
+            if terminal.display_offset() != 0 {
+                terminal.scroll_display(Scroll::Bottom);
+            }
+            terminal.selection.take();
+            drop(terminal);
+            context.set_selection(None);
+        }
+        context.messenger.send_write(bytes);
+        true
+    }
+
     #[inline]
     pub fn process_key_event(
         &mut self,
         key: &rio_window::event::KeyEvent,
         clipboard: &mut Clipboard,
     ) {
+        let captured_owner = self.mars_input.screen_key_owner(key);
+        match captured_owner {
+            ScreenKeyOwner::Route | ScreenKeyOwner::UnownedFollowup => return,
+            ScreenKeyOwner::Screen if key.state == ElementState::Released => return,
+            ScreenKeyOwner::Terminal(route_id) => {
+                self.send_terminal_key_event(key, route_id, self.modifiers.state());
+                return;
+            }
+            ScreenKeyOwner::Fresh | ScreenKeyOwner::Screen => {}
+        }
+
         if self.context_manager.current().ime.preedit().is_some() {
+            self.mars_input.capture_screen_key(key);
             return;
         }
 
         let mode = self.get_mode();
         let mods = self.modifiers.state();
 
-        if key.state == ElementState::Released {
-            if !mode.contains(Mode::REPORT_EVENT_TYPES)
-                || mode.contains(Mode::VI)
-                || self.search_active()
-                || self.hint_state.is_active()
-            {
-                return;
-            }
-
-            // Mask `Alt` modifier from input when we won't send esc.
-            let text = key.text_with_all_modifiers().unwrap_or_default();
-            let mods = if self.alt_send_esc(key, text) {
-                mods
-            } else {
-                mods & !ModifiersState::ALT
-            };
-
-            let bytes = match key.logical_key.as_ref() {
-                Key::Named(NamedKey::Enter)
-                | Key::Named(NamedKey::Tab)
-                | Key::Named(NamedKey::Backspace)
-                    if !mode.contains(Mode::REPORT_ALL_KEYS_AS_ESC) =>
-                {
-                    return
-                }
-                _ => build_key_sequence(key, mods, mode),
-            };
-
-            self.ctx_mut().current_mut().messenger.send_write(bytes);
-
-            return;
-        }
-
         // All key bindings are disabled while a hint is being selected (like Alacritty)
         if self.hint_state.is_active() {
+            self.mars_input.capture_screen_key(key);
+
             // Handle special keys first
             match key.logical_key {
                 rio_window::keyboard::Key::Named(
@@ -772,36 +860,21 @@ impl Screen<'_> {
                 _ => {}
             }
 
-            // Handle text input
             let text = key.text_with_all_modifiers().unwrap_or_default();
-            for character in text.chars() {
-                let terminal = self.context_manager.current().terminal.lock();
-                if let Some(hint_match) =
-                    self.hint_state.keyboard_input(&*terminal, character)
-                {
-                    drop(terminal);
-                    self.execute_hint_action(&hint_match, clipboard);
-                    // Stop hint mode and update state with proper damage tracking
-                    self.hint_state.stop();
-                    self.update_hint_state();
-                    self.mark_dirty();
-                    return;
-                }
-                drop(terminal);
-            }
-            self.update_hint_state();
-            self.mark_dirty();
+            self.input_hint_text(text, clipboard);
             return;
         }
 
         let ignore_chars = self.process_key_bindings(key, &mode, mods, clipboard);
         if ignore_chars {
+            self.mars_input.capture_screen_key(key);
             return;
         }
 
         let text = key.text_with_all_modifiers().unwrap_or_default();
 
         if self.search_active() {
+            self.mars_input.capture_screen_key(key);
             for character in text.chars() {
                 self.search_input(character);
             }
@@ -812,35 +885,48 @@ impl Screen<'_> {
 
         // Vi mode on its own doesn't have any input, the search input was done before.
         if mode.contains(Mode::VI) {
+            self.mars_input.capture_screen_key(key);
             return;
         }
 
-        // Mask `Alt` modifier from input when we won't send esc.
-        let mods = if self.alt_send_esc(key, text) {
-            mods
-        } else {
-            mods & !ModifiersState::ALT
-        };
+        // A screen-owned repeat stays local even if its original handler closed.
+        if captured_owner == ScreenKeyOwner::Screen {
+            return;
+        }
 
-        let build_key_sequence = Self::should_build_sequence(key, text, mode, mods);
-
-        let bytes = if build_key_sequence {
-            crate::bindings::kitty_keyboard::build_key_sequence(key, mods, mode)
-        } else {
-            let mut bytes = Vec::with_capacity(text.len() + 1);
-            if mods.alt_key() {
-                bytes.push(b'\x1b');
+        let route_id = self.context_manager.current_route();
+        if self.send_terminal_key_event(key, route_id, self.modifiers.state()) {
+            self.mars_input.capture_terminal_key(key, route_id);
+        }
+    }
+    fn input_hint_text(&mut self, text: &str, clipboard: &mut Clipboard) {
+        for character in text.chars() {
+            let terminal = self.context_manager.current().terminal.lock();
+            if let Some(hint_match) =
+                self.hint_state.keyboard_input(&*terminal, character)
+            {
+                drop(terminal);
+                self.execute_hint_action(&hint_match, clipboard);
+                self.hint_state.stop();
+                self.update_hint_state();
+                self.mark_dirty();
+                return;
             }
+            drop(terminal);
+        }
+        self.update_hint_state();
+        self.mark_dirty();
+    }
 
-            bytes.extend_from_slice(text.as_bytes());
-            bytes
-        };
-
-        if !bytes.is_empty() {
-            self.scroll_bottom_when_cursor_not_visible();
-            self.clear_selection();
-
-            self.ctx_mut().current_mut().messenger.send_write(bytes);
+    pub fn handle_local_ime_commit(&mut self, text: &str, clipboard: &mut Clipboard) {
+        if self.hint_state.is_active() {
+            self.input_hint_text(text, clipboard);
+        } else {
+            debug_assert!(self.search_active());
+            for character in text.chars() {
+                self.search_input(character);
+            }
+            self.mark_dirty();
         }
     }
 
@@ -972,6 +1058,9 @@ impl Screen<'_> {
                     }
                     Act::Copy => {
                         self.copy_selection(ClipboardType::Clipboard, clipboard);
+                    }
+                    Act::SelectAll => {
+                        self.select_all();
                     }
                     Act::Hint(hint_config) => {
                         self.start_hint_mode(hint_config.clone());
@@ -1413,8 +1502,8 @@ impl Screen<'_> {
                             old_index,
                             new_index,
                         );
-                        let (_, _, tab_width) =
-                            self.island_tab_layout(self.context_manager.len());
+                        let tab_width =
+                            self.island_tab_layout(self.context_manager.len()).tab_width;
                         if let Some(ref mut island) = self.renderer.island {
                             island.remap_tab_swap(old_index, new_index, tab_width);
                         }
@@ -1431,8 +1520,8 @@ impl Screen<'_> {
                             old_index,
                             new_index,
                         );
-                        let (_, _, tab_width) =
-                            self.island_tab_layout(self.context_manager.len());
+                        let tab_width =
+                            self.island_tab_layout(self.context_manager.len()).tab_width;
                         if let Some(ref mut island) = self.renderer.island {
                             island.remap_tab_swap(old_index, new_index, tab_width);
                         }
@@ -1599,8 +1688,7 @@ impl Screen<'_> {
             }
             return;
         }
-
-        let num_tabs = self.ctx().len().wrapping_sub(1);
+        let num_tabs = self.ctx().len();
         self.resize_top_or_bottom_line(num_tabs);
         self.mark_dirty();
     }
@@ -1768,6 +1856,22 @@ impl Screen<'_> {
     }
 
     #[inline]
+    pub fn select_all(&mut self) {
+        let current = self.context_manager.current_mut();
+        let mut terminal = current.terminal.lock();
+        let start = Pos::new(terminal.grid.topmost_line(), Column(0));
+        let end = Pos::new(terminal.grid.bottommost_line(), terminal.grid.last_column());
+        let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+        selection.update(end, Side::Right);
+        let selection_range = selection.to_range(&terminal);
+        terminal.selection = Some(selection);
+        drop(terminal);
+
+        current.set_selection(selection_range);
+        self.context_manager.request_render();
+    }
+
+    #[inline]
     pub fn clear_selection(&mut self) {
         // Clear the selection on the terminal.
         let mut terminal = self.context_manager.current_mut().terminal.lock();
@@ -1877,29 +1981,13 @@ impl Screen<'_> {
     /// Update hint highlighting based on mouse position and modifiers
     pub fn update_highlighted_hints(&mut self) -> bool {
         // Check if any hint configuration has matching modifiers
-        let should_highlight = self.hints_config.iter().any(|hint_config| {
-            hint_config.mouse.enabled && self.modifiers_match(&hint_config.mouse.mods)
-        });
-
-        let had_highlight = self
-            .context_manager
-            .current()
-            .renderable_content
-            .highlighted_hint
-            .is_some();
+        let should_highlight = self.mouse.last_cell.is_some()
+            && self.hints_config.iter().any(|hint_config| {
+                hint_config.mouse.enabled && self.modifiers_match(&hint_config.mouse.mods)
+            });
 
         if !should_highlight {
-            let current = self.context_manager.current_mut();
-
-            // Clear any previous hint damage
-            if current.renderable_content.highlighted_hint.is_some() {
-                let mut terminal = current.terminal.lock();
-                let display_offset = terminal.display_offset();
-                terminal.update_selection_damage(None, display_offset);
-            }
-
-            current.renderable_content.highlighted_hint = None;
-            return had_highlight;
+            return self.clear_highlighted_hint();
         }
 
         let terminal = self.context_manager.current().terminal.lock();
@@ -1941,22 +2029,33 @@ impl Screen<'_> {
             current.renderable_content.highlighted_hint = Some(hint_match);
             true
         } else {
-            if current.renderable_content.highlighted_hint.is_some() {
-                let mut terminal = current.terminal.lock();
-                let display_offset = terminal.display_offset();
-                terminal.update_selection_damage(None, display_offset);
-            }
-
-            // Force a render so the previously-highlighted line clears.
-            if had_highlight {
-                current
-                    .renderable_content
-                    .pending_update
-                    .set_terminal_damage(rio_backend::event::TerminalDamage::Full);
-            }
-            current.renderable_content.highlighted_hint = None;
-            had_highlight
+            self.clear_highlighted_hint()
         }
+    }
+
+    fn clear_highlighted_hint(&mut self) -> bool {
+        let current = self.context_manager.current_mut();
+        if current.renderable_content.highlighted_hint.is_none() {
+            return false;
+        }
+
+        let mut terminal = current.terminal.lock();
+        let display_offset = terminal.display_offset();
+        terminal.update_selection_damage(None, display_offset);
+        drop(terminal);
+
+        current.renderable_content.highlighted_hint = None;
+        current
+            .renderable_content
+            .pending_update
+            .set_terminal_damage(rio_backend::event::TerminalDamage::Full);
+        true
+    }
+
+    pub fn on_terminal_pointer_exit(&mut self) -> bool {
+        self.mouse.last_cell = None;
+        self.mars_input.cancel_link();
+        self.clear_highlighted_hint()
     }
 
     #[inline]
@@ -1969,9 +2068,66 @@ impl Screen<'_> {
     }
 
     #[inline]
+    pub fn begin_left_press(&mut self) {
+        self.mars_input.begin_left_press();
+    }
+
+    #[inline]
+    pub fn consume_left_press(&mut self) {
+        self.mars_input.consume_left_press();
+    }
+
+    #[inline]
     pub fn prepare_hint_click(&mut self) -> bool {
         self.update_highlighted_hints();
-        self.has_highlighted_hint()
+        let Some(hint) = self
+            .context_manager
+            .current()
+            .renderable_content
+            .highlighted_hint
+            .clone()
+        else {
+            return false;
+        };
+
+        let origin = self.mouse_position(self.display_offset());
+        self.mars_input.start_link(origin, hint);
+        true
+    }
+
+    #[inline]
+    pub fn cancel_link_gesture(&mut self) {
+        self.mars_input.cancel_link();
+    }
+
+    #[inline]
+    pub fn cancel_link_gesture_if_moved(&mut self, position: Pos) {
+        self.mars_input.cancel_link_if_moved(position);
+    }
+
+    /// Finish a terminal-owned left press. Returns whether the release was owned.
+    #[inline]
+    pub fn finish_hint_click(&mut self, clipboard: &mut Clipboard) -> bool {
+        let (origin, target) = match self.mars_input.finish_link() {
+            LinkRelease::NotOwned => return false,
+            LinkRelease::Cancelled => return true,
+            LinkRelease::Activate { origin, target } => (origin, target),
+        };
+
+        if self.mouse_position(self.display_offset()) == origin {
+            self.update_highlighted_hints();
+            let hint = self
+                .context_manager
+                .current_mut()
+                .renderable_content
+                .highlighted_hint
+                .take_if(|hint| hint == &target);
+            if let Some(hint) = hint {
+                self.execute_hint_action(&hint, clipboard);
+            }
+        }
+
+        true
     }
 
     /// Check if current modifiers match the required modifiers
@@ -2021,7 +2177,7 @@ impl Screen<'_> {
             // Check hyperlinks if enabled
             if hint_config.hyperlinks {
                 if let Some(hyperlink_match) =
-                    self.find_hyperlink_at_point(terminal, point)
+                    self.find_hyperlink_at_point(terminal, point, hint_config.clone())
                 {
                     return Some(hyperlink_match);
                 }
@@ -2050,6 +2206,7 @@ impl Screen<'_> {
         &self,
         terminal: &rio_backend::crosswords::Crosswords<EventProxy>,
         point: rio_backend::crosswords::pos::Pos,
+        hint: std::rc::Rc<rio_backend::config::hints::Hint>,
     ) -> Option<crate::hints::HintMatch> {
         let grid = &terminal.grid;
 
@@ -2091,46 +2248,12 @@ impl Screen<'_> {
 
         let hyperlink = terminal.cell_hyperlink(point.row, point.col)?;
 
-        // Build a synthetic hint config so the rest of the hint
-        // pipeline (highlighting, click action) treats this just like
-        // a regex/url match.
-        let hint_config = std::rc::Rc::new(rio_backend::config::hints::Hint {
-            regex: None,
-            hyperlinks: true,
-            post_processing: true,
-            persist: false,
-            action: rio_backend::config::hints::HintAction::Command {
-                command: Self::default_open_hint_command(),
-            },
-            mouse: rio_backend::config::hints::HintMouse::default(),
-            binding: None,
-        });
-
-        let mut uri = hyperlink.uri().to_string();
-        if hint_config.post_processing {
-            uri = post_process_hyperlink_uri(&uri);
-        }
-
-        Some(crate::hints::HintMatch {
-            text: uri,
-            start: rio_backend::crosswords::pos::Pos::new(point.row, start_col),
-            end: rio_backend::crosswords::pos::Pos::new(point.row, trimmed_end_col),
-            hint: hint_config,
-        })
-    }
-
-    fn default_open_hint_command() -> rio_backend::config::hints::HintCommand {
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        return rio_backend::config::hints::HintCommand::Simple("xdg-open".to_string());
-
-        #[cfg(target_os = "macos")]
-        return rio_backend::config::hints::HintCommand::Simple("open".to_string());
-
-        #[cfg(target_os = "windows")]
-        return rio_backend::config::hints::HintCommand::WithArgs {
-            program: "cmd".to_string(),
-            args: vec!["/c".to_string(), "start".to_string(), "".to_string()],
-        };
+        crate::hints::HintMatch::from_hyperlink(
+            hyperlink.uri(),
+            rio_backend::crosswords::pos::Pos::new(point.row, start_col),
+            rio_backend::crosswords::pos::Pos::new(point.row, trimmed_end_col),
+            hint,
+        )
     }
 
     /// Find regex match at the specified point
@@ -2156,146 +2279,41 @@ impl Screen<'_> {
         }
         let line_text = line_text.trim_end();
 
-        // Find all matches in this line and check if point is within any of them.
-        // Onig yields (byte_start, byte_end); we slice the source ourselves.
-        for (start, end) in regex.find_iter(line_text) {
-            let start_col = rio_backend::crosswords::pos::Column(start);
-            let end_col = rio_backend::crosswords::pos::Column(end.saturating_sub(1));
-
-            if !point_hits_match_or_trailing_delimiters(line_text, start, end, point.col)
-            {
+        // Onig yields byte offsets, while terminal positions are character columns.
+        for (byte_start, byte_end) in regex.find_iter(line_text) {
+            let start = line_text[..byte_start].chars().count();
+            let raw_end = start + line_text[byte_start..byte_end].chars().count();
+            if !point_hits_match_or_trailing_delimiters(
+                line_text, start, raw_end, point.col,
+            ) {
                 continue;
             }
 
-            // Apply grid-based post-processing before hit testing the final
-            // activatable range. Raw regex matches can include surrounding
-            // punctuation; those cells must not become hover/click targets.
-            let (processed_start, processed_end) = if hint_config.post_processing {
-                self.hint_post_processing(
-                    terminal,
-                    start_col,
-                    end_col,
-                    rio_backend::crosswords::pos::Line(point.row.0),
-                )
-                .unwrap_or((start_col, end_col))
-            } else {
-                (start_col, end_col)
-            };
-            let Some(processed_end) = trim_trailing_link_blank_cells(
-                terminal,
-                point.row,
-                processed_start,
-                processed_end,
+            let Some(match_text) = process_hint_text(
+                &line_text[byte_start..byte_end],
+                hint_config.post_processing,
             ) else {
                 continue;
             };
+            let end = start + match_text.chars().count();
 
-            // Check if the point is within the post-processed match or on
-            // punctuation immediately after it. The opened text remains the
-            // cleaned URL, and the highlight remains limited to the URL.
-            if point_hits_match_or_trailing_delimiters(
-                line_text,
-                processed_start.0,
-                processed_end.0 + 1,
-                point.col,
-            ) {
-                let original_match_text = line_text[start..end].to_string();
-                let mut match_text = original_match_text.clone();
-
-                // Extract the processed text
-                if hint_config.post_processing {
-                    let mut processed_text = String::new();
-                    for col in processed_start.0..=processed_end.0 {
-                        let cell =
-                            &grid[point.row][rio_backend::crosswords::pos::Column(col)];
-                        processed_text.push(cell.c());
-                    }
-                    match_text = processed_text.trim_end().to_string();
-                }
-
+            if point_hits_match_or_trailing_delimiters(line_text, start, end, point.col) {
                 return Some(crate::hints::HintMatch {
                     text: match_text,
                     start: rio_backend::crosswords::pos::Pos::new(
                         point.row,
-                        processed_start,
+                        rio_backend::crosswords::pos::Column(start),
                     ),
-                    end: rio_backend::crosswords::pos::Pos::new(point.row, processed_end),
+                    end: rio_backend::crosswords::pos::Pos::new(
+                        point.row,
+                        rio_backend::crosswords::pos::Column(end - 1),
+                    ),
                     hint: hint_config,
                 });
             }
         }
 
         None
-    }
-
-    #[inline]
-    pub fn trigger_hyperlink(&self) -> bool {
-        // Check if any hyperlink hint configuration has the required modifiers active
-        let mut is_hyperlink_key_active = false;
-        for hint_config in &self.hints_config {
-            if hint_config.hyperlinks && self.modifiers_match(&hint_config.mouse.mods) {
-                is_hyperlink_key_active = true;
-                break;
-            }
-        }
-
-        if !is_hyperlink_key_active
-            || !self.context_manager.current().has_hyperlink_range()
-        {
-            return false;
-        }
-
-        // Look up the cell under the mouse and dispatch open_hyperlink
-        // if it carries an OSC 8 link.
-        let terminal = self.context_manager.current().terminal.lock();
-        let display_offset = terminal.display_offset();
-        let pos = self.mouse_position(display_offset);
-        let pos_hyperlink = terminal.cell_hyperlink(pos.row, pos.col);
-        drop(terminal);
-
-        if let Some(hyperlink) = pos_hyperlink {
-            self.open_hyperlink(hyperlink);
-            return true;
-        }
-
-        false
-    }
-
-    /// Trigger hint action at mouse position
-    #[inline]
-    pub fn trigger_hint(&mut self, clipboard: &mut Clipboard) -> bool {
-        // Take the highlighted hint
-        let hint_match = self
-            .context_manager
-            .current_mut()
-            .renderable_content
-            .highlighted_hint
-            .take();
-
-        if let Some(hint_match) = hint_match {
-            self.execute_hint_action(&hint_match, clipboard);
-            true
-        } else {
-            false
-        }
-    }
-
-    fn open_hyperlink(&self, hyperlink: Hyperlink) {
-        // Apply post-processing to remove trailing delimiters and handle uneven brackets
-        let processed_uri = post_process_hyperlink_uri(hyperlink.uri());
-        if crate::hints::has_uri_scheme(&processed_uri) {
-            Self::open_uri_direct(&processed_uri);
-            return;
-        }
-
-        #[cfg(not(any(target_os = "macos", windows)))]
-        self.exec("xdg-open", [&processed_uri]);
-
-        #[cfg(target_os = "macos")]
-        self.exec("open", [&processed_uri]);
-
-        #[cfg(windows)]
-        self.exec("cmd", ["/c", "start", "", &processed_uri]);
     }
 
     fn open_uri_direct(uri: &str) {
@@ -2736,13 +2754,12 @@ impl Screen<'_> {
     }
 
     #[inline]
-    fn island_tab_layout(&self, num_tabs: usize) -> (f32, f32, f32) {
-        let layout = crate::renderer::island::tab_strip_layout(
+    fn island_tab_layout(&self, num_tabs: usize) -> TabStripLayout {
+        island::tab_strip_layout(
             self.sugarloaf.window_size().width,
             self.sugarloaf.scale_factor(),
             num_tabs,
-        );
-        (layout.left_margin, layout.available_width, layout.tab_width)
+        )
     }
 
     #[cfg(target_os = "macos")]
@@ -2751,11 +2768,82 @@ impl Screen<'_> {
         let _ = window.drag_window();
     }
 
+    fn on_chrome_press(
+        &mut self,
+        window: &rio_window::window::Window,
+        prev: Option<ChromePress>,
+    ) {
+        let window_origin = window.outer_position().ok();
+        let double = matches!(self.mouse.click_state, ClickState::DoubleClick)
+            && prev.is_some_and(|p| p.validates_double_click(window_origin));
+        if double {
+            let is_maximized = window.is_maximized();
+            window.set_maximized(!is_maximized);
+            return;
+        }
+
+        self.last_chrome_press = Some(ChromePress {
+            window_origin,
+            at: std::time::Instant::now(),
+        });
+        #[cfg(target_os = "macos")]
+        if self.allow_manual_dragging {
+            self.start_window_drag(window);
+        }
+    }
+
+    #[inline]
+    pub fn take_chrome_press(&mut self) -> Option<ChromePress> {
+        self.last_chrome_press.take()
+    }
+
+    fn is_close_press_tail(&self, x_unscaled: f32) -> bool {
+        const CLOSE_TAIL_SLOP: f32 = 16.0;
+        self.last_close_press.is_some_and(|(at, press_x)| {
+            at.elapsed() <= crate::constants::MULTI_CLICK_THRESHOLD
+                && (x_unscaled - press_x).abs() <= CLOSE_TAIL_SLOP
+        })
+    }
+
+    fn apply_close_hover(&mut self, hover: bool) -> bool {
+        let changed = self
+            .renderer
+            .island
+            .as_mut()
+            .is_some_and(|island| island.set_close_hover(hover));
+        if changed {
+            self.mark_dirty();
+        }
+        changed
+    }
+
+    pub fn update_close_button_hover(&mut self, mouse_x: f64, mouse_y: f64) -> bool {
+        let num_tabs = self.context_manager.len();
+        let scale_factor = self.sugarloaf.scale_factor();
+
+        let hovering = num_tabs > 1
+            && self.renderer.navigation.island_visible(num_tabs)
+            && mouse_y <= (ISLAND_HEIGHT * scale_factor) as f64
+            && island::close_button_hit(
+                &self.island_tab_layout(num_tabs),
+                self.context_manager.current_index(),
+                mouse_x as f32 / scale_factor,
+            );
+
+        self.apply_close_hover(hovering)
+    }
+
+    #[inline]
+    pub fn clear_close_button_hover(&mut self) -> bool {
+        self.apply_close_hover(false)
+    }
+
     pub fn handle_island_click(
         &mut self,
         window: &rio_window::window::Window,
         clipboard: &mut Clipboard,
         is_right_click: bool,
+        chrome_press: Option<ChromePress>,
     ) -> bool {
         // Only handle if navigation is enabled
         if !self.renderer.navigation.is_enabled() {
@@ -2765,7 +2853,6 @@ impl Screen<'_> {
         let mouse_x = self.mouse.x;
         let mouse_y = self.mouse.y;
 
-        use crate::renderer::island::ISLAND_HEIGHT;
         let scale_factor = self.sugarloaf.scale_factor();
         let island_height_px = (ISLAND_HEIGHT * scale_factor) as f64;
 
@@ -2773,10 +2860,6 @@ impl Screen<'_> {
         let num_tabs = self.context_manager.len();
         let island_visible = self.renderer.navigation.island_visible(num_tabs);
 
-        // Check if the color picker is open and the click hits a swatch.
-        // Handled before the `island_visible` short-circuit so a picker
-        // left open across a tab-close (hide_if_single trip) can still
-        // be dismissed by clicking its swatches.
         if let Some(ref mut island) = self.renderer.island {
             if island.is_color_picker_open() {
                 let consumed = island.handle_color_picker_click(
@@ -2806,46 +2889,46 @@ impl Screen<'_> {
             return false;
         }
 
+        let mouse_x_unscaled = mouse_x as f32 / scale_factor;
+
         // Island isn't painted (hide_if_single + single tab on macOS).
         // Nothing to click on, so let the caller route the event to the
         // grid for selection / double-click maximize at the OS title bar.
         if !island_visible {
+            // …unless a ×-close just hid the strip (2 tabs → 1 with
+            // hide-if-single): the tail press of a double-click on the
+            // × would otherwise leak into the terminal as a selection,
+            // or start a window drag via the band fallback.
+            if self.is_close_press_tail(mouse_x_unscaled) {
+                return true;
+            }
             return false;
         }
 
-        if !is_right_click {
-            if let ClickState::DoubleClick = self.mouse.click_state {
-                let is_maximized = window.is_maximized();
-                window.set_maximized(!is_maximized);
-                return true;
-            }
+        let layout = self.island_tab_layout(num_tabs);
+        let x_in_tabs = mouse_x_unscaled - layout.left_margin;
+
+        if !is_right_click
+            && self.is_close_press_tail(mouse_x_unscaled)
+            && !island::close_button_hit(
+                &layout,
+                self.context_manager.current_index(),
+                mouse_x_unscaled,
+            )
+        {
+            return true;
         }
 
-        let (left_margin, _available_width, tab_width) = self.island_tab_layout(num_tabs);
-
-        let mouse_x_unscaled = mouse_x as f32 / scale_factor;
-
-        // Note: automatic titlebar dragging is disabled for island windows
-        // (`with_mouse_down_can_move_window(false)`), so left presses on
-        // the band margins outside the tabs hand the drag back to AppKit.
-        if mouse_x_unscaled < left_margin {
-            #[cfg(target_os = "macos")]
-            if !is_right_click && self.allow_manual_dragging {
-                self.start_window_drag(window);
+        if x_in_tabs < 0.0 || x_in_tabs >= layout.tabs_width {
+            if !is_right_click {
+                self.on_chrome_press(window, chrome_press);
             }
             return true;
         }
 
-        let x_in_tabs = mouse_x_unscaled - left_margin;
-        let clicked_tab = (x_in_tabs / tab_width) as usize;
-
-        if clicked_tab >= num_tabs {
-            #[cfg(target_os = "macos")]
-            if !is_right_click && self.allow_manual_dragging {
-                self.start_window_drag(window);
-            }
-            return true;
-        }
+        // `.min` guards the float edge where x_in_tabs / tab_width
+        // lands exactly on num_tabs despite x_in_tabs < tabs_width.
+        let clicked_tab = ((x_in_tabs / layout.tab_width) as usize).min(num_tabs - 1);
 
         #[cfg(target_os = "macos")]
         if !is_right_click && self.modifiers.state().super_key() {
@@ -2881,13 +2964,28 @@ impl Screen<'_> {
                     &current_title,
                     &mut self.context_manager,
                 );
+                self.clear_ime_preedit();
                 self.mark_dirty();
             }
             return true;
         }
 
-        // Normal click → switch tab
+        if num_tabs == 1 {
+            self.on_chrome_press(window, chrome_press);
+            return true;
+        }
+
+        if clicked_tab == self.context_manager.current_index()
+            && island::close_button_hit(&layout, clicked_tab, mouse_x_unscaled)
+        {
+            self.stop_hint_mode_if_active();
+            self.last_close_press = Some((std::time::Instant::now(), mouse_x_unscaled));
+            self.close_tab(clipboard);
+            return true;
+        }
+
         if clicked_tab != self.context_manager.current_index() {
+            self.stop_hint_mode_if_active();
             self.cancel_search(clipboard);
             self.clear_selection();
             let old_index = self.context_manager.current_index();
@@ -2902,7 +3000,6 @@ impl Screen<'_> {
             self.mark_dirty();
         }
 
-        // Close picker on normal click
         if let Some(ref mut island) = self.renderer.island {
             if island.is_color_picker_open() {
                 island.close_color_picker(&mut self.context_manager);
@@ -2916,7 +3013,7 @@ impl Screen<'_> {
         let can_reorder = true;
         if num_tabs > 1 && can_reorder {
             if let Some(ref mut island) = self.renderer.island {
-                let tab_left = left_margin + clicked_tab as f32 * tab_width;
+                let tab_left = layout.left_margin + clicked_tab as f32 * layout.tab_width;
                 island.start_drag(
                     clicked_tab,
                     mouse_x_unscaled - tab_left,
@@ -2939,7 +3036,7 @@ impl Screen<'_> {
             return;
         }
 
-        let (left_margin, available_width, tab_width) = self.island_tab_layout(num_tabs);
+        let layout = self.island_tab_layout(num_tabs);
 
         let (drag_idx, center) = match self.renderer.island.as_mut() {
             Some(island) => {
@@ -2947,10 +3044,7 @@ impl Screen<'_> {
                     // armed but still below the drag threshold
                     return;
                 }
-                match (
-                    island.drag_index(),
-                    island.drag_center(left_margin, available_width, tab_width),
-                ) {
+                match (island.drag_index(), island.drag_center(&layout)) {
                     (Some(idx), Some(center)) => (idx, center),
                     _ => return,
                 }
@@ -2967,7 +3061,8 @@ impl Screen<'_> {
             return;
         }
 
-        let target = (((center - left_margin) / tab_width) as usize).min(num_tabs - 1);
+        let target = (((center - layout.left_margin) / layout.tab_width) as usize)
+            .min(num_tabs - 1);
         if target != old_index {
             self.context_manager.move_current_tab_to(target);
             let new_index = self.context_manager.current_index();
@@ -2977,7 +3072,7 @@ impl Screen<'_> {
                 new_index,
             );
             if let Some(ref mut island) = self.renderer.island {
-                island.remap_tab_move(old_index, new_index, tab_width);
+                island.remap_tab_move(old_index, new_index, layout.tab_width);
             }
         }
         self.mark_dirty();
@@ -2985,11 +3080,11 @@ impl Screen<'_> {
 
     pub fn handle_tab_drag_release(&mut self) -> bool {
         let num_tabs = self.context_manager.len();
-        let (left_margin, available_width, tab_width) = self.island_tab_layout(num_tabs);
+        let layout = self.island_tab_layout(num_tabs);
 
         if let Some(ref mut island) = self.renderer.island {
             let started = island.drag_index().is_some();
-            island.end_drag(left_margin, available_width, tab_width);
+            island.end_drag(&layout);
             if started {
                 self.mark_dirty();
             }
@@ -3387,14 +3482,27 @@ impl Screen<'_> {
 
     #[inline]
     pub fn on_focus_change(&mut self, is_focused: bool) {
+        self.renderer.is_window_focused = is_focused;
+        if is_focused {
+            self.mark_dirty();
+        }
         if !is_focused {
-            if let Some(ref mut island) = self.renderer.island {
-                if island.is_dragging() {
-                    island.cancel_drag();
-                    self.mark_dirty();
-                }
+            self.cancel_pointer_interactions();
+            for release in self.mars_input.drain_focus_loss_keys() {
+                self.send_terminal_key_event(
+                    &release.event,
+                    release.route_id,
+                    release.modifiers,
+                );
             }
-            self.mouse.left_button_state = ElementState::Released;
+            self.clear_ime_preedit();
+            let rc = &mut self.context_manager.current_mut().renderable_content;
+            if !rc.is_blinking_cursor_visible {
+                rc.is_blinking_cursor_visible = true;
+            }
+            rc.last_blink_toggle = None;
+            rc.pending_update
+                .set_terminal_damage(rio_backend::event::TerminalDamage::CursorOnly);
         }
 
         if self.get_mode().contains(Mode::FOCUS_IN_OUT) {
@@ -3676,6 +3784,7 @@ impl Screen<'_> {
         if grid_cols > 0 && grid_rows > 0 {
             self.ensure_grid(current_route, grid_cols, grid_rows);
         }
+        self.update_close_button_hover(self.mouse.x, self.mouse.y);
 
         let is_search_active = self.search_active();
         if is_search_active {
@@ -3898,6 +4007,8 @@ impl Screen<'_> {
                     rio_backend::crosswords::pos::Pos,
                     rio_backend::crosswords::pos::Pos,
                 )>,
+                hint_labels: Option<Vec<crate::context::renderable::HintLabel>>,
+                label_style_base: Option<u16>,
             }
 
             let (active_key, scaled_margin) = {
@@ -3950,7 +4061,8 @@ impl Screen<'_> {
                 // allocations.
                 let visible_rows =
                     std::mem::take(&mut ctx.renderable_content.visible_rows);
-                let style_table = std::mem::take(&mut ctx.renderable_content.style_table);
+                let mut style_table =
+                    std::mem::take(&mut ctx.renderable_content.style_table);
                 let extras = std::mem::take(&mut ctx.renderable_content.extras);
                 let term_colors = ctx.renderable_content.term_colors;
                 let display_offset = ctx.renderable_content.display_offset as i32;
@@ -3985,6 +4097,21 @@ impl Screen<'_> {
                 } else {
                     None
                 };
+                let hint_labels = if is_active {
+                    std::mem::take(&mut ctx.renderable_content.hint_labels)
+                } else {
+                    None
+                };
+                let label_style_base = hint_labels
+                    .as_deref()
+                    .filter(|labels| !labels.is_empty())
+                    .map(|_| {
+                        crate::grid_emit::push_hint_label_styles(
+                            &mut style_table,
+                            self.renderer.named_colors.hint_foreground,
+                            self.renderer.named_colors.hint_background,
+                        )
+                    });
                 let cursor_shape = cursor.state.content;
                 let cursor_blinking = ctx.renderable_content.has_blinking_enabled;
                 let cursor_blink_visible =
@@ -4026,6 +4153,8 @@ impl Screen<'_> {
                     hint_matches,
                     focused_match,
                     hovered_hyperlink,
+                    hint_labels,
+                    label_style_base,
                 });
             }
 
@@ -4141,6 +4270,26 @@ impl Screen<'_> {
                             p.display_offset,
                             &mut hint_scratch,
                         );
+                        let label_row;
+                        let row = match (p.hint_labels.as_deref(), p.label_style_base) {
+                            (Some(labels), Some(style_base)) => {
+                                match crate::grid_emit::overlay_hint_labels(
+                                    row,
+                                    labels,
+                                    y,
+                                    p.display_offset,
+                                    style_base,
+                                    &mut hint_scratch,
+                                ) {
+                                    Some(overlaid) => {
+                                        label_row = overlaid;
+                                        &label_row
+                                    }
+                                    None => row,
+                                }
+                            }
+                            _ => row,
+                        };
                         crate::grid_emit::build_row_bg(
                             row,
                             cols,
@@ -4215,15 +4364,17 @@ impl Screen<'_> {
                 // `cursor.style()`):
                 // 1. Decide render style with strict priority:
                 // preedit > visible > focused > blink > shape.
-                // 2. Always clear both cursor slots first — last
-                // frame's sprite (if any) needs to disappear
-                // whether we emit a new one or not.
-                // 3. Some(style): emit a sprite into slot 0 (block)
-                // or slot rows+1 (others). For Block we ALSO
-                // write the bg-tint uniforms below so the bg
-                // fragment paints the block + the text shader
-                // inverts the underlying glyph.
-                // 4. None: leave both slots empty + zero uniforms.
+                // 2. Some(style): build the sprite for the block
+                // slot (drawn under text; the bg-tint uniforms
+                // below make the bg fragment paint the block +
+                // the text shader invert the underlying glyph)
+                // or the tail slot (bar/underline, drawn over
+                // text). None: both stay empty + zero uniforms.
+                // 3. One `grid.set_cursor(block, tail)` call
+                // replaces both slots. It diffs against last
+                // frame and only dirties cursor buffers on
+                // change — do NOT clear the slots beforehand,
+                // that would dirty them every frame.
                 let render_style = crate::grid_emit::cursor_render_style(
                     crate::grid_emit::CursorRenderInputs {
                         visible: p.cursor_visible,
@@ -4234,33 +4385,54 @@ impl Screen<'_> {
                         shape: p.cursor_shape,
                     },
                 );
-                grid.clear_cursor();
+                let mut cursor_cells =
+                    [rio_backend::sugarloaf::grid::CellText::default(); 2];
+                let mut cursor_count = 0usize;
+                let mut cursor_is_block = false;
                 if let Some(style) = render_style {
                     let cell_w = p.cell_w.round().clamp(1.0, u32::MAX as f32) as u32;
                     let cell_h = p.cell_h.round().clamp(1.0, u32::MAX as f32) as u32;
                     if let Some(split) =
                         renderer_ref.yazelix_cursor.map(yazelix_cursor_split)
                     {
-                        crate::grid_emit::emit_split_cursor_sprite(
-                            grid,
-                            style,
-                            p.cursor_col,
-                            p.cursor_row,
-                            split,
-                            cell_w,
-                            cell_h,
-                        );
+                        if let Some((is_block, cells)) =
+                            crate::grid_emit::split_cursor_sprite_cells(
+                                grid,
+                                style,
+                                p.cursor_col,
+                                p.cursor_row,
+                                split,
+                                cell_w,
+                                cell_h,
+                            )
+                        {
+                            cursor_cells = cells;
+                            cursor_count = 2;
+                            cursor_is_block = is_block;
+                        }
                     } else {
-                        crate::grid_emit::emit_cursor_sprite(
-                            grid,
-                            style,
-                            p.cursor_col,
-                            p.cursor_row,
-                            color_array_to_rgba8(p.cursor_color),
-                            cell_w,
-                            cell_h,
-                        );
+                        if let Some((is_block, cell)) =
+                            crate::grid_emit::cursor_sprite_cell(
+                                grid,
+                                style,
+                                p.cursor_col,
+                                p.cursor_row,
+                                color_array_to_rgba8(p.cursor_color),
+                                cell_w,
+                                cell_h,
+                            )
+                        {
+                            cursor_cells[0] = cell;
+                            cursor_count = 1;
+                            cursor_is_block = is_block;
+                        }
                     }
+                }
+                let cursor_cells = &cursor_cells[..cursor_count];
+                if cursor_is_block {
+                    grid.set_cursor(cursor_cells, &[]);
+                } else {
+                    grid.set_cursor(&[], cursor_cells);
                 }
 
                 // Panel's grid origin in drawable-pixel space =
@@ -4375,9 +4547,14 @@ impl Screen<'_> {
                 let route_id = item.val.route_id;
                 if let Some(idx) = panels.iter().position(|p| p.route_id == route_id) {
                     let p = panels.swap_remove(idx);
+                    let mut style_table = p.style_table;
+                    if let Some(base) = p.label_style_base {
+                        style_table.truncate(base as usize);
+                    }
                     item.val.renderable_content.visible_rows = p.visible_rows;
-                    item.val.renderable_content.style_table = p.style_table;
+                    item.val.renderable_content.style_table = style_table;
                     item.val.renderable_content.extras = p.extras;
+                    item.val.renderable_content.hint_labels = p.hint_labels;
                 }
             }
             panels.clear();
@@ -4406,10 +4583,15 @@ impl Screen<'_> {
                 .set_dirty();
         }
 
+        if let Some(wake_in) = self.renderer.scrollbar.next_wake_in() {
+            self.context_manager
+                .schedule_render_on_route(wake_in.as_millis() as u64);
+        }
+
         // In case the configuration of blinking cursor is enabled
-        // and the terminal also have instructions of blinking enabled
         // TODO: enable blinking for selection after adding debounce (https://github.com/raphamorim/rio/issues/437)
-        if self.renderer.config_has_blinking_enabled
+        if self.renderer.is_window_focused
+            && self.renderer.config_has_blinking_enabled
             && self.selection_is_empty()
             && self
                 .context_manager
@@ -4443,9 +4625,7 @@ impl Screen<'_> {
         };
 
         let layout = current_item.val.dimension;
-        let terminal = current_item.val.terminal.lock();
-        let cursor_pos = terminal.grid.cursor.pos;
-        drop(terminal);
+        let cursor_pos = current_item.val.renderable_content.cursor.state.pos;
 
         // Calculate pixel position of cursor — canonical integer
         // stride (line_height already baked into cell_height).
@@ -4494,6 +4674,13 @@ impl Screen<'_> {
             rio_window::dpi::PhysicalPosition::new(pixel_x as f64, pixel_y as f64),
             rio_window::dpi::PhysicalSize::new(cell_width as f64, cell_height as f64),
         );
+    }
+
+    fn stop_hint_mode_if_active(&mut self) {
+        if self.hint_state.is_active() {
+            self.hint_state.stop();
+            self.update_hint_state();
+        }
     }
 
     /// Process a new character for keyboard hints
@@ -4642,27 +4829,29 @@ impl Screen<'_> {
                 let display_offset = terminal.display_offset();
                 let screen_lines = terminal.screen_lines();
 
-                let mut any = false;
-                for label in &hint_labels {
-                    let line = label.position.row.0 - display_offset as i32;
-                    if line >= 0 && (line as usize) < screen_lines {
-                        terminal.grid[rio_backend::crosswords::pos::Line(line)].dirty =
-                            true;
-                        any = true;
+                let visible_grid_line = |line: i32| -> bool {
+                    let viewport_row = line + display_offset as i32;
+                    viewport_row >= 0 && (viewport_row as usize) < screen_lines
+                };
+                let mut dirty_lines: Vec<i32> = Vec::new();
+                for label in hint_labels.iter().flatten() {
+                    let line = label.position.row.0;
+                    if visible_grid_line(line) {
+                        dirty_lines.push(line);
                     }
                 }
                 if let Some(hint_matches) = &hint_matches {
                     for hint_match in hint_matches {
-                        let start_line = hint_match.start().row.0 - display_offset as i32;
-                        let end_line = hint_match.end().row.0 - display_offset as i32;
-                        for line in start_line..=end_line {
-                            if line >= 0 && (line as usize) < screen_lines {
-                                terminal.grid[rio_backend::crosswords::pos::Line(line)]
-                                    .dirty = true;
-                                any = true;
+                        for line in hint_match.start().row.0..=hint_match.end().row.0 {
+                            if visible_grid_line(line) {
+                                dirty_lines.push(line);
                             }
                         }
                     }
+                }
+                let any = !dirty_lines.is_empty();
+                for line in dirty_lines {
+                    terminal.grid[rio_backend::crosswords::pos::Line(line)].dirty = true;
                 }
                 drop(terminal);
 
@@ -4685,8 +4874,7 @@ impl Screen<'_> {
             self.context_manager
                 .current_mut()
                 .renderable_content
-                .hint_labels
-                .clear();
+                .hint_labels = None;
             // Force full damage to clear all hint highlights
             let current = self.context_manager.current_mut();
             current
@@ -4699,12 +4887,11 @@ impl Screen<'_> {
     fn update_hint_labels(&mut self) {
         use crate::context::renderable::HintLabel;
 
-        let mut hint_labels = Vec::new();
-
-        if self.hint_state.is_active() {
+        let hint_labels = if self.hint_state.is_active() {
             let matches = self.hint_state.matches();
             let visible_labels = self.hint_state.visible_labels();
 
+            let mut labels = Vec::new();
             for (match_index, remaining_label) in visible_labels {
                 if let Some(hint_match) = matches.get(match_index) {
                     // Create labels for each character in the hint label
@@ -4714,166 +4901,24 @@ impl Screen<'_> {
                             hint_match.start.col + char_index,
                         );
 
-                        hint_labels.push(HintLabel {
+                        labels.push(HintLabel {
                             position,
-                            label: vec![label_char],
+                            label: label_char,
                             is_first: char_index == 0, // First character gets different styling
                         });
                     }
                 }
             }
-        }
+            Some(labels)
+        } else {
+            None
+        };
 
         self.context_manager
             .current_mut()
             .renderable_content
             .hint_labels = hint_labels;
     }
-
-    /// Apply grid-based hint post-processing.
-    ///
-    /// This iterates through the terminal grid character by character and adjusts
-    /// the match bounds based on bracket balance and trailing delimiters.
-    fn hint_post_processing(
-        &self,
-        terminal: &rio_backend::crosswords::Crosswords<EventProxy>,
-        start_col: rio_backend::crosswords::pos::Column,
-        end_col: rio_backend::crosswords::pos::Column,
-        row: rio_backend::crosswords::pos::Line,
-    ) -> Option<(
-        rio_backend::crosswords::pos::Column,
-        rio_backend::crosswords::pos::Column,
-    )> {
-        use rio_backend::crosswords::grid::BidirectionalIterator;
-
-        let grid = &terminal.grid;
-        let start_pos = rio_backend::crosswords::pos::Pos::new(row, start_col);
-        let end_pos = rio_backend::crosswords::pos::Pos::new(row, end_col);
-
-        let mut iter = grid.iter_from(start_pos);
-        let mut current_pos = start_pos;
-        let mut open_parents = 0;
-        let mut open_brackets = 0;
-
-        // First pass: handle uneven brackets/parentheses
-        while current_pos <= end_pos {
-            if let Some(indexed) = iter.next() {
-                let c = indexed.square.c();
-                current_pos = indexed.pos;
-
-                match c {
-                    '(' => open_parents += 1,
-                    '[' => open_brackets += 1,
-                    ')' => {
-                        if open_parents == 0 {
-                            // Unmatched closing parenthesis, truncate here
-                            if iter.prev().is_some() {
-                                return Some((start_col, iter.pos().col));
-                            }
-                            break;
-                        } else {
-                            open_parents -= 1;
-                        }
-                    }
-                    ']' => {
-                        if open_brackets == 0 {
-                            // Unmatched closing bracket, truncate here
-                            if iter.prev().is_some() {
-                                return Some((start_col, iter.pos().col));
-                            }
-                            break;
-                        } else {
-                            open_brackets -= 1;
-                        }
-                    }
-                    _ => (),
-                }
-
-                if current_pos == end_pos {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        // Second pass: remove trailing delimiters
-        let mut final_end = end_pos;
-        let mut iter = grid.iter_from(end_pos);
-
-        while final_end > start_pos {
-            if let Some(indexed) = iter.next() {
-                let c = indexed.square.c();
-                if !matches!(c, '.' | ',' | ':' | ';' | '?' | '!' | '(' | '[' | '\'') {
-                    break;
-                }
-
-                if let Some(prev_indexed) = iter.prev() {
-                    final_end = prev_indexed.pos;
-                    if iter.prev().is_some() {
-                        // Move iterator back one more position for next iteration
-                    }
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        Some((start_col, final_end.col))
-    }
-}
-
-/// Apply post-processing to hyperlink URIs to remove trailing delimiters and handle uneven brackets.
-fn post_process_hyperlink_uri(uri: &str) -> String {
-    let chars: Vec<char> = uri.chars().collect();
-    if chars.is_empty() {
-        return String::new();
-    }
-
-    let mut end_idx = chars.len() - 1;
-    let mut open_parents = 0;
-    let mut open_brackets = 0;
-
-    // First pass: handle uneven brackets/parentheses
-    for (i, &c) in chars.iter().enumerate() {
-        match c {
-            '(' => open_parents += 1,
-            '[' => open_brackets += 1,
-            ')' => {
-                if open_parents == 0 {
-                    // Unmatched closing parenthesis, truncate here
-                    end_idx = i.saturating_sub(1);
-                    break;
-                } else {
-                    open_parents -= 1;
-                }
-            }
-            ']' => {
-                if open_brackets == 0 {
-                    // Unmatched closing bracket, truncate here
-                    end_idx = i.saturating_sub(1);
-                    break;
-                } else {
-                    open_brackets -= 1;
-                }
-            }
-            _ => (),
-        }
-    }
-
-    // Second pass: remove trailing delimiters
-    while end_idx > 0 {
-        match chars[end_idx] {
-            '.' | ',' | ':' | ';' | '?' | '!' | '(' | '[' | '\'' => {
-                end_idx = end_idx.saturating_sub(1);
-            }
-            _ => break,
-        }
-    }
-
-    chars.into_iter().take(end_idx + 1).collect()
 }
 
 fn point_hits_match_or_trailing_delimiters(
@@ -4882,6 +4927,9 @@ fn point_hits_match_or_trailing_delimiters(
     end: usize,
     point_col: rio_backend::crosswords::pos::Column,
 ) -> bool {
+    if start >= end {
+        return false;
+    }
     let point = point_col.0;
     if point < start {
         return false;
@@ -4889,15 +4937,9 @@ fn point_hits_match_or_trailing_delimiters(
     if point < end {
         return true;
     }
-    let Some(trailing) = line_text.as_bytes().get(end..=point) else {
-        return false;
-    };
-    trailing.iter().all(|b| {
-        matches!(
-            *b,
-            b'.' | b',' | b':' | b';' | b'?' | b'!' | b'(' | b'[' | b'\''
-        )
-    })
+    let trailing_len = point - end + 1;
+    let mut trailing = line_text.chars().skip(end);
+    (0..trailing_len).all(|_| trailing.next().is_some_and(is_trailing_hint_delimiter))
 }
 
 #[cfg(test)]
@@ -4905,92 +4947,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_post_process_hyperlink_uri() {
-        // Test removing trailing parenthesis
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com)"),
-            "https://example.com"
-        );
+    fn chrome_press_validates_double_click() {
+        use rio_window::dpi::PhysicalPosition;
+        let origin = Some(PhysicalPosition::new(10, 20));
 
-        // Test removing trailing comma
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com,"),
-            "https://example.com"
-        );
+        // Same origin, fresh → a chrome double-click.
+        let fresh = ChromePress {
+            window_origin: origin,
+            at: std::time::Instant::now(),
+        };
+        assert!(fresh.validates_double_click(origin));
 
-        // Test removing trailing period
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com."),
-            "https://example.com"
-        );
+        // Window moved between the presses (a re-grab after a window
+        // drag) → keep dragging, don't maximize.
+        assert!(!fresh.validates_double_click(Some(PhysicalPosition::new(110, 20))));
 
-        // Test handling balanced parentheses (should keep them)
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com/path(with)parens"),
-            "https://example.com/path(with)parens"
-        );
+        // Unreported origin on both presses (Wayland) → time guard
+        // alone decides; a reported-vs-unreported mix never validates.
+        let unknown = ChromePress {
+            window_origin: None,
+            at: std::time::Instant::now(),
+        };
+        assert!(unknown.validates_double_click(None));
+        assert!(!unknown.validates_double_click(origin));
 
-        // Test handling unbalanced parentheses
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com/path)"),
-            "https://example.com/path"
-        );
-
-        // Test handling multiple trailing delimiters
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com.'),"),
-            "https://example.com"
-        );
-
-        // Test markdown-style URLs
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com)"),
-            "https://example.com"
-        );
-
-        // Test handling unbalanced brackets
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com/path]"),
-            "https://example.com/path"
-        );
-
-        // Test balanced brackets (should keep them)
-        assert_eq!(
-            post_process_hyperlink_uri("https://example.com/path[with]brackets"),
-            "https://example.com/path[with]brackets"
-        );
+        // Stale press → expired even at the same origin.
+        let stale = ChromePress {
+            window_origin: origin,
+            at: std::time::Instant::now() - crate::constants::MULTI_CLICK_THRESHOLD * 2,
+        };
+        assert!(!stale.validates_double_click(origin));
     }
 
     #[test]
     fn test_link_hit_allows_immediate_trailing_punctuation() {
         let url = "http://127.0.0.1:4321/docs/";
-        let text = format!("Docs are at {url}.");
-        let start = text.find(url).unwrap();
-        let end = start + url.len();
+        for prefix in ["Docs are at ", "➜ Local: "] {
+            let text = format!("{prefix}{url}.");
+            let byte_start = text.find(url).unwrap();
+            let start = text[..byte_start].chars().count();
+            let end = start + url.chars().count();
 
-        assert!(point_hits_match_or_trailing_delimiters(
-            &text,
-            start,
-            end,
-            rio_backend::crosswords::pos::Column(start)
-        ));
-        assert!(point_hits_match_or_trailing_delimiters(
-            &text,
-            start,
-            end,
-            rio_backend::crosswords::pos::Column(end - 1)
-        ));
-        assert!(point_hits_match_or_trailing_delimiters(
-            &text,
-            start,
-            end,
-            rio_backend::crosswords::pos::Column(end)
-        ));
+            assert!(point_hits_match_or_trailing_delimiters(
+                &text,
+                start,
+                end,
+                rio_backend::crosswords::pos::Column(start)
+            ));
+            assert!(point_hits_match_or_trailing_delimiters(
+                &text,
+                start,
+                end,
+                rio_backend::crosswords::pos::Column(end - 1)
+            ));
+            assert!(point_hits_match_or_trailing_delimiters(
+                &text,
+                start,
+                end,
+                rio_backend::crosswords::pos::Column(end)
+            ));
+            assert!(!point_hits_match_or_trailing_delimiters(
+                &text,
+                start,
+                end,
+                rio_backend::crosswords::pos::Column(start - 1)
+            ));
+        }
+
         assert!(!point_hits_match_or_trailing_delimiters(
-            &text,
-            start,
-            end,
-            rio_backend::crosswords::pos::Column(start - 1)
+            ".",
+            0,
+            0,
+            rio_backend::crosswords::pos::Column(0)
         ));
     }
 }
