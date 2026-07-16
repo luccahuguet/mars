@@ -138,24 +138,36 @@ impl<R> KeyLifecycle<R> {
 
     pub(crate) fn track_modifiers(
         &mut self,
-        mut modifiers: ModifiersState,
+        window_modifiers: ModifiersState,
         physical_key: PhysicalKey,
         logical_key: &Key,
         state: ElementState,
+        is_synthetic: bool,
     ) {
-        if let Some(modifier) = modifier_for_key(logical_key).filter(|m| !m.is_empty()) {
-            let pressed = match state {
-                ElementState::Pressed => {
-                    self.pressed_modifiers.insert(physical_key, modifier);
-                    true
-                }
-                ElementState::Released => {
-                    self.pressed_modifiers.remove(&physical_key);
-                    self.pressed_modifiers
-                        .values()
-                        .any(|pressed| *pressed == modifier)
-                }
-            };
+        let Some(mut modifiers) = modifier_tracking_base(
+            self.last_modifiers,
+            window_modifiers,
+            is_synthetic,
+            state,
+        ) else {
+            return;
+        };
+        let logical_modifier = modifier_for_key(logical_key).filter(|m| !m.is_empty());
+        let key_modifier = match state {
+            ElementState::Pressed => logical_modifier.inspect(|&modifier| {
+                self.pressed_modifiers.insert(physical_key, modifier);
+            }),
+            ElementState::Released => self
+                .pressed_modifiers
+                .remove(&physical_key)
+                .or(logical_modifier),
+        };
+        if let Some(modifier) = key_modifier {
+            let pressed = state == ElementState::Pressed
+                || self
+                    .pressed_modifiers
+                    .values()
+                    .any(|pressed| *pressed == modifier);
             modifiers.set(modifier, pressed);
         }
         self.last_modifiers = modifiers;
@@ -199,6 +211,19 @@ impl<R> KeyLifecycle<R> {
         self.last_modifiers = ModifiersState::empty();
         self.pressed_modifiers.clear();
         releases
+    }
+}
+
+fn modifier_tracking_base(
+    retained_modifiers: ModifiersState,
+    window_modifiers: ModifiersState,
+    is_synthetic: bool,
+    state: ElementState,
+) -> Option<ModifiersState> {
+    if is_synthetic {
+        (state == ElementState::Pressed).then_some(retained_modifiers)
+    } else {
+        Some(window_modifiers)
     }
 }
 
@@ -298,24 +323,28 @@ mod tests {
             shift_left,
             &shift,
             ElementState::Pressed,
+            false,
         );
         keys.track_modifiers(
             ModifiersState::SHIFT,
             shift_right,
             &shift,
             ElementState::Pressed,
+            false,
         );
         keys.track_modifiers(
             ModifiersState::SHIFT,
             shift_left,
             &shift,
             ElementState::Released,
+            false,
         );
         keys.track_modifiers(
             ModifiersState::SHIFT | ModifiersState::ALT,
             alt_left,
             &alt,
             ElementState::Pressed,
+            false,
         );
 
         keys.capture_screen(physical(KeyCode::KeyZ));
@@ -340,5 +369,62 @@ mod tests {
             .all(|release| { release.event == "shift" || release.event == "alt" }));
         assert_eq!(releases.last().unwrap().modifiers, ModifiersState::empty());
         assert!(keys.drain_focus_loss().is_empty());
+    }
+
+    #[test]
+    fn physical_release_clears_a_modifier_after_logical_layout_change() {
+        let control = physical(KeyCode::ControlLeft);
+        let mut keys = KeyLifecycle::<()>::default();
+        keys.track_modifiers(
+            ModifiersState::CONTROL,
+            control,
+            &Key::Named(NamedKey::Control),
+            ElementState::Pressed,
+            false,
+        );
+        keys.track_modifiers(
+            ModifiersState::empty(),
+            control,
+            &Key::Character("changed-layout".into()),
+            ElementState::Released,
+            false,
+        );
+
+        assert_eq!(keys.last_modifiers, ModifiersState::empty());
+        assert!(keys.pressed_modifiers.is_empty());
+    }
+
+    #[test]
+    fn synthetic_focus_presses_accumulate_from_retained_modifiers() {
+        let control = physical(KeyCode::ControlLeft);
+        let shift = physical(KeyCode::ShiftRight);
+        let mut keys = KeyLifecycle::<()>::default();
+        keys.track_modifiers(
+            ModifiersState::CONTROL,
+            control,
+            &Key::Named(NamedKey::Control),
+            ElementState::Pressed,
+            false,
+        );
+        keys.track_modifiers(
+            ModifiersState::empty(),
+            shift,
+            &Key::Named(NamedKey::Shift),
+            ElementState::Pressed,
+            true,
+        );
+        keys.track_modifiers(
+            ModifiersState::empty(),
+            shift,
+            &Key::Named(NamedKey::Shift),
+            ElementState::Released,
+            true,
+        );
+
+        assert_eq!(
+            keys.last_modifiers,
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        );
+        assert_eq!(keys.pressed_modifiers.len(), 2);
     }
 }

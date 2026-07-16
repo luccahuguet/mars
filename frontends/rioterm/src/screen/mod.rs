@@ -441,8 +441,13 @@ impl Screen<'_> {
     }
 
     #[inline]
-    pub fn track_key_event_modifiers(&mut self, key: &rio_window::event::KeyEvent) {
-        self.mars_input.track_key_event(self.modifiers.state(), key);
+    pub fn track_key_event_modifiers(
+        &mut self,
+        key: &rio_window::event::KeyEvent,
+        is_synthetic: bool,
+    ) {
+        self.mars_input
+            .track_key_event(self.modifiers.state(), key, is_synthetic);
     }
 
     #[inline]

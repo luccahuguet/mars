@@ -1,6 +1,6 @@
 use crate::event::{ClickState, EventPayload, EventProxy, RioEvent, RioEventType};
 use crate::ime::Preedit;
-use crate::mars::input::PointerOwner;
+use crate::mars::input::{apply_modifiers, PointerOwner};
 use crate::renderer::utils::update_colors_based_on_theme;
 use crate::router::{routes::RoutePath, Router};
 use crate::scheduler::{Scheduler, TimerId, Topic};
@@ -17,7 +17,8 @@ use rio_backend::clipboard::{Clipboard, ClipboardType};
 use rio_backend::config::colors::{ColorRgb, NamedColor};
 use rio_window::application::ApplicationHandler;
 use rio_window::event::{
-    ElementState, Ime, MouseButton, MouseScrollDelta, StartCause, TouchPhase, WindowEvent,
+    ElementState, Ime, Modifiers, MouseButton, MouseScrollDelta, StartCause, TouchPhase,
+    WindowEvent,
 };
 use rio_window::event_loop::ActiveEventLoop;
 use rio_window::event_loop::ControlFlow;
@@ -83,10 +84,7 @@ impl Application<'_> {
     fn skip_window_event(event: &WindowEvent) -> bool {
         matches!(
             event,
-            WindowEvent::KeyboardInput {
-                is_synthetic: true,
-                ..
-            } | WindowEvent::ActivationTokenDone { .. }
+            WindowEvent::ActivationTokenDone { .. }
                 | WindowEvent::DoubleTapGesture { .. }
                 | WindowEvent::TouchpadPressure { .. }
                 | WindowEvent::RotationGesture { .. }
@@ -1036,22 +1034,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
             }
 
-            WindowEvent::ModifiersChanged(modifiers) => {
-                route.window.screen.set_modifiers(modifiers);
-                if route.window.screen.update_highlighted_hints() {
-                    let cursor_icon = if route.window.screen.has_highlighted_hint() {
-                        CursorIcon::Pointer
-                    } else if !route.window.screen.modifiers.state().shift_key()
-                        && route.window.screen.mouse_mode()
-                    {
-                        CursorIcon::Default
-                    } else {
-                        CursorIcon::Text
-                    };
-                    route.window.winit_window.set_cursor(cursor_icon);
-                    route.request_redraw();
-                }
-            }
+            WindowEvent::ModifiersChanged(modifiers) => apply_modifiers(route, modifiers),
 
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Released
@@ -1757,12 +1740,22 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
             }
 
             WindowEvent::KeyboardInput {
-                is_synthetic: false,
+                is_synthetic,
                 event: key_event,
                 ..
             } => {
+                if is_synthetic {
+                    route
+                        .window
+                        .screen
+                        .track_key_event_modifiers(&key_event, true);
+                    return;
+                }
                 route.window.screen.cancel_link_gesture();
-                route.window.screen.track_key_event_modifiers(&key_event);
+                route
+                    .window
+                    .screen
+                    .track_key_event_modifiers(&key_event, false);
                 if route.has_key_wait(&key_event, &mut self.router.clipboard) {
                     if route.path != RoutePath::Terminal
                         && key_event.state == ElementState::Released
@@ -1860,6 +1853,9 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 let focus_changed = route.window.is_focused != focused;
                 route.window.is_focused = focused;
 
+                if !focused {
+                    apply_modifiers(route, Modifiers::default());
+                }
                 if focus_changed {
                     route.request_redraw();
                 }

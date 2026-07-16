@@ -12,7 +12,7 @@ use rio_window::keyboard::ModifiersState;
 
 pub(crate) use key_lifecycle::{FocusLossRelease, ScreenKeyOwner};
 pub(crate) use link_gesture::LinkRelease;
-pub(crate) use pointer::PointerOwner;
+pub(crate) use pointer::{apply_modifiers, PointerOwner};
 
 /// Mars-owned cross-event input state. Keep Rio integration to one Screen field.
 #[derive(Debug, Default)]
@@ -26,12 +26,14 @@ impl MarsInputState {
         &mut self,
         modifiers: ModifiersState,
         event: &KeyEvent,
+        is_synthetic: bool,
     ) {
         self.keys.track_modifiers(
             modifiers,
             event.physical_key,
             &event.logical_key,
             event.state,
+            is_synthetic,
         );
     }
 

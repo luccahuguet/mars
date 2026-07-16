@@ -1,6 +1,8 @@
+use crate::router::Route;
 use crate::screen::Screen;
 use rio_backend::clipboard::Clipboard;
-use rio_window::event::{ElementState, MouseButton};
+use rio_window::event::{ElementState, Modifiers, MouseButton};
+use rio_window::window::CursorIcon;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PointerOwner {
@@ -32,6 +34,41 @@ pub(crate) fn select_pointer_owner(snapshot: PointerSnapshot) -> PointerOwner {
         PointerOwner::OtherRoute
     } else {
         PointerOwner::Terminal
+    }
+}
+
+pub(crate) fn apply_modifiers(route: &mut Route<'_>, modifiers: Modifiers) {
+    let (cursor, should_redraw) = {
+        let screen = &mut route.window.screen;
+        screen.set_modifiers(modifiers);
+        let should_redraw = screen.update_highlighted_hints();
+        let cursor = screen.mouse.last_cell.is_some().then(|| {
+            terminal_pointer_icon(
+                screen.has_highlighted_hint(),
+                screen.modifiers.state().shift_key(),
+                screen.mouse_mode(),
+            )
+        });
+        (cursor, should_redraw)
+    };
+
+    if let Some(cursor) = cursor {
+        route.window.winit_window.set_cursor(cursor);
+    }
+    if should_redraw {
+        route.request_redraw();
+    }
+}
+
+fn terminal_pointer_icon(
+    has_highlighted_hint: bool,
+    shift_pressed: bool,
+    mouse_mode: bool,
+) -> CursorIcon {
+    match (has_highlighted_hint, shift_pressed, mouse_mode) {
+        (true, _, _) => CursorIcon::Pointer,
+        (_, false, true) => CursorIcon::Default,
+        _ => CursorIcon::Text,
     }
 }
 
@@ -160,6 +197,20 @@ mod tests {
 
         for (snapshot, expected) in cases {
             assert_eq!(select_pointer_owner(snapshot), expected);
+        }
+    }
+
+    #[test]
+    fn terminal_cursor_follows_hint_shift_and_mouse_mode() {
+        let cases = [
+            ((true, false, false), CursorIcon::Pointer),
+            ((false, false, true), CursorIcon::Default),
+            ((false, true, true), CursorIcon::Text),
+            ((false, false, false), CursorIcon::Text),
+        ];
+
+        for ((hint, shift, mouse_mode), expected) in cases {
+            assert_eq!(terminal_pointer_icon(hint, shift, mouse_mode), expected);
         }
     }
 }
