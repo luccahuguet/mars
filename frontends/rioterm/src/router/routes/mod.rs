@@ -6,5 +6,4 @@ pub mod welcome;
 pub enum RoutePath {
     Terminal,
     Welcome,
-    ConfirmQuit,
 }
