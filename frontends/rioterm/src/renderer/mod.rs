@@ -289,7 +289,8 @@ impl Renderer {
         }
 
         for (_key, grid_context) in grid.contexts_mut().iter_mut() {
-            let panel_rect = grid_context.layout_rect;
+            let [grid_origin_x, grid_origin_y] =
+                grid_context.grid_origin(grid_scaled_margin);
             let context = grid_context.context_mut();
 
             let mut has_ime = false;
@@ -409,8 +410,8 @@ impl Renderer {
                 // grid uniform paints with.
                 let cell_width = layout.cell.cell_width as f32;
                 let cell_height = layout.cell.cell_height as f32;
-                let origin_x = panel_rect[0] + grid_scaled_margin.left;
-                let origin_y = panel_rect[1] + grid_scaled_margin.top;
+                let origin_x = grid_origin_x;
+                let origin_y = grid_origin_y;
 
                 let overlays = sugarloaf
                     .image_overlays
@@ -550,8 +551,8 @@ impl Renderer {
                 if &active_key == key {
                     continue;
                 }
-                // Match the grid renderer's actual paint region —
-                // `.round()`ed integer-pixel origin +
+                // Match the grid renderer's actual paint region — snapped
+                // integer-pixel origin +
                 // `cols * round(cell_w)` × `rows * round(cell_h)`
                 // content size (same math as `GridUniforms.grid_padding`
                 // / `cell_size` in `screen/mod.rs:~3717`). Using raw
@@ -564,10 +565,8 @@ impl Renderer {
                 let cell_h = dim.cell.cell_height as f32;
                 let cols = dim.columns.max(1) as f32;
                 let rows = dim.lines.max(1) as f32;
-                let panel_left =
-                    (grid_context.layout_rect[0] + grid_scaled_margin.left).round();
-                let panel_top =
-                    (grid_context.layout_rect[1] + grid_scaled_margin.top).round();
+                let [panel_left, panel_top] =
+                    grid_context.grid_origin(grid_scaled_margin);
                 let x = panel_left / scale_factor;
                 let y = panel_top / scale_factor;
                 let w = (cols * cell_w) / scale_factor;

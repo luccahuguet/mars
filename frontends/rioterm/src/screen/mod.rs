@@ -3785,7 +3785,6 @@ impl Screen<'_> {
 
         if self.renderer.trail_cursor_enabled {
             let current_grid = self.context_manager.current_grid();
-            let scaled_margin = current_grid.get_scaled_margin();
 
             if let Some(current_item) = current_grid.current_item() {
                 let layout = current_item.val.dimension;
@@ -3795,9 +3794,8 @@ impl Screen<'_> {
                 let cell_height = layout.cell.cell_height as f32;
                 let scale_factor = self.sugarloaf.scale_factor();
 
-                let panel_rect = current_item.layout_rect;
-                let origin_x = panel_rect[0] + scaled_margin.left;
-                let origin_y = panel_rect[1] + scaled_margin.top;
+                let [origin_x, origin_y] =
+                    current_item.grid_origin(current_grid.get_scaled_margin());
 
                 let current = self.context_manager.current();
                 let cursor = &current.renderable_content.cursor;
@@ -3869,7 +3867,7 @@ impl Screen<'_> {
         {
             struct PanelFrame {
                 route_id: usize,
-                layout_rect: [f32; 4],
+                grid_origin: [f32; 2],
                 cols: u32,
                 rows: u32,
                 cell_w: f32,
@@ -3963,6 +3961,7 @@ impl Screen<'_> {
                 .contexts_mut()
                 .iter_mut()
             {
+                let grid_origin = item.grid_origin(scaled_margin);
                 let ctx = &mut item.val;
                 let dim = ctx.dimension;
                 // Canonical integer cell stride — single source of
@@ -4063,7 +4062,7 @@ impl Screen<'_> {
                     .unwrap_or(self.renderer.named_colors.cursor);
                 panels.push(PanelFrame {
                     route_id: ctx.route_id,
-                    layout_rect: item.layout_rect,
+                    grid_origin,
                     cols: ctx.renderable_content.columns.max(1) as u32,
                     rows: ctx.renderable_content.screen_lines.max(1) as u32,
                     cell_w,
@@ -4371,19 +4370,16 @@ impl Screen<'_> {
                     grid.set_cursor(&[], cursor_cells);
                 }
 
-                // Panel's grid origin in drawable-pixel space =
-                // window scaled_margin + the panel's layout rect
-                // offset inside the root container. Snap to integer
-                // pixels so `cell_size * grid_pos + grid_padding`
-                // always lands on pixel boundaries. Without this, a
-                // fractional margin (e.g. Taffy layout computing
-                // 10.5px offsets) shifts the whole grid half a pixel
-                // and the bg fragment's
+                // The panel snapshot carries the balanced, integer-pixel grid
+                // origin in drawable-pixel space. Keeping the snap in
+                // `ContextGridItem::grid_origin` makes paint, input, graphics,
+                // cursors, and IME use the same coordinates. Otherwise the
+                // bg fragment's
                 // `floor((pixel - padding) / cell_size)` disagrees
                 // with the text vertex's `cell_size * grid_pos`
                 // about where cell boundaries are → visible seams.
-                let panel_left = (scaled_margin.left + p.layout_rect[0]).round();
-                let panel_top = (scaled_margin.top + p.layout_rect[1]).round();
+                let panel_left = p.grid_origin[0];
+                let panel_top = p.grid_origin[1];
 
                 // Bg-tint uniforms fire ONLY for the active block
                 // style. Monocolor blocks let the bg shader paint
@@ -4554,7 +4550,6 @@ impl Screen<'_> {
         }
 
         let current_grid = self.context_manager.current_grid();
-        let scaled_margin = current_grid.get_scaled_margin();
 
         let Some(current_item) = current_grid.current_item() else {
             return;
@@ -4578,11 +4573,8 @@ impl Screen<'_> {
             return;
         }
 
-        // Panel origin: layout_rect is relative to root container,
-        // add scaled_margin to get absolute screen position
-        let panel_rect = current_item.layout_rect;
-        let origin_x = panel_rect[0] + scaled_margin.left;
-        let origin_y = panel_rect[1] + scaled_margin.top;
+        let [origin_x, origin_y] =
+            current_item.grid_origin(current_grid.get_scaled_margin());
 
         // Convert grid position to pixel position
         let pixel_x =

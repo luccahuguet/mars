@@ -85,6 +85,16 @@ fn compute(
 }
 
 #[inline]
+fn balanced_grid_offset(available_size: f32, cells: usize, cell_size: u32) -> f32 {
+    if available_size <= 0.0 || cells == 0 || cell_size == 0 {
+        return 0.0;
+    }
+
+    let remainder = (available_size - cells as f32 * cell_size as f32).max(0.0);
+    (remainder / 2.0).floor()
+}
+
+#[inline]
 fn create_border(color: [f32; 4], position: [f32; 2], size: [f32; 2]) -> Rect {
     Rect::new(position[0], position[1], size[0], size[1], color)
 }
@@ -151,6 +161,29 @@ impl<T: rio_backend::event::EventListener> ContextGridItem<T> {
     /// The grid renderer reads panel positions directly from
     /// `layout_rect`.
     fn set_position(&mut self, _position: [f32; 2]) {}
+
+    /// Integer-pixel origin of the painted terminal cells. The PTY keeps the
+    /// floored row count; pixels that cannot form a complete row are balanced
+    /// above and below the grid instead of collecting below its final row.
+    #[inline]
+    pub fn grid_origin(&self, scaled_margin: Margin) -> [f32; 2] {
+        let left = self.layout_rect[0] + scaled_margin.left;
+        let top = self.layout_rect[1]
+            + scaled_margin.top
+            + self.val.dimension.balanced_grid_offset_y();
+        [left.round(), top.round()]
+    }
+
+    #[inline]
+    fn grid_margin(&self, scaled_margin: Margin) -> Margin {
+        let [left, top] = self.grid_origin(scaled_margin);
+        Margin {
+            top,
+            right: scaled_margin.right,
+            bottom: scaled_margin.bottom,
+            left,
+        }
+    }
 }
 
 impl<T: rio_backend::event::EventListener> ContextGrid<T> {
@@ -1085,33 +1118,27 @@ impl<T: rio_backend::event::EventListener> ContextGrid<T> {
         let len = self.inner.len();
         if len <= 1 {
             if let Some(item) = self.inner.get(&self.current) {
-                return (&item.val, self.scaled_margin);
+                return (&item.val, item.grid_margin(self.scaled_margin));
             } else if let Some(root) = self.root {
                 if let Some(item) = self.inner.get(&root) {
-                    return (&item.val, self.scaled_margin);
+                    return (&item.val, item.grid_margin(self.scaled_margin));
                 }
             }
             panic!("Grid is in an invalid state - no contexts available");
         }
 
         if let Some(current_item) = self.inner.get(&self.current) {
-            // For multi-panel layouts, the margin must include the panel's
-            // absolute offset so that mouse coordinates (which are relative
-            // to the window) are correctly translated to panel-local grid
-            // positions.
-            let [abs_x, abs_y, _, _] = current_item.layout_rect;
-            let margin = Margin {
-                left: self.scaled_margin.left + abs_x,
-                top: self.scaled_margin.top + abs_y,
-                right: self.scaled_margin.right,
-                bottom: self.scaled_margin.bottom,
-            };
-            (&current_item.val, margin)
+            // Include the panel offset and balanced row remainder so mouse
+            // coordinates use the same origin as painted terminal cells.
+            (
+                &current_item.val,
+                current_item.grid_margin(self.scaled_margin),
+            )
         } else {
             tracing::error!("Current key {:?} not found in grid", self.current);
             if let Some(root) = self.root {
                 if let Some(item) = self.inner.get(&root) {
-                    return (&item.val, self.scaled_margin);
+                    return (&item.val, item.grid_margin(self.scaled_margin));
                 }
             }
             panic!("Grid is in an invalid state - no contexts available");
@@ -1649,6 +1676,13 @@ impl ContextDimension {
             scaled_font_size: font_size * dimension.scale,
             cell,
         }
+    }
+
+    #[inline]
+    fn balanced_grid_offset_y(&self) -> f32 {
+        let available_height =
+            self.height - (self.margin.top + self.margin.bottom) * self.dimension.scale;
+        balanced_grid_offset(available_height, self.lines, self.cell.cell_height)
     }
 
     #[inline]

@@ -236,6 +236,46 @@ fn test_compute_floors_fractional_rows() {
 }
 
 #[test]
+fn test_grid_offset_balances_nearly_full_row_remainder() {
+    // Live Yazelix/Mars case: 41 complete 24px rows in 1006px leave 22px.
+    // Keep 41 PTY rows and split the unused pixels evenly across both edges.
+    assert_eq!(balanced_grid_offset(1006.0, 41, 24), 11.0);
+}
+
+#[test]
+fn test_grid_offset_preserves_exact_fit() {
+    assert_eq!(balanced_grid_offset(984.0, 41, 24), 0.0);
+}
+
+#[test]
+fn test_grid_offset_stays_on_integer_pixels_for_odd_remainder() {
+    // The extra pixel remains below the grid rather than introducing a
+    // half-pixel origin that would blur glyphs and cell edges.
+    assert_eq!(balanced_grid_offset(1007.0, 41, 24), 11.0);
+}
+
+#[test]
+fn test_context_dimension_grid_offset_respects_scaled_margins() {
+    let dims = TextDimensions {
+        width: 12.0,
+        height: 24.0,
+        scale: 2.0,
+    };
+    let context = ContextDimension::build(
+        1200.0,
+        1026.0,
+        dims,
+        cell_for(dims),
+        1.0,
+        14.0,
+        Margin::new(5.0, 0.0, 5.0, 0.0),
+    );
+
+    assert_eq!(context.lines, 41);
+    assert_eq!(context.balanced_grid_offset_y(), 11.0);
+}
+
+#[test]
 fn test_compute_respects_margins() {
     let dims = TextDimensions {
         width: 16.0,
