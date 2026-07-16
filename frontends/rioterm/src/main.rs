@@ -13,7 +13,6 @@ mod grid_emit;
 mod hints;
 mod ime;
 mod layout;
-mod mars;
 mod messenger;
 mod mouse;
 #[cfg(windows)]

@@ -142,7 +142,6 @@ impl VulkanGlyphAtlas {
             descriptor_pool,
             descriptor_set_layout,
             sampler,
-            true,
         )
     }
 
@@ -159,11 +158,9 @@ impl VulkanGlyphAtlas {
             descriptor_pool,
             descriptor_set_layout,
             sampler,
-            false,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn new(
         ctx: &VulkanContext,
         format: vk::Format,
@@ -171,26 +168,21 @@ impl VulkanGlyphAtlas {
         descriptor_pool: vk::DescriptorPool,
         descriptor_set_layout: vk::DescriptorSetLayout,
         sampler: vk::Sampler,
-        eager_first_page: bool,
     ) -> Self {
         let shared = ctx.shared().clone();
         let queue = ctx.queue;
         let queue_family_index = ctx.queue_family_index;
-        let pages = if eager_first_page {
-            vec![make_page(
-                &shared,
-                queue,
-                queue_family_index,
-                format,
-                descriptor_pool,
-                descriptor_set_layout,
-                sampler,
-            )]
-        } else {
-            Vec::new()
-        };
+        let initial_page = make_page(
+            &shared,
+            queue,
+            queue_family_index,
+            format,
+            descriptor_pool,
+            descriptor_set_layout,
+            sampler,
+        );
         Self {
-            pages,
+            pages: vec![initial_page],
             slots: FxHashMap::default(),
             format,
             bytes_per_pixel,
@@ -867,21 +859,42 @@ impl VulkanGridRenderer {
         self.bg_dirty = [true; FRAMES_IN_FLIGHT];
     }
 
-    pub fn set_cursor(&mut self, block: &[CellText], non_block: &[CellText]) {
+    pub fn set_block_cursor(&mut self, cells: &[CellText]) {
+        if let Some(slot) = self.fg_rows.first_mut() {
+            if slot.is_empty() && cells.is_empty() {
+                return;
+            }
+            slot.clear();
+            slot.extend_from_slice(cells);
+            self.fg_dirty = [true; FRAMES_IN_FLIGHT];
+        }
+    }
+
+    pub fn set_non_block_cursor(&mut self, cells: &[CellText]) {
+        let idx = self.fg_rows.len().saturating_sub(1);
+        if let Some(slot) = self.fg_rows.get_mut(idx) {
+            if slot.is_empty() && cells.is_empty() {
+                return;
+            }
+            slot.clear();
+            slot.extend_from_slice(cells);
+            self.fg_dirty = [true; FRAMES_IN_FLIGHT];
+        }
+    }
+
+    pub fn clear_cursor(&mut self) {
         let mut changed = false;
         if let Some(slot) = self.fg_rows.first_mut() {
-            if slot.as_slice() != block {
+            if !slot.is_empty() {
                 slot.clear();
-                slot.extend_from_slice(block);
                 changed = true;
             }
         }
         let last = self.fg_rows.len().saturating_sub(1);
         if last > 0 {
             if let Some(slot) = self.fg_rows.get_mut(last) {
-                if slot.as_slice() != non_block {
+                if !slot.is_empty() {
                     slot.clear();
-                    slot.extend_from_slice(non_block);
                     changed = true;
                 }
             }

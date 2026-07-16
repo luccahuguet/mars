@@ -373,21 +373,42 @@ impl WgpuGridRenderer {
         self.bg_dirty = true;
     }
 
-    pub fn set_cursor(&mut self, block: &[CellText], non_block: &[CellText]) {
+    pub fn set_block_cursor(&mut self, cells: &[CellText]) {
+        if let Some(slot) = self.fg_rows.first_mut() {
+            if slot.is_empty() && cells.is_empty() {
+                return;
+            }
+            slot.clear();
+            slot.extend_from_slice(cells);
+            self.fg_dirty = true;
+        }
+    }
+
+    pub fn set_non_block_cursor(&mut self, cells: &[CellText]) {
+        let idx = self.fg_rows.len().saturating_sub(1);
+        if let Some(slot) = self.fg_rows.get_mut(idx) {
+            if slot.is_empty() && cells.is_empty() {
+                return;
+            }
+            slot.clear();
+            slot.extend_from_slice(cells);
+            self.fg_dirty = true;
+        }
+    }
+
+    pub fn clear_cursor(&mut self) {
         let mut changed = false;
         if let Some(slot) = self.fg_rows.first_mut() {
-            if slot.as_slice() != block {
+            if !slot.is_empty() {
                 slot.clear();
-                slot.extend_from_slice(block);
                 changed = true;
             }
         }
         let last = self.fg_rows.len().saturating_sub(1);
         if last > 0 {
             if let Some(slot) = self.fg_rows.get_mut(last) {
-                if slot.as_slice() != non_block {
+                if !slot.is_empty() {
                     slot.clear();
-                    slot.extend_from_slice(non_block);
                     changed = true;
                 }
             }
@@ -788,7 +809,7 @@ fn build_text_pipeline(
         vertex: wgpu::VertexState {
             module: shader,
             entry_point: Some("grid_text_vertex"),
-            buffers: &[Some(vbuf_layout)],
+            buffers: &[vbuf_layout],
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {

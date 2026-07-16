@@ -1,3 +1,4 @@
+use crate::layout::ContextDimension;
 use rio_backend::sugarloaf::text::DrawOpts;
 use rio_backend::sugarloaf::Sugarloaf;
 
@@ -71,14 +72,15 @@ fn compute_layout(win_w: f32, win_h: f32) -> DialogLayout {
 #[inline]
 pub fn screen(
     sugarloaf: &mut Sugarloaf,
-    dimensions: (f32, f32, f32),
+    context_dimension: &ContextDimension,
     heading_content: &str,
     confirm_content: &str,
     quit_content: &str,
 ) {
-    let (width, height, scale) = dimensions;
-    let win_w = width / scale;
-    let win_h = height / scale;
+    let layout = sugarloaf.window_size();
+    let scale = context_dimension.dimension.scale;
+    let win_w = layout.width / scale;
+    let win_h = layout.height / scale;
 
     let layout = compute_layout(win_w, win_h);
 

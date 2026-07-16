@@ -227,12 +227,27 @@ Colors are specified using their hexadecimal values with a _#_ prefix: _#RRGGBB_
 
 *tabs* = _"<string>"_
 
-	Inactive tab title color. Tab island backgrounds are derived from
-	the window background color automatically.
+	Tab bar background color.
+
+*tabs-foreground* = _"<string>"_
+
+	Tab bar text color.
 
 *tabs-active* = _"<string>"_
 
-	Active tab title color.
+	Active tab background color.
+
+*tabs-active-foreground* = _"<string>"_
+
+	Active tab text color.
+
+*tabs-active-highlight* = _"<string>"_
+
+	Active tab highlight color.
+
+*bar* = _"<string>"_
+
+	Navigation bar background color.
 
 *split* = _"<string>"_
 

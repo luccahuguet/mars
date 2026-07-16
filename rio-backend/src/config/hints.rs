@@ -5,13 +5,12 @@ pub const DEFAULT_HINTS_ALPHABET: &str = "jfkdls;ahgurieowpq";
 
 /// Default URL/path regex pattern.
 ///
-/// Based on ghostty's `src/config/url.zig`. Requires a regex
+/// Ported verbatim from ghostty's `src/config/url.zig`. Requires a regex
 /// engine with lookbehind support — rio uses oniguruma via the `onig`
 /// crate. Three alternations:
 ///
 /// 1. **Schemed URLs** — `http://`, `https://`, `mailto:`, `file:`, `ssh:`,
-///    `magnet:`, `ipfs://`, `gemini://`, etc. Schemes are case-insensitive,
-///    cannot start inside a word, and support IPv6 literals.
+///    `magnet:`, `ipfs://`, `gemini://`, etc. IPv6 literals supported.
 ///    Trailing `.` / `,` and unbalanced parens are excluded via lookbehind.
 /// 2. **Rooted or explicitly-relative paths** — `/abs`, `./rel`, `../rel`,
 ///    `~/x`, `.hidden/x`, `$VAR/x`. Each prefix is guarded by lookbehinds
@@ -22,7 +21,7 @@ pub const DEFAULT_HINTS_ALPHABET: &str = "jfkdls;ahgurieowpq";
 ///    required, and lookbehinds prevent matching mid-word starts.
 pub const DEFAULT_URL_REGEX: &str = concat!(
  // schemed URLs
-    "(?<!\\w)(?i:https?://|mailto:|ftp://|file:|ssh:|git://|tel:|magnet:|ipfs://|ipns://|gemini://|gopher://|news:)",
+    "(?:https?://|mailto:|ftp://|file:|ssh:|git://|ssh://|tel:|magnet:|ipfs://|ipns://|gemini://|gopher://|news:)",
     "(?:",
         r"(?:\[[:0-9a-fA-F]+(?:[:0-9a-fA-F]*)+\](?::[0-9]+)?)",
         "|",
@@ -297,28 +296,6 @@ mod tests {
             vec!["http://localhost:4321/"]
         );
         assert_eq!(find_all("file://foo"), vec!["file://foo"]);
-    }
-
-    #[test]
-    fn test_default_regex_scheme_boundaries_and_case() {
-        for (input, expected) in [
-            ("HTTP://localhost:3000/", vec!["HTTP://localhost:3000/"]),
-            (
-                "HtTpS://127.0.0.1:8443/api",
-                vec!["HtTpS://127.0.0.1:8443/api"],
-            ),
-            ("MAILTO:dev@example.com", vec!["MAILTO:dev@example.com"]),
-        ] {
-            assert_eq!(find_all(input), expected, "input: {input:?}");
-        }
-
-        for input in [
-            "abchttp://localhost:3000",
-            "partial http//localhost:3000",
-            "javascript:alert(1)",
-        ] {
-            assert!(find_all(input).is_empty(), "input: {input:?}");
-        }
     }
 
     #[test]

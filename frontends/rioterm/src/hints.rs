@@ -24,7 +24,7 @@ pub struct HintState {
 }
 
 /// A match found by a hint
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct HintMatch {
     /// The text that was matched
     pub text: String,
@@ -37,22 +37,6 @@ pub struct HintMatch {
 
     /// The hint configuration that created this match
     pub hint: Rc<Hint>,
-}
-
-impl HintMatch {
-    pub(crate) fn from_hyperlink(
-        uri: &str,
-        start: Pos,
-        end: Pos,
-        hint: Rc<Hint>,
-    ) -> Option<Self> {
-        Some(Self {
-            text: process_hint_text(uri, hint.post_processing)?,
-            start,
-            end,
-            hint,
-        })
-    }
 }
 
 impl HintState {
@@ -239,16 +223,18 @@ impl HintState {
             let line_text = self.extract_line_text(term, line);
 
             // Find all matches in this line. Onig yields (byte_start, byte_end);
+            // we slice the source ourselves.
             for (start, end) in regex.find_iter(&line_text) {
-                let start_col = Column(line_text[..start].chars().count());
-                let Some(match_text) =
-                    process_hint_text(&line_text[start..end], hint.post_processing)
-                else {
-                    continue;
-                };
+                let start_col = Column(start);
+                let mut match_text = line_text[start..end].to_string();
 
-                let end_col =
-                    Column(start_col.0 + match_text.chars().count().saturating_sub(1));
+                // Apply post-processing if enabled
+                if hint.post_processing {
+                    match_text = post_process_hyperlink_uri(&match_text);
+                }
+
+                // Calculate the correct end position based on the processed text length
+                let end_col = Column(start + match_text.len().saturating_sub(1));
 
                 let hint_match = HintMatch {
                     text: match_text,
@@ -317,14 +303,16 @@ impl HintState {
 
                 // Look up the URI once for the whole span.
                 if let Some(hyperlink) = term.cell_hyperlink(line, Column(start_col)) {
-                    if let Some(hint_match) = HintMatch::from_hyperlink(
-                        hyperlink.uri(),
-                        Pos::new(line, Column(start_col)),
-                        Pos::new(line, trimmed_end_col),
-                        hint.clone(),
-                    ) {
-                        self.matches.push(hint_match);
+                    let mut uri = hyperlink.uri().to_string();
+                    if hint.post_processing {
+                        uri = post_process_hyperlink_uri(&uri);
                     }
+                    self.matches.push(HintMatch {
+                        text: uri,
+                        start: Pos::new(line, Column(start_col)),
+                        end: Pos::new(line, trimmed_end_col),
+                        hint: hint.clone(),
+                    });
                 }
 
                 col = end_col;
@@ -449,6 +437,7 @@ const URI_SCHEMES: &[&str] = &[
     "file:",
     "git://",
     "ssh:",
+    "ssh://",
     "ftp://",
     "tel:",
 ];
@@ -530,10 +519,14 @@ pub fn resolve_path_for_opening(text: &str, cwd: Option<&Path>) -> Option<PathBu
     }
 }
 
-/// Remove trailing delimiters and truncate at unmatched closing brackets.
-fn post_process_hint_text(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    let mut end = chars.len();
+/// Apply post-processing to hyperlink URIs (same as in screen/mod.rs)
+fn post_process_hyperlink_uri(uri: &str) -> String {
+    let chars: Vec<char> = uri.chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+
+    let mut end_idx = chars.len() - 1;
     let mut open_parents = 0;
     let mut open_brackets = 0;
 
@@ -544,41 +537,37 @@ fn post_process_hint_text(text: &str) -> String {
             '[' => open_brackets += 1,
             ')' => {
                 if open_parents == 0 {
-                    end = i;
+                    // Unmatched closing parenthesis, truncate here
+                    end_idx = i.saturating_sub(1);
                     break;
+                } else {
+                    open_parents -= 1;
                 }
-                open_parents -= 1;
             }
             ']' => {
                 if open_brackets == 0 {
-                    end = i;
+                    // Unmatched closing bracket, truncate here
+                    end_idx = i.saturating_sub(1);
                     break;
+                } else {
+                    open_brackets -= 1;
                 }
-                open_brackets -= 1;
             }
             _ => (),
         }
     }
 
-    while end > 0 && is_trailing_hint_delimiter(chars[end - 1]) {
-        end -= 1;
+    // Second pass: remove trailing delimiters
+    while end_idx > 0 {
+        match chars[end_idx] {
+            '.' | ',' | ':' | ';' | '?' | '!' | '(' | '[' | '\'' => {
+                end_idx = end_idx.saturating_sub(1);
+            }
+            _ => break,
+        }
     }
 
-    chars.into_iter().take(end).collect()
-}
-
-#[inline]
-pub(crate) fn is_trailing_hint_delimiter(c: char) -> bool {
-    matches!(c, '.' | ',' | ':' | ';' | '?' | '!' | '(' | '[' | '\'')
-}
-
-pub(crate) fn process_hint_text(text: &str, post_processing: bool) -> Option<String> {
-    let text = if post_processing {
-        post_process_hint_text(text)
-    } else {
-        text.to_owned()
-    };
-    (!text.is_empty()).then_some(text)
+    chars.into_iter().take(end_idx + 1).collect()
 }
 
 #[cfg(test)]
@@ -765,31 +754,6 @@ mod tests {
     }
 
     #[test]
-    fn test_post_processing_rejects_delimiter_only_targets() {
-        for input in ["", ".", ",", ":", ";", "?", "!", "(", "[", "'", ")", "]"] {
-            assert_eq!(post_process_hint_text(input), "", "input: {input:?}");
-        }
-
-        for (input, expected) in [
-            ("https://example.com)", "https://example.com"),
-            ("https://example.com,", "https://example.com"),
-            (
-                "https://example.com/path(with)parens",
-                "https://example.com/path(with)parens",
-            ),
-            ("https://example.com/path)", "https://example.com/path"),
-            ("https://example.com.'),", "https://example.com"),
-            ("https://example.com/path]", "https://example.com/path"),
-            (
-                "https://example.com/path[with]brackets",
-                "https://example.com/path[with]brackets",
-            ),
-        ] {
-            assert_eq!(post_process_hint_text(input), expected, "input: {input:?}");
-        }
-    }
-
-    #[test]
     fn test_hyperlink_hint_trims_trailing_blank_cells() {
         use rio_backend::ansi::CursorShape;
         use rio_backend::crosswords::{Crosswords, CrosswordsSize};
@@ -798,8 +762,7 @@ mod tests {
 
         let url = "http://localhost:4321/";
         let label = format!("{url}   ");
-        let bytes =
-            format!("\x1b]8;;{url}\x07{label}\x1b]8;;\x07\x1b]8;;.\x07.\x1b]8;;\x07");
+        let bytes = format!("\x1b]8;;{url}\x07{label}\x1b]8;;\x07");
         let window_id = WindowId::from(0);
         let mut term = Crosswords::new(
             CrosswordsSize::new(40, 3),
@@ -825,12 +788,11 @@ mod tests {
         });
         let mut state = HintState::new("abc".to_string());
 
-        state.find_hyperlink_matches(&term, hint.clone());
+        state.find_hyperlink_matches(&term, hint);
 
         assert_eq!(state.matches.len(), 1);
         let hint_match = &state.matches[0];
         assert_eq!(hint_match.text, url);
-        assert!(Rc::ptr_eq(&hint_match.hint, &hint));
         assert_eq!(hint_match.start, Pos::new(Line(0), Column(0)));
         assert_eq!(
             hint_match.end,

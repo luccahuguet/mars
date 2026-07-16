@@ -2253,7 +2253,6 @@ impl Renderer {
                     text.render_metal(
                         render_encoder,
                         [context.size.width, context.size.height],
-                        frame,
                     );
                     true
                 })();
@@ -2275,13 +2274,7 @@ impl Renderer {
                     );
                     // No completion handler will fire to release the
                     // swap-chain permit we acquired above — release
-                    // it here so the next frame can run, and roll the
-                    // frame slot back since nothing was committed for
-                    // it (permits pair with committed frames).
-                    self.metal_frame_index = (self.metal_frame_index
-                        + crate::grid::metal::FRAMES_IN_FLIGHT_PUB
-                        - 1)
-                        % crate::grid::metal::FRAMES_IN_FLIGHT_PUB;
+                    // it here so the next frame can run.
                     crate::grid::metal::release_frame_permit(&self.metal_frame_permits);
                     return;
                 }
@@ -2716,7 +2709,7 @@ impl WgpuRenderer {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         module: &shader,
                         entry_point: Some("vs_main"),
-                        buffers: &[Some(wgpu::VertexBufferLayout {
+                        buffers: &[wgpu::VertexBufferLayout {
                             array_stride: mem::size_of::<Vertex>() as u64,
                             // https://docs.rs/wgpu/latest/wgpu/enum.VertexStepMode.html
                             step_mode: wgpu::VertexStepMode::Vertex,
@@ -2730,7 +2723,7 @@ impl WgpuRenderer {
                                 6 => Sint32,     // underline_style
                                 7 => Float32x4,  // clip_rect
                             ),
-                        })],
+                        }],
                     },
                     fragment: Some(wgpu::FragmentState {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -2768,7 +2761,7 @@ impl WgpuRenderer {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         module: &shader,
                         entry_point: Some("vs_instanced"),
-                        buffers: &[Some(wgpu::VertexBufferLayout {
+                        buffers: &[wgpu::VertexBufferLayout {
                             array_stride: mem::size_of::<batch::QuadInstance>() as u64,
                             step_mode: wgpu::VertexStepMode::Instance,
                             attributes: &wgpu::vertex_attr_array!(
@@ -2781,7 +2774,7 @@ impl WgpuRenderer {
                                 6 => Sint32,     // underline_style
                                 7 => Float32x4,  // clip_rect
                             ),
-                        })],
+                        }],
                     },
                     fragment: Some(wgpu::FragmentState {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -2888,7 +2881,7 @@ impl WgpuRenderer {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         module: &image_shader,
                         entry_point: Some("vs_main"),
-                        buffers: &[Some(wgpu::VertexBufferLayout {
+                        buffers: &[wgpu::VertexBufferLayout {
                             array_stride: mem::size_of::<ImageInstance>() as u64,
                             step_mode: wgpu::VertexStepMode::Instance,
                             attributes: &wgpu::vertex_attr_array!(
@@ -2896,7 +2889,7 @@ impl WgpuRenderer {
                                 1 => Float32x2, // dest_size
                                 2 => Float32x4, // source_rect
                             ),
-                        })],
+                        }],
                     },
                     fragment: Some(wgpu::FragmentState {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),

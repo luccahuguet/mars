@@ -28,10 +28,12 @@ pub struct Cursor {
     pub is_ime_enabled: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+/// Hint label information for rendering
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct HintLabel {
     pub position: rio_backend::crosswords::pos::Pos,
-    pub label: char,
+    pub label: Vec<char>,
     pub is_first: bool,
 }
 
@@ -42,7 +44,8 @@ pub struct RenderableContent {
     pub has_blinking_enabled: bool,
     pub is_blinking_cursor_visible: bool,
     pub selection_range: Option<SelectionRange>,
-    pub hint_labels: Option<Vec<HintLabel>>,
+    pub hyperlink_range: Option<SelectionRange>,
+    pub hint_labels: Vec<HintLabel>,
     pub highlighted_hint: Option<crate::hints::HintMatch>,
     pub hint_matches: Option<Vec<rio_backend::crosswords::search::Match>>,
     pub last_typing: Option<Instant>,
@@ -104,11 +107,12 @@ impl RenderableContent {
             cursor,
             has_blinking_enabled: false,
             selection_range: None,
-            hint_labels: None,
+            hint_labels: Vec::new(),
             highlighted_hint: None,
             hint_matches: None,
             last_typing: None,
             last_blink_toggle: None,
+            hyperlink_range: None,
             pending_update: PendingUpdate::default(),
             is_blinking_cursor_visible: false,
             background: None,

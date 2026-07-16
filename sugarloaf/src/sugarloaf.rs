@@ -1226,7 +1226,7 @@ impl Sugarloaf<'_> {
             filters_brush.render(ctx, &mut encoder, &frame.texture, &frame.texture);
         }
         ctx.queue.submit(Some(encoder.finish()));
-        ctx.queue.present(frame);
+        frame.present();
         self.reset();
     }
 }

@@ -18,7 +18,6 @@
 use crate::sugarloaf::{Colorspace, SugarloafWindow, SugarloafWindowSize};
 use ash::khr;
 use ash::vk;
-use ash::vk::CompositeAlphaFlagsKHR;
 use ash::{Device, Entry, Instance};
 use raw_window_handle::{
     HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
@@ -1454,7 +1453,7 @@ fn create_swapchain(
         image_count = caps.max_image_count;
     }
 
-    let composite_alpha = guess_composite_alpha(caps.supported_composite_alpha);
+    let composite_alpha = choose_composite_alpha(caps.supported_composite_alpha);
 
     let create_info = vk::SwapchainCreateInfoKHR::default()
         .surface(surface)
@@ -1509,17 +1508,17 @@ fn create_swapchain(
     )
 }
 
-fn guess_composite_alpha(
-    supported_alpha: CompositeAlphaFlagsKHR,
-) -> CompositeAlphaFlagsKHR {
-    if supported_alpha.contains(CompositeAlphaFlagsKHR::POST_MULTIPLIED) {
-        CompositeAlphaFlagsKHR::POST_MULTIPLIED
-    } else if supported_alpha.contains(CompositeAlphaFlagsKHR::PRE_MULTIPLIED) {
-        CompositeAlphaFlagsKHR::PRE_MULTIPLIED
-    } else if supported_alpha.contains(CompositeAlphaFlagsKHR::INHERIT) {
-        CompositeAlphaFlagsKHR::INHERIT
+fn choose_composite_alpha(
+    supported: vk::CompositeAlphaFlagsKHR,
+) -> vk::CompositeAlphaFlagsKHR {
+    if supported.contains(vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED) {
+        vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED
+    } else if supported.contains(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED) {
+        vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+    } else if supported.contains(vk::CompositeAlphaFlagsKHR::INHERIT) {
+        vk::CompositeAlphaFlagsKHR::INHERIT
     } else {
-        CompositeAlphaFlagsKHR::OPAQUE
+        vk::CompositeAlphaFlagsKHR::OPAQUE
     }
 }
 
