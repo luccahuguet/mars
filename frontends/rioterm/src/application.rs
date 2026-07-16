@@ -1770,10 +1770,7 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
                 }
 
                 route.window.screen.context_manager.set_last_typing();
-                route
-                    .window
-                    .screen
-                    .process_key_event(&key_event, &mut self.router.clipboard);
+                route.process_unowned_key_event(&key_event, &mut self.router.clipboard);
                 // `process_key_event` used to call `self.render()` for
                 // local-only keystrokes (VI mode, search input, hint
                 // mode). Now it just marks `pending_update.set_dirty()`
@@ -2047,17 +2044,16 @@ impl ApplicationHandler<EventPayload> for Application<'_> {
         // since menu events don't trigger ModifiersChanged events.
         let original_modifiers = route.window.screen.modifiers;
 
-        // Use the modifiers passed from the menu action
+        route.window.screen.cancel_link_gesture();
         route.window.screen.set_modifiers(*modifiers);
-
-        // Process the key event
-        route
-            .window
-            .screen
-            .process_key_event(key, &mut self.router.clipboard);
-
-        // Restore the original modifiers
+        let consumed = route.has_key_wait(key, &mut self.router.clipboard);
+        if !consumed {
+            route.process_unowned_key_event(key, &mut self.router.clipboard);
+        }
         route.window.screen.set_modifiers(original_modifiers);
+        if !consumed {
+            route.request_redraw();
+        }
     }
 
     // Emitted when the event loop is being shut down.

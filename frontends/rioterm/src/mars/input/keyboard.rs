@@ -308,6 +308,21 @@ impl Route<'_> {
         }
     }
 
+    pub(crate) fn process_unowned_key_event(
+        &mut self,
+        key_event: &KeyEvent,
+        clipboard: &mut Clipboard,
+    ) {
+        let palette_was_enabled =
+            self.window.screen.renderer.command_palette.is_enabled();
+        self.window.screen.process_key_event(key_event, clipboard);
+        if !palette_was_enabled
+            && self.window.screen.renderer.command_palette.is_enabled()
+        {
+            self.enter_pointer_overlay();
+        }
+    }
+
     pub(crate) fn handle_owned_ime(
         &mut self,
         ime: &Ime,
