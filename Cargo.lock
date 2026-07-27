@@ -6189,7 +6189,7 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 [[package]]
 name = "yazelix_cursors"
 version = "0.1.0"
-source = "git+https://github.com/luccahuguet/yazelix-cursors?rev=adca9c8e2cca1cb94a78f4a590ddcfcc470a6977#adca9c8e2cca1cb94a78f4a590ddcfcc470a6977"
+source = "git+https://github.com/luccahuguet/yazelix-cursors?rev=b4fe18fa314f783b5d8d6418dd309553518709a8#b4fe18fa314f783b5d8d6418dd309553518709a8"
 dependencies = [
  "serde",
  "serde_json",

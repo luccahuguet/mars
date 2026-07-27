@@ -69,7 +69,7 @@ in
     cargoLock = {
       lockFile = ./Cargo.lock;
       outputHashes = {
-        "yazelix_cursors-0.1.0" = "sha256-n1oSZ3J7k3OOf3vt39Fcw2NoVWRqJoOGZpoyq/hVEU4=";
+        "yazelix_cursors-0.1.0" = "sha256-Ait54BZqYf+bg/fQSC9I0r2cypZtMKRWISN/yNr8eLs=";
       };
     };
 
