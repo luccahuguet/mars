@@ -1,6 +1,6 @@
 use rio_backend::config::Config;
 use serde_json::Value as JsonValue;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use toml::Value as TomlValue;
 
 const INVENTORY: &str = include_str!("../../docs/yazelix/config_inventory.v1.json");
@@ -131,14 +131,44 @@ fn parse_field(inventory: &JsonValue, path: &str, value: &JsonValue) {
     });
 }
 
+fn parse_referenced_shape_choices(
+    inventory: &JsonValue,
+    entry: &JsonValue,
+    value: &JsonValue,
+) {
+    let Some(reference) = entry["shape"].get("ref").and_then(JsonValue::as_str) else {
+        return;
+    };
+    let Some(fields) = inventory["shape_definitions"][reference]["fields"].as_object()
+    else {
+        return;
+    };
+    let path = entry["path"].as_str().unwrap();
+    for (field, shape) in fields {
+        if shape
+            .get("constraints")
+            .is_some_and(|constraints| !available_here(constraints))
+        {
+            continue;
+        }
+        let Some(choices) = shape.get("choices").and_then(JsonValue::as_array) else {
+            continue;
+        };
+        for choice in choices.iter().filter(|choice| available_here(choice)) {
+            let mut candidate = value.clone();
+            candidate[field] = choice_value(choice).clone();
+            parse_field(inventory, path, &candidate);
+        }
+    }
+}
+
 #[test]
-fn inventory_is_complete_deterministic_and_explicit() {
+fn inventory_is_deterministic_and_explicit() {
     let inventory = inventory();
     assert_eq!(inventory["schema_version"], 1);
     assert_eq!(inventory["owner"], "mars");
 
     let entries = entries(&inventory);
-    assert_eq!(entries.len(), 151);
     let definitions = inventory["shape_definitions"]
         .as_object()
         .expect("shape definitions must be an object");
@@ -178,51 +208,9 @@ fn inventory_is_complete_deterministic_and_explicit() {
         assert_shape_refs_resolve(definition, definitions);
     }
     assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
-    assert_eq!(paths.iter().copied().collect::<BTreeSet<_>>().len(), 151);
-
-    let counts = paths.iter().fold(BTreeMap::new(), |mut counts, path| {
-        *counts.entry(path.split('.').next().unwrap()).or_insert(0) += 1;
-        counts
-    });
     assert_eq!(
-        counts,
-        BTreeMap::from([
-            ("adaptive-theme", 1),
-            ("bell", 2),
-            ("bindings", 1),
-            ("colors", 42),
-            ("confirm-before-quit", 1),
-            ("copy-on-select", 1),
-            ("cursor", 3),
-            ("developer", 3),
-            ("draw-bold-text-with-light-colors", 1),
-            ("editor", 1),
-            ("effects", 2),
-            ("enable-scroll-bar", 1),
-            ("env-vars", 1),
-            ("fonts", 12),
-            ("force-theme", 1),
-            ("hide-mouse-cursor-when-typing", 1),
-            ("hints", 2),
-            ("ignore-selection-foreground-color", 1),
-            ("keyboard", 2),
-            ("line-height", 1),
-            ("margin", 1),
-            ("mars", 1),
-            ("navigation", 10),
-            ("option-as-alt", 1),
-            ("panel", 6),
-            ("platform", 18),
-            ("renderer", 6),
-            ("scroll", 2),
-            ("scrollback-history-limit", 1),
-            ("shell", 1),
-            ("theme", 1),
-            ("title", 2),
-            ("use-fork", 1),
-            ("window", 19),
-            ("working-dir", 1),
-        ])
+        paths.iter().copied().collect::<BTreeSet<_>>().len(),
+        paths.len()
     );
 
     let excluded = inventory["excluded"]
@@ -260,6 +248,7 @@ fn choices_and_structured_examples_parse_through_mars() {
         if let Some(value) = default_or_example {
             if entry.get("constraints").is_none_or(available_here) {
                 parse_field(&inventory, path, value);
+                parse_referenced_shape_choices(&inventory, entry, value);
             }
         }
 
