@@ -3932,6 +3932,7 @@ dependencies = [
  "rio-window",
  "rustc-hash 2.1.2",
  "serde",
+ "serde_json",
  "simdutf",
  "smallvec",
  "sugarloaf",
