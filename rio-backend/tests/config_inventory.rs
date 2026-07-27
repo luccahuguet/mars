@@ -38,14 +38,15 @@ fn choice_value(choice: &JsonValue) -> &JsonValue {
 }
 
 fn available_here(value: &JsonValue) -> bool {
-    value
-        .get("platforms")
-        .and_then(JsonValue::as_array)
-        .is_none_or(|platforms| {
-            platforms
-                .iter()
-                .any(|platform| platform.as_str() == Some(current_platform()))
-        })
+    value["platforms"].as_array().is_none_or(|platforms| {
+        platforms
+            .iter()
+            .any(|platform| platform.as_str() == Some(current_platform()))
+    }) && value["features"].as_array().is_none_or(|features| {
+        features
+            .iter()
+            .all(|feature| feature == "wgpu" && cfg!(feature = "wgpu"))
+    })
 }
 
 fn assert_shape_refs_resolve(
@@ -74,25 +75,7 @@ fn assert_shape_refs_resolve(
 }
 
 fn to_toml(value: &JsonValue) -> TomlValue {
-    match value {
-        JsonValue::Null => panic!("null cannot represent a Mars TOML value"),
-        JsonValue::Bool(value) => TomlValue::Boolean(*value),
-        JsonValue::Number(value) => value
-            .as_i64()
-            .map(TomlValue::Integer)
-            .or_else(|| value.as_f64().map(TomlValue::Float))
-            .expect("JSON number must fit a TOML number"),
-        JsonValue::String(value) => TomlValue::String(value.clone()),
-        JsonValue::Array(values) => {
-            TomlValue::Array(values.iter().map(to_toml).collect())
-        }
-        JsonValue::Object(values) => TomlValue::Table(
-            values
-                .iter()
-                .map(|(key, value)| (key.clone(), to_toml(value)))
-                .collect(),
-        ),
-    }
+    TomlValue::try_from(value).expect("inventory value must encode as TOML")
 }
 
 fn set_path(document: &mut toml::Table, path: &str, value: &JsonValue) {
@@ -113,7 +96,10 @@ fn set_path(document: &mut toml::Table, path: &str, value: &JsonValue) {
 
 fn default_document(inventory: &JsonValue) -> toml::Table {
     let mut document = toml::Table::new();
-    for entry in entries(inventory) {
+    for entry in entries(inventory)
+        .iter()
+        .filter(|entry| entry.get("constraints").is_none_or(available_here))
+    {
         if let Some(value) = literal_default(entry) {
             set_path(&mut document, entry["path"].as_str().unwrap(), value);
         }
