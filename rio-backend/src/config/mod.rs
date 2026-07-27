@@ -896,6 +896,8 @@ trail-cursor = true
         write_config(&user, "[window]\nopacity = 0.85\n");
         let mut config = Config::try_load_from_dirs(&user, Some(&base)).unwrap();
         let cursor_path = user.join("cursors.toml");
+        let existing_yazelix = config.yazelix.clone();
+        let existing_trail_cursor = config.effects.trail_cursor;
 
         config.apply_yazelix_cursor_result(
             &cursor_path,
@@ -904,8 +906,8 @@ trail-cursor = true
 
         assert_eq!(config.window.opacity, 0.85);
         assert_eq!(config.window.decorations, window::Decorations::Disabled);
-        assert_eq!(config.yazelix, Yazelix::default());
-        assert!(config.effects.trail_cursor);
+        assert_eq!(config.yazelix, existing_yazelix);
+        assert_eq!(config.effects.trail_cursor, existing_trail_cursor);
         let diagnostic = config.take_load_diagnostic().unwrap();
         assert!(matches!(
             &diagnostic,

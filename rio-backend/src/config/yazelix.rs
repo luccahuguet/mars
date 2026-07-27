@@ -101,7 +101,7 @@ mod tests {
     use std::{fs, process};
 
     #[test]
-    fn loads_child_owned_fixed_custom_random_and_none_cursor_states() {
+    fn loads_child_owned_sparse_fixed_custom_random_and_none_cursor_states() {
         let path = std::env::temp_dir()
             .join(format!("mars-yazelix-cursors-{}.toml", process::id()));
         fs::write(
@@ -113,9 +113,6 @@ enabled_cursors = ["custom_split", "custom_mono", "midnight", "snow"]
 [settings]
 trail = "custom_split"
 trail_effect = "tail"
-mode_effect = "none"
-glow = "none"
-duration = 1.0
 
 [[cursor]]
 name = "custom_split"
@@ -178,7 +175,7 @@ color = "#ffffff"
         fs::write(&path, "schema_version = 2").unwrap();
         assert!(load_cursor_state(&path, "dark")
             .unwrap_err()
-            .contains("Could not parse Yazelix cursor config"));
+            .contains("schema_version"));
         fs::remove_file(path).unwrap();
     }
 }

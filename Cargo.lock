@@ -2295,15 +2295,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonc-parser"
-version = "0.32.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "840785e1a8b4fdb27be18440a35a81af64820dc185c3973ff8b012d4c6282512"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3757,17 +3748,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratconfig"
-version = "2.0.0"
-source = "git+https://github.com/luccahuguet/ratconfig?rev=110e749a5fb10e146611427564bd6afda0750827#110e749a5fb10e146611427564bd6afda0750827"
-dependencies = [
- "jsonc-parser",
- "serde_json",
- "toml 1.1.2+spec-1.1.0",
- "toml_edit",
-]
-
-[[package]]
 name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4956,7 +4936,6 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
- "toml_writer",
  "winnow 1.0.3",
 ]
 
@@ -6210,10 +6189,8 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 [[package]]
 name = "yazelix_cursors"
 version = "0.1.0"
-source = "git+https://github.com/luccahuguet/yazelix-cursors?rev=e4523a7eadce92146416295bb179f09058a8554e#e4523a7eadce92146416295bb179f09058a8554e"
+source = "git+https://github.com/luccahuguet/yazelix-cursors?rev=adca9c8e2cca1cb94a78f4a590ddcfcc470a6977#adca9c8e2cca1cb94a78f4a590ddcfcc470a6977"
 dependencies = [
- "jsonc-parser",
- "ratconfig",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
