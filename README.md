@@ -109,6 +109,13 @@ internals. The package metadata tells Yazelix where Mars configs live, which
 emoji presets and appearance modes are supported, and which wrapper command to
 launch.
 
+The source tree also publishes the versioned
+[`docs/yazelix/config_inventory.v1.json`](docs/yazelix/config_inventory.v1.json)
+catalog of public Mars settings, defaults, choices, structured shapes, and
+platform constraints. Consumers read this small artifact from their exact
+pinned Mars source revision; using it does not retain or link the terminal
+runtime.
+
 Package metadata exposes the current runtime environment contract to Yazelix:
 
 | Variable | Purpose |
