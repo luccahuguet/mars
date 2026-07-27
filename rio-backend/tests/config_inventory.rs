@@ -74,16 +74,14 @@ fn assert_shape_refs_resolve(
     }
 }
 
-fn to_toml(value: &JsonValue) -> TomlValue {
-    TomlValue::try_from(value).expect("inventory value must encode as TOML")
-}
-
 fn set_path(document: &mut toml::Table, path: &str, value: &JsonValue) {
     let mut segments = path.split('.').peekable();
     let mut table = document;
     while let Some(segment) = segments.next() {
         if segments.peek().is_none() {
-            table.insert(segment.to_string(), to_toml(value));
+            let value =
+                TomlValue::try_from(value).expect("inventory value must encode as TOML");
+            table.insert(segment.to_string(), value);
             return;
         }
         table = table
