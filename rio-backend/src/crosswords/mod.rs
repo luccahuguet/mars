@@ -3045,6 +3045,10 @@ impl<U: EventListener> Handler for Crosswords<U> {
                 }
 
                 self.selection = None;
+                if !self.graphics.kitty_placements.is_empty() {
+                    self.graphics.kitty_placements.clear();
+                    self.graphics.kitty_graphics_dirty = true;
+                }
             }
             ClearMode::Saved if self.history_size() > 0 => {
                 self.grid.clear_history();
@@ -5528,6 +5532,51 @@ mod tests {
         assert_eq!(version_number("0.1.2-nightly"), 1_02);
         assert_eq!(version_number("1.2.3-nightly"), 1_02_03);
         assert_eq!(version_number("999.99.99"), 9_99_99_99);
+    }
+
+    #[test]
+    fn kitty_placements_follow_full_screen_erase_contract() {
+        let mut term = make_crosswords();
+        for _ in 0..4 {
+            term.linefeed();
+        }
+        assert_eq!(term.history_size(), 1);
+
+        let placement = KittyPlacement {
+            image_id: 1,
+            placement_id: 1,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
+            dest_col: 0,
+            dest_row: 0,
+            columns: 1,
+            rows: 1,
+            pixel_width: 1,
+            pixel_height: 1,
+            cell_x_offset: 0,
+            cell_y_offset: 0,
+            z_index: 0,
+            transmit_time: std::time::Instant::now(),
+        };
+        term.graphics
+            .kitty_placements
+            .insert((1, 1), placement.clone());
+
+        for mode in [ClearMode::Above, ClearMode::Below, ClearMode::Saved] {
+            term.clear_screen(mode);
+            assert_eq!(
+                term.graphics.kitty_placements.get(&(1, 1)),
+                Some(&placement)
+            );
+        }
+        assert_eq!(term.history_size(), 0);
+
+        term.graphics.kitty_graphics_dirty = false;
+        term.clear_screen(ClearMode::All);
+        assert!(term.graphics.kitty_placements.is_empty());
+        assert!(term.graphics.kitty_graphics_dirty);
     }
 
     #[test]
